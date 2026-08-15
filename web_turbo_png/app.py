@@ -25,6 +25,7 @@ from flask import Flask
 from web_turbo_png.routes.upload_routes import upload_bp
 from web_turbo_png.routes.api_routes import api_bp
 from web_turbo_png.routes.main_routes import main_bp
+from web_turbo_png.routes.auth_routes import auth_bp
 
 import tempfile
 
@@ -48,6 +49,7 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.register_blueprint(upload_bp, url_prefix='/api')
 app.register_blueprint(api_bp)
 app.register_blueprint(main_bp)
+app.register_blueprint(auth_bp)
 
 
 @app.context_processor

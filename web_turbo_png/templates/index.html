@@ -35,24 +35,7 @@
 
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-
-        /* 📱 統一サイドバー */
-        .sidebar { 
-            background: #ffffff; 
-            border-right: 1px solid rgba(0,0,0,0.05);
-            z-index: 50;
-            display: flex; flex-direction: column;
-            width: 280px;
-            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            overflow-x: hidden;
-            white-space: nowrap;
-        }
-        .sidebar.collapsed { width: 0; padding-left: 0; padding-right: 0; }
-        @media (max-width: 768px) {
-            .sidebar { position: fixed; height: 100%; transform: translateX(0); }
-            .sidebar.collapsed { transform: translateX(-100%); width: 280px; }
-        }
-
+        /* (Removed old sidebar CSS) */
         body { background-color: #f9f9f9; color: #231815; font-family: 'Zen Kaku Gothic New', sans-serif; }
         
         /* 🍔 トップナビゲーションバー */
@@ -65,14 +48,7 @@
             
             
         }
-
-        .session-item {
-            transition: all 0.2s;
-        }
-        .session-item:hover { background: #e6f3ec; color: #008d54; }
-        .session-item.active { background: #008d54; color: #ffffff; font-weight: bold; }
-        .session-item.active .lucide { color: #ffffff; }
-
+        /* (Removed old session-item CSS) */
         .btn-submit {
             transition: transform 0.1s, box-shadow 0.2s;
         }
@@ -445,70 +421,68 @@
         const progressFill = document.getElementById('progress-fill');
         const progressText = document.getElementById('progress-text');
 
-        uploadForm.addEventListener('submit', function(e) {
-            e.preventDefault(); // デフォルトのページ遷移をキャンセル
+        uploadForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
 
-            // UIを更新
             btnSubmit.disabled = true;
             btnSubmit.innerHTML = '<i data-lucide="hourglass" class="w-5 h-5"></i> 処理中...';
             lucide.createIcons();
-            
-            // プログレスバーをスライドイン
             progressWrapper.classList.add('active');
 
-            // SSEで進捗を受信
-            const evtSource = new EventSource('/api/progress-stream');
-            evtSource.onmessage = function(event) {
-                const data = JSON.parse(event.data);
-                const progress = parseInt(data.progress);
-                if (!isNaN(progress)) {
-                    progressFill.style.width = progress + '%';
-                    progressText.innerText = `処理中... ${progress}%`;
-                    
-                    if (progress >= 100) {
-                        progressText.innerText = "完了！画面が切り替わります...";
-                        evtSource.close();
-                        window.location.href = '/turbo_png/result';
-                    } else if (data.error && data.error.length > 0) {
-                        alert(data.error);
-                        btnSubmit.disabled = false;
-                        btnSubmit.innerHTML = '<i data-lucide="rocket" class="w-5 h-5"></i> サーバーに送信して解析を開始';
-                        lucide.createIcons();
-                        progressWrapper.classList.remove('active');
-                        evtSource.close();
-                    }
-                }
-            };
-            
-            evtSource.onerror = function() {
-                evtSource.close();
-            };
-
-            // AJAXでファイルを送信
             const formData = new FormData(uploadForm);
-            fetch('/api/upload', {
-                method: 'POST',
-                body: formData
-            }).then(response => {
-                if (!response.ok) {
-                    response.text().then(text => {
-                        alert(text);
-                        // エラー時にUIを元に戻す
-                        btnSubmit.disabled = false;
-                        btnSubmit.innerHTML = '<i data-lucide="rocket" class="w-5 h-5"></i> サーバーに送信して解析を開始';
-                        lucide.createIcons();
-                        progressWrapper.classList.remove('active');
+            try {
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                
+                if (data.success && data.job_id) {
+                    const evtSource = new EventSource(`/api/progress-stream?job_id=${data.job_id}`);
+                    
+                    evtSource.onmessage = function(event) {
+                        const sseData = JSON.parse(event.data);
+                        
+                        if (sseData.error) {
+                            alert(sseData.error);
+                            btnSubmit.disabled = false;
+                            btnSubmit.innerHTML = '<i data-lucide="rocket" class="w-5 h-5"></i> サーバーに送信して解析を開始';
+                            lucide.createIcons();
+                            progressWrapper.classList.remove('active');
+                            evtSource.close();
+                            return;
+                        }
+                        
+                        const progress = parseInt(sseData.progress);
+                        if (!isNaN(progress)) {
+                            progressFill.style.width = progress + '%';
+                            progressText.innerText = `処理中... ${progress}%`;
+                            
+                            if (progress >= 100) {
+                                progressText.innerText = "完了！画面が切り替わります...";
+                                evtSource.close();
+                                window.location.href = `/result?job_id=${data.job_id}`;
+                            }
+                        }
+                    };
+                    
+                    evtSource.onerror = function() {
                         evtSource.close();
-                    });
+                    };
+                } else {
+                    alert(data.error || "アップロードに失敗しました");
+                    btnSubmit.disabled = false;
+                    btnSubmit.innerHTML = '<i data-lucide="rocket" class="w-5 h-5"></i> サーバーに送信して解析を開始';
+                    lucide.createIcons();
+                    progressWrapper.classList.remove('active');
                 }
-            }).catch(err => {
+            } catch (err) {
                 alert("通信エラーが発生しました: " + err);
                 btnSubmit.disabled = false;
                 btnSubmit.innerHTML = '<i data-lucide="rocket" class="w-5 h-5"></i> サーバーに送信して解析を開始';
                 lucide.createIcons();
                 progressWrapper.classList.remove('active');
-                evtSource.close();
-            });
+            }
         });
 
         // サイドバーのトグル

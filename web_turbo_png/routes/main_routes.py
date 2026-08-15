@@ -2,8 +2,9 @@ import os
 import sys
 import time
 import json
-from flask import Blueprint, render_template, session
+from flask import Blueprint, render_template, session, request, redirect, url_for
 from pathlib import Path
+from web_turbo_png.routes.auth_routes import login_required
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
 if ROOT_DIR not in sys.path:
@@ -15,15 +16,13 @@ main_bp = Blueprint('main', __name__)
 
 
 @main_bp.route('/')
-def index():
+def landing():
     """ホーム画面"""
-    if getattr(config, 'ENABLE_LANDING_PAGE', False):
-        return render_template('landing.html', engine_type='TurboPNG')
-    return render_template('index.html')
-
+    return render_template('landing.html', engine_type='TurboPNG')
 
 @main_bp.route('/app')
-def app_upload():
+@login_required
+def index():
     """ファイルアップロード画面（メインアプリ）"""
     return render_template('index.html')
 
@@ -79,18 +78,32 @@ def ranking():
 
 
 @main_bp.route('/result')
+@login_required
 def result():
     """デコード結果画面を表示"""
-    from web_turbo_png.routes.upload_routes import latest_result_data
-    if latest_result_data:
-        session['result_data'] = latest_result_data.copy()
-        
+    job_id = request.args.get('job_id')
+    if job_id:
+        from web_turbo_png.routes.upload_routes import jobs
+        if job_id in jobs:
+            session['result_data'] = jobs[job_id].get("result_data", {})
+    
     result_data = session.get('result_data', {})
     return render_template(
         'result.html',
         show_heatmap=getattr(config, 'ENABLE_HEATMAP', False),
         show_ranking=getattr(config, 'ENABLE_RANKING', False),
         **result_data
+    )
+
+
+@main_bp.route('/calendar')
+@login_required
+def calendar():
+    """カレンダー（履歴）画面"""
+    return render_template(
+        'calendar.html',
+        show_heatmap=getattr(config, 'ENABLE_HEATMAP', False),
+        show_ranking=getattr(config, 'ENABLE_RANKING', False)
     )
 
 

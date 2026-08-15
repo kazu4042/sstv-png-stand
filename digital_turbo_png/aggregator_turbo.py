@@ -43,6 +43,14 @@ class TurboPNGAggregator:
         print(f"[Sync] {len(new_files)} 個の新規ログファイルをDBに同期中...")
         for file_path in new_files:
             file_name = os.path.basename(file_path)
+            
+            user_id = None
+            if "_user_" in file_name:
+                try:
+                    user_id = int(file_name.split("_user_")[1].split("_")[0])
+                except Exception:
+                    pass
+            
             file_packets = []
             with open(file_path, "r", encoding="utf-8") as f:
                 for line in f:
@@ -92,8 +100,8 @@ class TurboPNGAggregator:
                                 continue
 
             if file_packets:
-                self.db.insert_packets_bulk(file_name, file_packets)
-                print(f"  [Loaded] {file_name}: {len(file_packets)} パケット")
+                self.db.insert_packets_bulk(file_name, file_packets, user_id=user_id)
+                print(f"  [Loaded] {file_name}: {len(file_packets)} パケット (User: {user_id})")
         return True
 
     def bits_to_bytearray(self, bits_str):
@@ -116,40 +124,38 @@ class TurboPNGAggregator:
             print(f"[Reset] 旧データベースを削除しました: {db_path}")
         self.db = PacketDatabaseTurboPNG(self.log_dir)
 
-    def process_and_save_images(self, min_tile_ratio=0.3):
+    def process_and_save_images(self, min_tile_ratio=0.0, user_id=None):
         """
         テキストログをDBに蓄積し、多数決投票で最終画像を復元する。
 
         Args:
             min_tile_ratio: 復元対象の最低タイル充填率 (0.0~1.0)
-                            デフォルト 0.3 = 全タイルの30%以上のパケットがある画像IDのみ復元
+                            デフォルト 0.0 = 全ての画像IDを復元対象とする
+            user_id: フィルタリングするユーザーID
         """
         if not self.load_all_logs():
             return []
 
-        image_counts = self.db.get_all_image_ids_with_counts()
-        if not image_counts:
-            print("[Warn] データベースにパケットがありません。")
-            return []
-
+        image_counts = self.db.get_all_image_ids_with_counts(user_id=user_id)
+        
+        tile_count_x = config.TILE_COUNT_X
+        tile_count_y = config.TILE_COUNT_Y
+        total_required_packets = tile_count_x * tile_count_y
+        
+        print(f"\n[Info] 期待タイル数: {total_required_packets}  最低パケット数フィルタ: {int(total_required_packets * min_tile_ratio)}")
+        print(f"[Info] DB内画像ID数: {len(image_counts)}")
+        
+        saved_files = []
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
         output_dir = os.path.join(root_dir, config.IMAGE_OUT_DIR)
         os.makedirs(output_dir, exist_ok=True)
-        saved_files = []
-
-        total_tiles = config.TILE_COUNT_X * config.TILE_COUNT_Y
-        min_packets = max(1, int(total_tiles * min_tile_ratio))
-
-        print(f"\n[Info] 期待タイル数: {total_tiles}  最低パケット数フィルタ: {min_packets}")
-        print(f"[Info] DB内画像ID数: {len(image_counts)}")
-
-        for main_id, count in sorted(image_counts.items(), key=lambda x: x[1], reverse=True):
-            if count < min_packets:
-                print(f"[Skip] 画像ID 0x{main_id:04X}: パケット数 {count} < {min_packets} (不完全のためスキップ)")
+        
+        for img_id, count in image_counts.items():
+            if count < total_required_packets * min_tile_ratio:
                 continue
-
-            print(f"\n[Restore] 画像ID 0x{main_id:04X} (パケット数: {count}) を多数決投票で復元中...")
-            tiles_data = self.db.get_packets_for_image(main_id)
+                
+            print(f"\n[Restore] 画像ID 0x{img_id:04X} (パケット数: {count}) を多数決投票で復元中...")
+            tiles_data = self.db.get_packets_for_image(img_id, user_id=user_id)
 
             canvas = Image.new("RGB", (config.WIDTH, config.HEIGHT), color="black")
             success_tiles = 0
@@ -214,17 +220,17 @@ class TurboPNGAggregator:
                             print(f"  [ERROR] タイル({tx},{ty}) PNG復元失敗 (投票数:{valid_count}): {e}")
 
             # PNG形式で保存（JPEGではなくPNG）
-            out_path = os.path.join(output_dir, f"restored_ID_{main_id:04X}.png")
+            out_path = os.path.join(output_dir, f"restored_ID_{img_id:04X}.png")
             canvas.save(out_path, format="PNG", compress_level=config.PNG_COMPRESS)
 
             # Webシステム用に static/output にもコピー保存
             static_out = os.path.join(root_dir, "web_turbo_png", "static", "output")
             os.makedirs(static_out, exist_ok=True)
-            static_path = os.path.join(static_out, f"restored_ID_{main_id:04X}.png")
+            static_path = os.path.join(static_out, f"restored_ID_{img_id:04X}.png")
             canvas.save(static_path, format="PNG", compress_level=config.PNG_COMPRESS)
 
             saved_files.append(out_path)
-            print(f"[Done] 復元完了: {success_tiles}/{total_tiles} タイル合成"
+            print(f"[Done] 復元完了: {success_tiles}/{total_required_packets} タイル合成"
                   f" (失敗:{error_tiles}) -> {out_path}")
 
         if not saved_files:

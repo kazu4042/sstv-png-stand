@@ -109,14 +109,18 @@ def fast_bits_to_int(bits):
     return val
 
 class DigitalTurboPNGDecoder:
-    def __init__(self):
+    def __init__(self, user_id=None):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
 
         # テキストログのみ出力（タイル画像はアグリゲータが生成する）
         log_dir = os.path.join(root_dir, config.TEXT_LOG_DIR)
         os.makedirs(log_dir, exist_ok=True)
-        self.output_raw = os.path.join(log_dir, f"{config.TEXT_LOG_PREFIX}_{timestamp}.txt")
+        
+        if user_id:
+            self.output_raw = os.path.join(log_dir, f"{config.TEXT_LOG_PREFIX}_user_{user_id}_{timestamp}.txt")
+        else:
+            self.output_raw = os.path.join(log_dir, f"{config.TEXT_LOG_PREFIX}_{timestamp}.txt")
 
         self.update_cache()
 

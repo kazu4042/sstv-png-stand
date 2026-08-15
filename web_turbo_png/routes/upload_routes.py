@@ -17,11 +17,14 @@ from digital_turbo_png.aggregator_turbo import TurboPNGAggregator
 
 upload_bp = Blueprint('upload', __name__)
 
+import uuid
+from web_turbo_png.routes.auth_routes import login_required
+
 ALLOWED_EXTENSIONS = {'wav'}
 
-current_progress = 0
-upload_status = ""
-upload_error = ""
+# Global jobs dictionary for tracking background tasks
+# Format: {job_id: {"progress": 0, "status": "", "error": "", "result_data": {}}}
+jobs = {}
 
 
 def allowed_file(filename):
@@ -66,34 +69,37 @@ def bits_to_bytearray(bits_str):
 
 @upload_bp.route('/progress-stream')
 def progress_stream():
+    job_id = request.args.get('job_id')
     def generate():
-        global current_progress, upload_status, upload_error
         while True:
             import json
-            payload = json.dumps({"progress": current_progress, "status": upload_status, "error": upload_error})
+            if job_id not in jobs:
+                yield f"data: {json.dumps({'error': 'Job not found'})}\n\n"
+                break
+                
+            job = jobs[job_id]
+            payload = json.dumps({"progress": job["progress"], "status": job["status"], "error": job["error"]})
             yield f"data: {payload}\n\n"
-            if current_progress >= 100 or upload_error:
+            
+            if job["progress"] >= 100 or job["error"]:
                 break
             time.sleep(0.1)
     return Response(generate(), mimetype='text/event-stream')
 
-
-latest_result_data = {}
-
-def run_decode_background(save_path, app_static_folder, available_image_ids):
-    global current_progress, upload_status, upload_error, latest_result_data
+def run_decode_background(job_id, save_path, app_static_folder, available_image_ids, user_id=None):
+    job = jobs[job_id]
     try:
-        current_progress = 15
-        upload_status = "音声をTurboPNGパケットとしてデコード中..."
+        job["progress"] = 15
+        job["status"] = "音声をTurboPNGパケットとしてデコード中..."
 
         # ===== Step1: デコード =====
-        decoder = DigitalTurboPNGDecoder()
+        decoder = DigitalTurboPNGDecoder(user_id=user_id)
         decoder.run(save_path)
-        current_progress = 50
+        job["progress"] = 50
 
         latest_user_log = decoder.output_raw
 
-        upload_status = "デコード結果を集計・分析中..."
+        job["status"] = "デコード結果を集計・分析中..."
 
         # ===== Step2: アグリゲータでDBに蓄積 =====
         log_dir = getattr(config, "TEXT_LOG_DIR", "data/digital_turbo_png/logs")
@@ -103,10 +109,10 @@ def run_decode_background(save_path, app_static_folder, available_image_ids):
             log_dir_path = log_dir
 
         aggregator = TurboPNGAggregator(log_dir=log_dir_path)
-        aggregator.process_and_save_images(min_tile_ratio=0.0)
-        current_progress = 70
+        aggregator.process_and_save_images(min_tile_ratio=0.0, user_id=user_id)
+        job["progress"] = 70
 
-        upload_status = "復元画像を生成中..."
+        job["status"] = "復元画像を生成中..."
 
         # 復元画像を output ディレクトリに保存
         output_dir = os.path.join(app_static_folder, "output")
@@ -205,59 +211,64 @@ def run_decode_background(save_path, app_static_folder, available_image_ids):
             user_image_buffer.save(user_img_path, format="PNG")
 
             if img_id_hex == current_image_id:
+                user_output_url = f"/static/output/user_ID_{img_id_hex}.png"
                 main_score = round((matched_packets / total_required_packets) * 100, 1)
                 if main_score > 100.0:
                     main_score = 100.0
                 main_matched = matched_packets
 
-            current_progress = int(70 + ((idx_id + 1) / max(len(user_packets_by_id), 1)) * 25)
-
         if not current_image_id:
             current_image_id = available_image_ids[0] if available_image_ids else "0000"
-
-        current_progress = 100
-        import time
-        time.sleep(0.5)
 
         aggregator.close()
 
         from web_turbo_png.routes.api_routes import invalidate_analyzer_cache
         invalidate_analyzer_cache()
 
-        latest_result_data = {
-            'available_image_ids': available_image_ids,
-            'current_image_id': current_image_id,
-            'main_score': main_score,
-            'main_matched': main_matched,
-            'total_required': total_required_packets,
-            'is_perfect': main_matched >= total_required_packets
+        job["result_data"] = {
+            "available_image_ids": available_image_ids,
+            "current_image_id": current_image_id,
+            "main_image_url": user_output_url,
+            "tile_count_x": tile_count_x,
+            "tile_count_y": tile_count_y,
+            "tile_size": tile_size,
+            "total_packets": total_required_packets,
+            "total_required": total_required_packets,
+            "received_packets": max_packets,
+            "main_score": main_score,
+            "main_matched": main_matched,
+            "is_perfect": main_matched >= total_required_packets
         }
+
+        job["progress"] = 100
+        job["status"] = "完了"
 
     except Exception as e:
         import traceback
         traceback.print_exc()
-        upload_error = f"エラーが発生しました: {str(e)}"
+        job["error"] = str(e)
+        job["progress"] = 100
 
 @upload_bp.route('/upload', methods=['POST'])
+@login_required
 def upload_file():
-    global current_progress, upload_status, upload_error
-    current_progress = 0
-    upload_status = "初期化中..."
-    upload_error = ""
+    user_id = session.get('user_id')
+    job_id = uuid.uuid4().hex
+    jobs[job_id] = {"progress": 0, "status": "初期化中...", "error": "", "result_data": {}}
 
     if 'file' not in request.files:
-        upload_error = "ファイルが見つかりません"
-        return jsonify({'success': False, 'error': upload_error}), 400
+        jobs[job_id]["error"] = "ファイルが見つかりません"
+        return jsonify({'success': False, 'error': jobs[job_id]["error"]}), 400
 
     file = request.files['file']
     if file.filename == '':
-        upload_error = "ファイルが選択されていません"
-        return jsonify({'success': False, 'error': upload_error}), 400
+        jobs[job_id]["error"] = "ファイルが選択されていません"
+        return jsonify({'success': False, 'error': jobs[job_id]["error"]}), 400
 
     if file and allowed_file(file.filename):
         try:
-            current_progress = 5
-            upload_status = "音声をアップロード中..."
+            jobs[job_id]["progress"] = 5
+            jobs[job_id]["status"] = "音声をアップロード中..."
 
             os.makedirs(current_app.config['UPLOAD_FOLDER'], exist_ok=True)
             from werkzeug.utils import secure_filename
@@ -265,10 +276,10 @@ def upload_file():
             file.save(save_path)
 
             import threading
-            thread = threading.Thread(target=run_decode_background, args=(save_path, current_app.static_folder, []))
+            thread = threading.Thread(target=run_decode_background, args=(job_id, save_path, current_app.static_folder, [], user_id))
             thread.start()
 
-            return jsonify({'success': True, 'message': 'Processing started in background'})
+            return jsonify({'success': True, 'message': 'Processing started in background', 'job_id': job_id})
 
         except Exception as e:
             import traceback

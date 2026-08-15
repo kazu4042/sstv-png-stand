@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, session
 import os
 import sys
 
@@ -8,6 +8,8 @@ if ROOT_DIR not in sys.path:
 
 import digital_turbo_png.config_turbo as config
 from web_turbo_png.services.analyzer_service import TurboPNGAnalyzerService
+from web_turbo_png.routes.auth_routes import login_required
+from digital_turbo_png.database_turbo import PacketDatabaseTurboPNG
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -98,7 +100,8 @@ def get_reliability():
             }), 400
 
         analyzer = get_analyzer()
-        scores = analyzer.calculate_reliability_scores(target_image_id_hex=image_id)
+        current_user_id = session.get('user_id')
+        scores = analyzer.calculate_reliability_scores(target_image_id_hex=image_id, current_user_id=current_user_id)
 
         return jsonify({
             "status": "success",
@@ -232,4 +235,28 @@ def get_heatmap_data():
         return jsonify({
             "status": "error",
             "message": f"ヒートマップデータ取得エラー: {str(e)}"
+        }), 500
+
+@api_bp.route('/history', methods=['GET'])
+@login_required
+def get_user_history_api():
+    """ログインユーザーのアップロード履歴を返す"""
+    try:
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({"status": "error", "message": "Unauthorized"}), 401
+            
+        log_dir = os.path.join(ROOT_DIR, config.TEXT_LOG_DIR)
+        db = PacketDatabaseTurboPNG(log_dir)
+        history = db.get_user_history(user_id)
+        db.close()
+        
+        return jsonify({
+            "status": "success",
+            "history": history
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"履歴取得エラー: {str(e)}"
         }), 500

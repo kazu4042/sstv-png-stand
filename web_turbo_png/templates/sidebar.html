@@ -1,4 +1,28 @@
 <style>
+/* 📱 統一サイドバー */
+.sidebar { 
+    background: #ffffff; 
+    border-right: 1px solid rgba(0,0,0,0.05);
+    z-index: 50;
+    display: flex; flex-direction: column;
+    width: 280px;
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow-x: hidden;
+    white-space: nowrap;
+}
+.sidebar.collapsed { width: 0; padding-left: 0; padding-right: 0; }
+@media (max-width: 768px) {
+    .sidebar { position: fixed; height: 100%; transform: translateX(0); }
+    .sidebar.collapsed { transform: translateX(-100%); width: 280px; }
+}
+
+.session-item {
+    transition: all 0.2s;
+}
+.session-item:hover { background: #e6f3ec; color: #008d54; }
+.session-item.active { background: #008d54; color: #ffffff !important; font-weight: bold; }
+.session-item.active .lucide { color: #ffffff; }
+
 /* カスタムアクティブ状態（画像セッション用） */
 .session-img-item {
     border-left: 4px solid transparent;
@@ -44,6 +68,9 @@
         <a href="/analytics" class="session-item {% if request.path == '/analytics' %}active{% endif %} flex items-center gap-3 px-4 py-3 rounded-lg mb-2 text-ink/70" style="text-decoration:none;">
             <i data-lucide="activity" class="w-5 h-5"></i> アナリティクス
         </a>
+        <a href="/calendar" class="session-item {% if request.path == '/calendar' %}active{% endif %} flex items-center gap-3 px-4 py-3 rounded-lg mb-2 text-ink/70" style="text-decoration:none;">
+            <i data-lucide="calendar" class="w-5 h-5"></i> カレンダー (履歴)
+        </a>
         {% if show_heatmap %}
         <a href="/heatmap" class="session-item {% if request.path == '/heatmap' %}active{% endif %} flex items-center gap-3 px-4 py-3 rounded-lg mb-2 text-ink/70" style="text-decoration:none;">
             <i data-lucide="map" class="w-5 h-5"></i> ヒートマップ
@@ -88,6 +115,21 @@
                 {% endif %}
             {% endif %}
         </ul>
+        
+        <div class="mt-auto mb-4 px-4 pt-6 border-t border-gray-100" style="margin-top: 30px;">
+            {% if session.get('user_id') %}
+            <div class="text-xs text-earth mb-2" style="overflow: hidden; text-overflow: ellipsis;">
+                <i data-lucide="user" class="inline w-3 h-3"></i> {{ session.get('email') }}
+            </div>
+            <a href="{{ url_for('auth.logout') }}" class="flex items-center justify-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-600 hover:text-white transition-colors text-sm font-bold" style="text-decoration:none;">
+                <i data-lucide="log-out" class="w-4 h-4"></i> ログアウト
+            </a>
+            {% else %}
+            <a href="{{ url_for('auth.login') }}" class="flex items-center justify-center gap-2 px-4 py-2 bg-forestLight text-forest rounded-lg hover:bg-forest hover:text-white transition-colors text-sm font-bold" style="text-decoration:none;">
+                <i data-lucide="log-in" class="w-4 h-4"></i> ログイン / 登録
+            </a>
+            {% endif %}
+        </div>
     </div>
 </aside>
 <script>

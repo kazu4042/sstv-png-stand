@@ -87,10 +87,9 @@ class TurboPNGAnalyzerService:
 
         return missing_list
 
-    def calculate_reliability_scores(self, target_image_id_hex):
-        """各タイルのSNR重み付き信頼度を計算して返す"""
+    def calculate_reliability_scores(self, target_image_id_hex, current_user_id=None):
+        """指定画像のタイルごとの信頼度（0-100%）を算出し、配列で返す"""
         reliability_map = []
-
         try:
             target_id_int = int(target_image_id_hex, 16)
         except ValueError:
@@ -127,12 +126,17 @@ class TurboPNGAnalyzerService:
                 payload_len = best_plen * 8
 
                 total_files = len(packets)
-                total_weight_sum = sum(weight for _, weight, _ in packets)
+                total_weight_sum = sum(weight for _, weight, _, _ in packets)
 
                 score_0 = np.zeros(payload_len, dtype=float)
                 score_1 = np.zeros(payload_len, dtype=float)
+                
+                is_contributed = False
 
-                for payload_bits_str, weight, _ in packets:
+                for payload_bits_str, weight, file_name, p_user_id in packets:
+                    if current_user_id and p_user_id == current_user_id:
+                        is_contributed = True
+                        
                     if len(payload_bits_str) < payload_len:
                         continue
                     for i, bit_char in enumerate(payload_bits_str[:payload_len]):
@@ -166,7 +170,8 @@ class TurboPNGAnalyzerService:
                     "avg_snr": round(avg_snr, 1),
                     "samples": total_files,
                     "total_weight": int(total_weight_sum),
-                    "sources": sources
+                    "sources": sources,
+                    "is_contributed": is_contributed
                 })
 
         return reliability_map
