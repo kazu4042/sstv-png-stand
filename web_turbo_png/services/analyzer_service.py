@@ -71,7 +71,7 @@ class TurboPNGAnalyzerService:
 
                     packets = len_dict[best_plen]
                     total_files = len(packets)
-                    total_weight = sum(weight for _, weight, _ in packets)
+                    total_weight = sum(weight for _, weight, _, _ in packets)
                     avg_snr = (total_weight / total_files) - 1.0 if total_files > 0 else 0
 
                     if avg_snr <= poor_threshold:

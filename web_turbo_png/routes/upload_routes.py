@@ -130,15 +130,16 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
         update_job(job_id, progress=60, status="統合処理中 (Aggregator)...")
         
         aggregator = TurboPNGAggregator(log_dir=log_dir_path)
-        aggregator.process_and_save_images(min_tile_ratio=0.0, user_id=user_id)
+        # 全員のパケットで多数決画像を生成（user_idフィルタなし）
+        aggregator.process_and_save_images(min_tile_ratio=0.0, user_id=None)
         update_job(job_id, progress=70, status="復元画像を生成中...")
 
         # 復元画像を output ディレクトリに保存
         output_dir = os.path.join(app.static_folder, "output")
         os.makedirs(output_dir, exist_ok=True)
 
-        # DB から全画像ID を取得
-        image_counts = aggregator.db.get_all_image_ids_with_counts()
+        # DB から全画像ID を取得（全ユーザー横断）
+        image_counts = aggregator.db.get_all_image_ids_with_counts(user_id=None)
         available_image_ids = sorted([f"{img_id:04X}" for img_id in image_counts.keys()])
 
         # ===== Step3: ユーザーの今回ログをパースして自分の受信画像を生成 =====
@@ -239,6 +240,16 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
         if not current_image_id:
             current_image_id = available_image_ids[0] if available_image_ids else "0000"
 
+        # ネットワーク全体の復元度を計算（全ユーザー横断）
+        network_received = 0
+        if current_image_id:
+            network_tiles = aggregator.db.get_packets_for_image(int(current_image_id, 16), user_id=None)
+            for ty in range(tile_count_y):
+                for tx in range(tile_count_x):
+                    if ty in network_tiles and tx in network_tiles[ty] and network_tiles[ty][tx]:
+                        network_received += 1
+        network_score = round((network_received / total_required_packets) * 100, 1) if total_required_packets > 0 else 0.0
+
         aggregator.close()
 
         result_data = {
@@ -252,8 +263,12 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
             "total_required": total_required_packets,
             "received_packets": max_packets,
             "main_score": main_score,
+            "contribution_score": main_score,
             "main_matched": main_matched,
-            "is_perfect": main_matched >= total_required_packets
+            "is_perfect": main_matched >= total_required_packets,
+            "network_score": network_score,
+            "network_received": network_received,
+            "timestamp": int(time.time())
         }
 
         update_job(job_id, progress=100, status="完了", result_data=result_data)
