@@ -177,7 +177,7 @@ class TurboPNGAggregator:
                     score_1 = np.zeros(payload_bit_len, dtype=np.float64)
 
                     valid_count = 0
-                    for payload_bits_str, weight, _ in packets:
+                    for payload_bits_str, weight, _, _ in packets:
                         if len(payload_bits_str) < payload_bit_len:
                             continue
                         valid_count += 1

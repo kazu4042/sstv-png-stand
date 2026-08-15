@@ -28,6 +28,7 @@ from web_turbo_png.routes.main_routes import main_bp
 from web_turbo_png.routes.auth_routes import auth_bp
 
 import tempfile
+from flask import request, Response
 
 app = Flask(__name__,
             static_folder=os.path.join(CURRENT_DIR, 'static'),
@@ -40,8 +41,37 @@ else:
     app.config['UPLOAD_FOLDER'] = os.path.join(app.static_folder, 'uploads')
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-key-turbo-png')
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', os.urandom(24))
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB limit
+
+# Basic Auth 設定
+BASIC_AUTH_USERNAME = os.environ.get('BASIC_AUTH_USERNAME', 'Nagasaki')
+BASIC_AUTH_PASSWORD = os.environ.get('BASIC_AUTH_PASSWORD', '123456789')
+
+def check_basic_auth(username, password):
+    return username == BASIC_AUTH_USERNAME and password == BASIC_AUTH_PASSWORD
+
+def authenticate():
+    return Response(
+        'このページを見るにはパスワードが必要です。\n', 401,
+        {'WWW-Authenticate': 'Basic realm="Login Required"'}
+    )
+
+@app.before_request
+def require_basic_auth():
+    # 開発時にBasic Authをオフにしたい場合は環境変数でスキップできるようにする
+    if os.environ.get('DISABLE_BASIC_AUTH') == '1':
+        return
+        
+    # 静的ファイルへのアクセスは除外
+    if request.path.startswith('/static/'):
+        return
+
+    auth = request.authorization
+    if not auth or not check_basic_auth(auth.username, auth.password):
+        return authenticate()
+
 
 # ====================================================================
 # Blueprint 登録

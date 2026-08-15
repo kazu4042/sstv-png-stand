@@ -177,7 +177,7 @@ class DigitalTurboPNGDecoder:
     def calculate_crc16_bits(bit_list, poly=0x1021, init_val=0xFFFF):
         return fast_calculate_crc16_bits(bit_list, poly, init_val)
 
-    def run(self, wav_path):
+    def run(self, wav_path, progress_callback=None):
         self.update_cache()
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
         if not os.path.exists(wav_path):
@@ -220,13 +220,15 @@ class DigitalTurboPNGDecoder:
                 step_size = max(1, int(config.SAMPLE_RATE * 0.002))
                 while i < total_samples - samples_sync_full - header_samples:
 
-                    # ===== 5秒ごとに進捗を表示 =====
+                    # ===== 進捗を表示・コールバック =====
                     now = time.time()
-                    if now - last_progress_time >= 5.0:
+                    if now - last_progress_time >= 2.0:
                         pct = 100.0 * i / total_samples
                         pos_sec = i / config.SAMPLE_RATE
                         remain_sec = max(0, duration_sec - pos_sec)
                         print(f"  [進捗] {pct:5.1f}% ({pos_sec:.0f}/{duration_sec:.0f}秒) | パケット検出: {success_count} | 残り約 {remain_sec:.0f}秒", flush=True)
+                        if progress_callback:
+                            progress_callback(pct)
                         last_progress_time = now
 
                     sync_power = self.detect_sync_long_dft(data[i : i + self.sync_long_samples])

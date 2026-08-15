@@ -19,12 +19,9 @@ upload_bp = Blueprint('upload', __name__)
 
 import uuid
 from web_turbo_png.routes.auth_routes import login_required
+from web_turbo_png.services.job_manager import create_job, update_job, get_job, cleanup_old_jobs
 
 ALLOWED_EXTENSIONS = {'wav'}
-
-# Global jobs dictionary for tracking background tasks
-# Format: {job_id: {"progress": 0, "status": "", "error": "", "result_data": {}}}
-jobs = {}
 
 
 def allowed_file(filename):
@@ -67,17 +64,29 @@ def bits_to_bytearray(bits_str):
     return bytearray(byte_list)
 
 
+@upload_bp.route('/progress')
+def upload_progress():
+    job_id = request.args.get('job_id')
+    if not job_id:
+        return jsonify({"error": "Missing job_id"}), 400
+        
+    job_data = get_job(job_id)
+    if job_data:
+        return jsonify(job_data)
+    else:
+        return jsonify({"error": "Job not found"}), 404
+
 @upload_bp.route('/progress-stream')
 def progress_stream():
     job_id = request.args.get('job_id')
     def generate():
         while True:
             import json
-            if job_id not in jobs:
+            job = get_job(job_id)
+            if not job:
                 yield f"data: {json.dumps({'error': 'Job not found'})}\n\n"
                 break
                 
-            job = jobs[job_id]
             payload = json.dumps({"progress": job["progress"], "status": job["status"], "error": job["error"]})
             yield f"data: {payload}\n\n"
             
@@ -86,20 +95,30 @@ def progress_stream():
             time.sleep(0.1)
     return Response(generate(), mimetype='text/event-stream')
 
-def run_decode_background(job_id, save_path, app_static_folder, available_image_ids, user_id=None):
-    job = jobs[job_id]
+def process_upload(filepath, original_filename, job_id, app, user_id):
+    """アップロードされたファイルの処理（バックグラウンド）"""
     try:
-        job["progress"] = 15
-        job["status"] = "音声をTurboPNGパケットとしてデコード中..."
+        update_job(job_id, progress=5, status="音声のデコード中...")
 
         # ===== Step1: デコード =====
         decoder = DigitalTurboPNGDecoder(user_id=user_id)
-        decoder.run(save_path)
-        job["progress"] = 50
-
-        latest_user_log = decoder.output_raw
-
-        job["status"] = "デコード結果を集計・分析中..."
+        
+        def decode_progress_callback(prog):
+            # progは0.0〜100.0のパーセンテージ
+            update_job(job_id, progress=5 + int(prog * 0.45))
+                
+        success_count, log_path = decoder.run(filepath, progress_callback=decode_progress_callback)
+        
+        decoded_bits_list = []
+        if os.path.exists(log_path):
+            with open(log_path, "r", encoding="utf-8") as f:
+                decoded_bits_list = [line.strip() for line in f if line.strip()]
+        
+        if not decoded_bits_list:
+            update_job(job_id, progress=100, status="エラー", error="SSTV TurboPNGの信号が検出できませんでした。")
+            return
+            
+        update_job(job_id, progress=50, status="データベースへの登録中...")
 
         # ===== Step2: アグリゲータでDBに蓄積 =====
         log_dir = getattr(config, "TEXT_LOG_DIR", "data/digital_turbo_png/logs")
@@ -107,15 +126,15 @@ def run_decode_background(job_id, save_path, app_static_folder, available_image_
             log_dir_path = os.path.join(ROOT_DIR, log_dir)
         else:
             log_dir_path = log_dir
-
+        
+        update_job(job_id, progress=60, status="統合処理中 (Aggregator)...")
+        
         aggregator = TurboPNGAggregator(log_dir=log_dir_path)
         aggregator.process_and_save_images(min_tile_ratio=0.0, user_id=user_id)
-        job["progress"] = 70
-
-        job["status"] = "復元画像を生成中..."
+        update_job(job_id, progress=70, status="復元画像を生成中...")
 
         # 復元画像を output ディレクトリに保存
-        output_dir = os.path.join(app_static_folder, "output")
+        output_dir = os.path.join(app.static_folder, "output")
         os.makedirs(output_dir, exist_ok=True)
 
         # DB から全画像ID を取得
@@ -125,17 +144,16 @@ def run_decode_background(job_id, save_path, app_static_folder, available_image_
         # ===== Step3: ユーザーの今回ログをパースして自分の受信画像を生成 =====
         user_packets_by_id = {}  # {img_id_hex: [(img_id, tx, ty, plen, pbits, snr), ...]}
 
-        if latest_user_log and os.path.exists(latest_user_log):
-            with open(latest_user_log, "r", encoding="utf-8") as f:
-                for line in f:
-                    parsed = parse_turbo_log_line(line)
-                    if parsed is None:
-                        continue
-                    img_id, tile_x, tile_y, plen, pbits, snr_val = parsed
-                    img_id_hex = f"{img_id:04X}"
-                    if img_id_hex not in user_packets_by_id:
-                        user_packets_by_id[img_id_hex] = []
-                    user_packets_by_id[img_id_hex].append(parsed)
+        # デコード結果からログデータを取得
+        for bits in decoded_bits_list:
+            parsed = parse_turbo_log_line(bits)
+            if parsed is None:
+                continue
+            img_id, tile_x, tile_y, plen, pbits, snr_val = parsed
+            img_id_hex = f"{img_id:04X}"
+            if img_id_hex not in user_packets_by_id:
+                user_packets_by_id[img_id_hex] = []
+            user_packets_by_id[img_id_hex].append(parsed)
 
         tile_count_x = config.TILE_COUNT_X
         tile_count_y = config.TILE_COUNT_Y
@@ -146,8 +164,9 @@ def run_decode_background(job_id, save_path, app_static_folder, available_image_
         max_packets = 0
         main_score = 0.0
         main_matched = 0
+        user_output_url = ""
 
-        for idx_id, (img_id_hex, packets) in enumerate(user_packets_by_id.items()):
+        for img_id_hex, packets in user_packets_by_id.items():
             if len(packets) > max_packets:
                 max_packets = len(packets)
                 current_image_id = img_id_hex
@@ -172,7 +191,7 @@ def run_decode_background(job_id, save_path, app_static_folder, available_image_
                         payload_bit_len = best_plen * 8
                         score_0 = np.zeros(payload_bit_len, dtype=float)
                         score_1 = np.zeros(payload_bit_len, dtype=float)
-                        for p_bits_str, weight, _ in db_packets:
+                        for p_bits_str, weight, _, _ in db_packets:
                             if len(p_bits_str) < payload_bit_len:
                                 continue
                             for i, bit_char in enumerate(p_bits_str[:payload_bit_len]):
@@ -190,7 +209,7 @@ def run_decode_background(job_id, save_path, app_static_folder, available_image_
                     if len(voted_payload) > 0 and (bit_matches / len(voted_payload)) >= 0.9:
                         matched_packets += 1
 
-                # ユーザー受信タイルを描画（PNG実サイズで座標計算）
+                # ユーザー受信タイルを描画
                 try:
                     p_bytes = bits_to_bytearray(user_payload)
                     tile_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
@@ -222,10 +241,7 @@ def run_decode_background(job_id, save_path, app_static_folder, available_image_
 
         aggregator.close()
 
-        from web_turbo_png.routes.api_routes import invalidate_analyzer_cache
-        invalidate_analyzer_cache()
-
-        job["result_data"] = {
+        result_data = {
             "available_image_ids": available_image_ids,
             "current_image_id": current_image_id,
             "main_image_url": user_output_url,
@@ -240,35 +256,32 @@ def run_decode_background(job_id, save_path, app_static_folder, available_image_
             "is_perfect": main_matched >= total_required_packets
         }
 
-        job["progress"] = 100
-        job["status"] = "完了"
+        update_job(job_id, progress=100, status="完了", result_data=result_data)
 
     except Exception as e:
         import traceback
         traceback.print_exc()
-        job["error"] = str(e)
-        job["progress"] = 100
+        update_job(job_id, progress=100, status="エラー", error=str(e))
 
 @upload_bp.route('/upload', methods=['POST'])
 @login_required
 def upload_file():
     user_id = session.get('user_id')
     job_id = uuid.uuid4().hex
-    jobs[job_id] = {"progress": 0, "status": "初期化中...", "error": "", "result_data": {}}
+    create_job(job_id)
 
     if 'file' not in request.files:
-        jobs[job_id]["error"] = "ファイルが見つかりません"
-        return jsonify({'success': False, 'error': jobs[job_id]["error"]}), 400
+        update_job(job_id, progress=100, status="エラー", error="ファイルが見つかりません")
+        return jsonify({'success': False, 'error': "ファイルが見つかりません"}), 400
 
     file = request.files['file']
     if file.filename == '':
-        jobs[job_id]["error"] = "ファイルが選択されていません"
-        return jsonify({'success': False, 'error': jobs[job_id]["error"]}), 400
+        update_job(job_id, progress=100, status="エラー", error="ファイルが選択されていません")
+        return jsonify({'success': False, 'error': "ファイルが選択されていません"}), 400
 
     if file and allowed_file(file.filename):
         try:
-            jobs[job_id]["progress"] = 5
-            jobs[job_id]["status"] = "音声をアップロード中..."
+            update_job(job_id, progress=5, status="音声をアップロード中...")
 
             os.makedirs(current_app.config['UPLOAD_FOLDER'], exist_ok=True)
             from werkzeug.utils import secure_filename
@@ -276,7 +289,12 @@ def upload_file():
             file.save(save_path)
 
             import threading
-            thread = threading.Thread(target=run_decode_background, args=(job_id, save_path, current_app.static_folder, [], user_id))
+            app = current_app._get_current_object()
+            
+            # 古いジョブやファイルのクリーンアップ処理（バックグラウンドではなくここで軽く実行）
+            cleanup_old_jobs(max_age_seconds=86400)
+            
+            thread = threading.Thread(target=process_upload, args=(save_path, secure_filename(file.filename), job_id, app, user_id))
             thread.start()
 
             return jsonify({'success': True, 'message': 'Processing started in background', 'job_id': job_id})

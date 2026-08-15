@@ -83,9 +83,10 @@ def result():
     """デコード結果画面を表示"""
     job_id = request.args.get('job_id')
     if job_id:
-        from web_turbo_png.routes.upload_routes import jobs
-        if job_id in jobs:
-            session['result_data'] = jobs[job_id].get("result_data", {})
+        from web_turbo_png.services.job_manager import get_job
+        job = get_job(job_id)
+        if job:
+            session['result_data'] = job.get("result_data", {})
     
     result_data = session.get('result_data', {})
     return render_template(
