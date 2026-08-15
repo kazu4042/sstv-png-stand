@@ -1,0 +1,139 @@
+<style>
+/* カスタムアクティブ状態（画像セッション用） */
+.session-img-item {
+    border-left: 4px solid transparent;
+    transition: all 0.2s ease-out;
+}
+.session-img-item.active {
+    background: #008d54 !important;
+    border-left: 4px solid #38bdf8 !important;
+    box-shadow: 0 4px 6px rgba(0, 141, 84, 0.3) !important;
+    transform: translateX(4px);
+}
+.session-img-item.active .session-id {
+    color: #ffffff !important;
+    font-weight: bold;
+}
+.session-img-item.active .img-icon {
+    color: #ffffff !important;
+}
+.session-img-item.active .badge-status {
+    background: #ffffff !important;
+    color: #008d54 !important;
+}
+</style>
+<aside class="sidebar" id="sidebar">
+    <div class="p-6 flex items-center justify-between border-b border-gray-100">
+        <h3 class="text-xs font-bold text-earth tracking-widest flex items-center gap-2">
+            <i data-lucide="globe" class="w-4 h-4"></i> メニュー
+        </h3>
+        <button id="close-sidebar" class="lg:hidden text-ink/50 hover:text-ink">
+            <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+    </div>
+    <div class="flex-1 overflow-y-auto py-4 px-3">
+        <a href="/" class="session-item {% if request.path == '/' %}active{% endif %} flex items-center gap-3 px-4 py-3 rounded-lg mb-2 text-ink/70" style="text-decoration:none;">
+            <i data-lucide="home" class="w-5 h-5"></i> ホーム
+        </a>
+        <a href="/app" class="session-item {% if request.path == '/app' %}active{% endif %} flex items-center gap-3 px-4 py-3 rounded-lg mb-2 text-ink/70" style="text-decoration:none;">
+            <i data-lucide="rocket" class="w-5 h-5"></i> アップロード
+        </a>
+        <a href="/result" class="session-item {% if request.path == '/result' %}active{% endif %} flex items-center gap-3 px-4 py-3 rounded-lg mb-2 text-ink/70" style="text-decoration:none;">
+            <i data-lucide="layout-dashboard" class="w-5 h-5"></i> 復元結果
+        </a>
+        <a href="/analytics" class="session-item {% if request.path == '/analytics' %}active{% endif %} flex items-center gap-3 px-4 py-3 rounded-lg mb-2 text-ink/70" style="text-decoration:none;">
+            <i data-lucide="activity" class="w-5 h-5"></i> アナリティクス
+        </a>
+        {% if show_heatmap %}
+        <a href="/heatmap" class="session-item {% if request.path == '/heatmap' %}active{% endif %} flex items-center gap-3 px-4 py-3 rounded-lg mb-2 text-ink/70" style="text-decoration:none;">
+            <i data-lucide="map" class="w-5 h-5"></i> ヒートマップ
+        </a>
+        {% endif %}
+        {% if show_ranking %}
+        <a href="/ranking" class="session-item {% if request.path == '/ranking' %}active{% endif %} flex items-center gap-3 px-4 py-3 rounded-lg mb-2 text-ink/70" style="text-decoration:none;">
+            <i data-lucide="award" class="w-5 h-5"></i> ランキング
+        </a>
+        {% endif %}
+        
+        <div class="mt-6 mb-2 px-4">
+            <h3 class="text-xs font-bold text-earth tracking-widest flex items-center gap-2">
+                <i data-lucide="radio" class="w-4 h-4"></i> 受信セッション履歴
+            </h3>
+        </div>
+        <ul class="flex flex-col gap-2" id="session-list">
+            {% if available_image_ids is defined and available_image_ids %}
+                {% for img_id in available_image_ids %}
+                <li class="session-item flex items-center justify-between px-4 py-3 rounded-lg cursor-pointer session-img-item" data-id="{{ img_id }}">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="image" class="w-4 h-4 img-icon text-ink/50"></i>
+                        <span class="session-id font-mono text-sm tracking-widest text-ink">0x{{ img_id }}</span>
+                    </div>
+                    {% if img_id == current_image_id %}
+                    <span class="badge-status text-[10px] bg-forest text-white px-2 py-0.5 rounded-full tracking-widest font-bold">NEW</span>
+                    {% else %}
+                    <span class="badge-status text-[10px] bg-gray-200 text-earth px-2 py-0.5 rounded-full tracking-widest font-bold">STORED</span>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            {% else %}
+                {% if current_image_id is defined and current_image_id %}
+                <li class="session-item flex items-center justify-between px-4 py-3 rounded-lg cursor-pointer session-img-item" data-id="{{ current_image_id }}">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="image" class="w-4 h-4 img-icon text-forest/80"></i>
+                        <span class="session-id font-mono text-sm tracking-widest text-forest font-bold">0x{{ current_image_id }}</span>
+                    </div>
+                </li>
+                {% else %}
+                <li class="px-4 py-2 text-xs text-earth">履歴がありません</li>
+                {% endif %}
+            {% endif %}
+        </ul>
+    </div>
+</aside>
+<script>
+    if(window.innerWidth <= 768) document.getElementById('sidebar').classList.add('collapsed');
+    
+    document.addEventListener("DOMContentLoaded", function() {
+        const imageItems = document.querySelectorAll('.session-img-item');
+        
+        // 初期状態でのアクティブ化 (URLから判定)
+        const urlParams = new URLSearchParams(window.location.search);
+        let activeImageId = urlParams.get('image_id');
+        
+        if (activeImageId) {
+            imageItems.forEach(item => {
+                if (item.dataset.id === activeImageId) {
+                    item.classList.add('active');
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+        }
+        
+        imageItems.forEach(item => {
+            item.addEventListener('click', function(e) {
+                const imageId = this.dataset.id;
+                const currentPath = window.location.pathname;
+                
+                // サイドバーを閉じる (モバイル時)
+                if (window.innerWidth <= 768) {
+                    document.getElementById('sidebar').classList.add('collapsed');
+                }
+                
+                // アナリティクス画面の場合はクエリパラメータをつけてリロード
+                if (currentPath === '/analytics') {
+                    window.location.href = `/analytics?image_id=${imageId}`;
+                } 
+                // result 画面の場合は、result.html の JS が動的に処理するので
+                // ここではページ遷移は行わない (result.html 側に任せる)
+                else if (currentPath === '/result') {
+                    // 何もしない (result.html 内のイベントリスナーで処理される)
+                }
+                // それ以外の画面（ホーム等）からは、結果画面(result)へ遷移する
+                else {
+                    window.location.href = `/result?image_id=${imageId}`;
+                }
+            });
+        });
+    });
+</script>

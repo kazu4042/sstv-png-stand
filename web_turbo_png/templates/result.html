@@ -1,0 +1,722 @@
+﻿<!doctype html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8">
+    <title>マルチセッション・デコード完了 - SSTV Aggregator</title>
+    <style>
+
+        /* 📱 統一サイドバー */
+        .sidebar { 
+            background: #ffffff; 
+            border-right: 1px solid rgba(0,0,0,0.05);
+            z-index: 50;
+            display: flex; flex-direction: column;
+            width: 280px;
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            overflow-x: hidden;
+            white-space: nowrap;
+        }
+        .sidebar.collapsed { width: 0; padding-left: 0; padding-right: 0; }
+        @media (max-width: 768px) {
+            .sidebar { position: fixed; height: 100%; transform: translateX(0); }
+            .sidebar.collapsed { transform: translateX(-100%); width: 280px; }
+        }
+
+        /* 🌐 画面全体：Geminiライクなモダンレイアウト */
+        body { 
+            font-family: "Zen Kaku Gothic New", sans-serif; 
+            margin: 0; padding: 0; background: #f9f9f9; color: #231815; 
+            display: flex; height: 100vh; overflow: hidden; 
+        }
+        
+        /* 📱 左サイドバー：洗練されたダーク/スレートテーマとスムーズな開閉 */
+        
+        
+        @media (min-width: 1024px) {
+            
+            
+        }
+        
+        .sidebar-header { 
+            padding: 20px 24px; 
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .sidebar-header h3 { margin: 0; color: #8b7d6b; font-size: 1rem; letter-spacing: 0.5px; }
+        
+        /* 🎨 セッションリスト：ピル型（角丸）のスタイリッシュなデザイン */
+        .session-list { list-style: none; padding: 0 12px; margin: 0; overflow-y: auto; flex: 1; }
+        .session-item { 
+            padding: 12px 16px; 
+            margin-bottom: 8px;
+            border-radius: 24px; 
+            cursor: pointer; 
+            transition: background 0.2s, color 0.2s; 
+            display: flex; justify-content: space-between; align-items: center; 
+            color: #231815;
+        }
+        .session-item:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+        .session-item.active { background: #008d54; color: #fff; font-weight: bold; }
+        
+        .session-id { font-family: 'Courier New', Courier, monospace; font-size: 1.05em; }
+        .session-badge { background: rgba(255, 255, 255, 0.2); font-size: 0.7em; padding: 4px 8px; border-radius: 12px; }
+        .session-item.active .session-badge { background: #a8c7fa; color: #000; }
+
+        /* 🖥️ 右メインコンテンツ */
+        .main-wrapper { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #ffffff; }
+        
+        /* 🍔 トップナビゲーションバー（ハンバーガーメニュー配置） */
+        
+        .toggle-btn {
+            background: transparent; border: none; font-size: 1.5rem; color: #5f6368;
+            cursor: pointer; padding: 8px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.2s; width: 44px; height: 44px;
+        }
+        .toggle-btn:hover { background: #f1f5f9; color: #1f1f1f; }
+
+        /* <i data-lucide="file-audio" class="icon-inline"></i> メインコンテナ */
+        .content-scroll { flex: 1; overflow-y: auto; padding: 40px 20px; }
+        .container { background: white; padding: 40px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); max-width: 900px; margin: auto; }
+        
+        h2 { color: #008d54; text-align: center; margin-bottom: 5px; font-size: 1.6rem; }
+        .subtitle { text-align: center; color: #8b7d6b; margin-top: 0; margin-bottom: 30px; font-size: 0.95rem; }
+        
+        .active-session-header { background: #1e293b; padding: 15px 24px; border-radius: 12px; border: 1px solid #334155; margin: 20px 0; display: flex; align-items: center; justify-content: space-between; }
+        .session-label { font-weight: bold; color: #94a3b8; font-size: 1.05em; }
+        .display-id { font-size: 1.8rem; font-weight: bold; color: #4ade80; font-family: monospace; letter-spacing: 2px; text-shadow: 0 0 10px rgba(74, 222, 128, 0.3); }
+
+        .score-box { background: #fff; padding: 25px; border-radius: 12px; border: 1px solid #e2e8f0; margin: 20px 0; text-align: center; box-shadow: 0 2px 6px rgba(0,0,0,0.02); }
+        .score-num { font-size: 3.2em; font-weight: bold; color: #008d54; margin: 10px 0; }
+        .progress-bar-container { background: #e2e8f0; border-radius: 12px; width: 100%; height: 16px; margin-top: 10px; overflow: hidden; }
+        .progress-bar { background: #008d54; height: 100%; width: 0%; transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1); border-radius: 12px; }
+        
+        .image-section { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 30px; }
+        @media (max-width: 768px) { .image-section { grid-template-columns: 1fr; } }
+        
+        .image-card { background: #ffffff; padding: 20px; border-radius: 12px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .image-card p { color: #e2e8f0; margin-top: 0; margin-bottom: 15px; font-weight: bold; font-size: 1rem; }
+        .badge-user { color: #facc15; }
+        .badge-all { color: #4ade80; }
+        .restored-img { max-width: 100%; height: auto; border-radius: 8px; background: #000; display: block; margin: 0 auto; min-width: 200px; min-height: 200px; }
+
+        .missing-box { background: white; padding: 25px; border-radius: 12px; border: 1px solid #e2e8f0; margin-top: 30px; box-shadow: 0 2px 6px rgba(0,0,0,0.02); }
+        .missing-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 15px; }
+        .missing-list { font-family: monospace; background: #ffffff; padding: 15px; border-radius: 8px; max-height: 200px; overflow-y: auto; border: 1px solid #e2e8f0; list-style: none; margin: 0; }
+
+        /* 🔘 ボタンデザイン */
+        .btn-action { display: inline-block; padding: 12px 24px; border-radius: 24px; font-weight: bold; text-decoration: none; transition: all 0.2s; margin: 10px; font-size: 0.95rem; }
+        .btn-analytics { background: #000; color: #fff; box-shadow: 0 4px 10px rgba(0,0,0,0.15); }
+        .btn-analytics:hover { background: #333; transform: translateY(-1px); }
+        .btn-back { color: #475569; background: #f1f5f9; border: 1px solid #cbd5e1; }
+        .btn-back:hover { background: #e2e8f0; }
+
+        .btn-download-csv { display: inline-flex; align-items: center; gap: 8px; background: #16a34a; color: white; border: none; padding: 10px 20px; border-radius: 20px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+        .btn-download-csv:hover { background: #15803d; }
+        .btn-download-csv:disabled { background: #94a3b8; cursor: not-allowed; }
+
+        .btn-download-img {
+            display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+            background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;
+            padding: 10px 20px; border-radius: 20px; font-weight: bold; font-size: 0.9rem;
+            cursor: pointer; transition: all 0.2s; margin-top: 16px;
+        }
+        .btn-download-img:hover { background: #e2e8f0; color: #0f172a; border-color: #94a3b8; }
+    
+        /* 共通アイコンスタイル */
+        .icon-inline {
+            width: 1.1em; height: 1.1em;
+            vertical-align: -0.15em;
+            display: inline-block;
+        }
+        
+        /* サイドバー洗練 */
+        
+        .sidebar-header h3 { font-size: 0.85rem; text-transform: uppercase; color: #8b7d6b; font-weight: 700; letter-spacing: 0.05em; }
+        .session-item { border-radius: 8px; margin-bottom: 4px; padding: 10px 16px; display: flex; align-items: center; gap: 12px; font-weight: 500; font-size: 0.95rem; }
+        .session-item:hover { background: #e6f3ec; color: #008d54; }
+        .session-item.active { background: #008d54; color: #ffffff; font-weight: 600; }
+        .session-item.active .icon-inline { color: #0f172a; }
+        
+        
+        .main-wrapper { background: #ffffff; }
+        
+        /* Typography */
+        h1, h2, h3 { font-family: "Zen Kaku Gothic New", sans-serif; }
+</style>
+<script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Tailwind Config -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        forest: '#008d54',
+                        forestLight: '#e6f3ec',
+                        earth: '#8b7d6b',
+                        ink: '#231815',
+                        paper: '#f9f9f9'
+                    },
+                    fontFamily: {
+                        sans: ['"Zen Kaku Gothic New"', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body>
+
+    {% include 'sidebar.html' %}
+
+
+    <main class="main-wrapper">
+        
+        <header class="top-nav h-16 px-4 flex items-center shrink-0 bg-white border-b border-gray-100 shadow-sm" style="z-index: 30;">
+            <button class="p-2 rounded-full hover:bg-gray-100 text-ink/70 transition-colors" id="toggle-btn" style="background:transparent; border:none; cursor:pointer;">
+                <i data-lucide="menu" class="w-6 h-6"></i>
+            </button>
+            <span class="ml-4 font-bold text-ink tracking-widest" style="font-size: 1.1rem;">SSTV Aggregator</span>
+        </header>
+
+
+        <div class="content-scroll">
+            <div class="container">
+                <h2><i data-lucide="party-popper" class="icon-inline"></i> デコード ＆ 多数決集計が完了しました</h2>
+                <div class="subtitle">16-bit Content Addressing Protocol v1.2</div>
+                
+                <div class="active-session-header">
+                    <span class="session-label"><i data-lucide="radio" class="icon-inline"></i> 現在表示中の画像ID:</span>
+                    <span id="display-image-id" class="display-id">0x----</span>
+                </div>
+
+                <div class="score-box" style="position: relative;">
+                    <div style="position: absolute; top: 15px; right: 20px; display: flex; gap: 8px;">
+                        <button id="show-merge-btn" class="btn-action" style="font-size: 0.75rem; padding: 6px 12px; margin: 0; background: #e2e8f0; color: #475569; cursor: pointer; border: none; display: none;">
+                            <i data-lucide="git-merge" class="icon-inline"></i> マージ情報
+                        </button>
+                        <button id="toggle-score-btn" class="btn-action" style="font-size: 0.75rem; padding: 6px 12px; margin: 0; background: #e2e8f0; color: #475569; cursor: pointer; border: none;">
+                            <i data-lucide="refresh-cw" class="icon-inline"></i> 表示切替
+                        </button>
+                    </div>
+                    <div id="score-label" style="font-weight: bold; color: #475569; font-size: 1.05em;">この画像に対するあなたの貢献度（パケット一致率）</div>
+                    <div class="score-num">
+                        <span id="score-text">--%</span>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div id="progress-indicator" class="progress-bar"></div>
+                    </div>
+                    <!-- パケット数詳細テキスト -->
+                    <div id="score-details" style="display: none; margin-top: 12px; color: #475569; font-size: 0.9em; font-weight: bold; text-align: center;"></div>
+                </div>
+
+                <!-- マージ情報モーダル -->
+                <div id="merge-modal" style="display: none; position: fixed; inset: 0; background: rgba(35,24,21,0.5); z-index: 100; align-items: center; justify-content: center;">
+                    <div style="background: white; border-radius: 12px; width: 90%; max-width: 500px; padding: 24px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <h3 style="font-size: 1.2rem; font-weight: bold; margin: 0; display: flex; align-items: center; gap: 8px;">
+                                <i data-lucide="git-merge" style="width: 20px; height: 20px; color: #008d54;"></i>
+                                マージ・クラスタリング情報
+                            </h3>
+                            <button id="close-merge-modal" style="background: transparent; border: none; cursor: pointer; color: #64748b;">
+                                <i data-lucide="x" style="width: 24px; height: 24px;"></i>
+                            </button>
+                        </div>
+                        <div style="background: #f8fafc; padding: 12px; border-radius: 8px; margin-bottom: 16px;">
+                            <p style="font-size: 0.9rem; margin: 0; color: #475569;">
+                                迷子になったパケットをこのメイン画像へ救済した履歴です。
+                                合計 <strong><span id="merge-total-count">0</span> パケット</strong> を救済しました。
+                            </p>
+                        </div>
+                        <div id="merge-details-container" style="max-height: 250px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 8px;">
+                            <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">
+                                <thead style="background: #f1f5f9;">
+                                    <tr>
+                                        <th style="padding: 8px 12px; text-align: left; border-bottom: 1px solid #e2e8f0;">元の画像ID</th>
+                                        <th style="padding: 8px 12px; text-align: right; border-bottom: 1px solid #e2e8f0;">マージされた数</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="merge-details-body">
+                                    <!-- JSで挿入 -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="image-section">
+                    <div class="image-card">
+                        <p><span class="badge-user"><i data-lucide="camera" class="icon-inline"></i> 1. あなたの音声だけ</span> の抽出パーツ</p>
+                        <img id="user-img" src="/static/user_slices_placeholder.png" class="restored-img" alt="単体復元画像">
+                        <button id="download-user-img-btn" class="btn-download-img">
+                            <i data-lucide="download" class="icon-inline"></i> 単体画像を保存
+                        </button>
+                    </div>
+
+                    <div class="image-card">
+                        <p><span class="badge-all"><i data-lucide="sparkles" class="icon-inline"></i> 2. 全員の多数決</span> ノイズ除去後の統合写真</p>
+                        <img id="target-img" src="/static/latest_aggregated_placeholder.png" class="restored-img" alt="全員の多数決画像">
+                        <button id="download-target-img-btn" class="btn-download-img">
+                            <i data-lucide="download" class="icon-inline"></i> 多数決画像を保存
+                        </button>
+                    </div>
+                </div>
+
+                <div class="missing-box">
+                    <div class="missing-header">
+                        <div id="toggle-missing-btn" style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <i data-lucide="chevron-down" id="missing-chevron" style="transition: transform 0.2s; color: #475569;"></i>
+                            <h3 style="color: #dc2626; margin: 0; font-size: 1.2rem;"><i data-lucide="x-circle" class="icon-inline"></i> 現在不足しているパケット (再送要求)</h3>
+                        </div>
+                        <button id="download-csv-btn" class="btn-download-csv" disabled>
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                            不足リストをCSV保存
+                        </button>
+                    </div>
+                    
+                    <ul id="missing-packets-list" class="missing-list" style="display: block;">
+                        <li>データを読み込み中...</li>
+                    </ul>
+
+                    <div class="missing-header" style="margin-top: 25px;">
+                        <div id="toggle-poor-btn" style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <i data-lucide="chevron-down" id="poor-chevron" style="transition: transform 0.2s; color: #475569;"></i>
+                            <h3 style="color: #d97706; margin: 0; font-size: 1.2rem;"><i data-lucide="alert-triangle" class="icon-inline"></i> 低品質なパケット (再送推奨)</h3>
+                        </div>
+                        <button id="download-poor-csv-btn" class="btn-download-csv" disabled style="background: #d97706;">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                            低品質リストをCSV保存
+                        </button>
+                    </div>
+                    
+                    <ul id="poor-packets-list" class="missing-list" style="display: block;">
+                        <li>データを読み込み中...</li>
+                    </ul>
+                </div>
+
+
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let missingPacketsData = [];
+        const timestamp = "{{ timestamp }}";
+        const currentUploadedId = "{{ current_image_id }}";
+
+        document.addEventListener("DOMContentLoaded", function() {
+            // UIエレメントの取得
+            const sidebar = document.getElementById('sidebar');
+            const toggleBtn = document.getElementById('toggle-btn');
+            const userImg = document.getElementById('user-img');
+            const targetImg = document.getElementById('target-img');
+            const scoreText = document.getElementById('score-text');
+            const progressBar = document.getElementById('progress-indicator');
+            const listEl = document.getElementById('missing-packets-list');
+            const poorListEl = document.getElementById('poor-packets-list');
+            const downloadBtn = document.getElementById('download-csv-btn');
+            const downloadPoorBtn = document.getElementById('download-poor-csv-btn');
+            
+            // トグル要素
+            const toggleMissingBtn = document.getElementById('toggle-missing-btn');
+            const togglePoorBtn = document.getElementById('toggle-poor-btn');
+            const missingChevron = document.getElementById('missing-chevron');
+            const poorChevron = document.getElementById('poor-chevron');
+            const displayImageId = document.getElementById('display-image-id');
+            const sessionItems = document.querySelectorAll('.session-item');
+            const toggleScoreBtn = document.getElementById('toggle-score-btn');
+            const scoreLabel = document.getElementById('score-label');
+
+            let activeImageId = currentUploadedId;
+            let currentScoreMode = 1; // 0 = 貢献度, 1 = 復元度
+            let myContributionScore = "{{ contribution_score }}";
+            let overallRestorationScore = "0.0";
+            let overallRestorationDetails = "";
+
+            // マージ情報モーダル関連の処理
+            const mergeBtn = document.getElementById('show-merge-btn');
+            const mergeModal = document.getElementById('merge-modal');
+            const closeMergeBtn = document.getElementById('close-merge-modal');
+            
+            function checkMergeStats(imageId) {
+                fetch(`/api/merge_stats?image_id=${imageId}`)
+                    .then(r => r.json())
+                    .then(data => {
+                        if(data.status === 'success' && data.total_merged > 0) {
+                            mergeBtn.style.display = 'flex';
+                            document.getElementById('merge-total-count').textContent = data.total_merged;
+                            
+                            const tbody = document.getElementById('merge-details-body');
+                            tbody.innerHTML = '';
+                            data.details.forEach(detail => {
+                                const tr = document.createElement('tr');
+                                tr.innerHTML = `
+                                    <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-family: monospace;">0x${detail.from_id}</td>
+                                    <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; text-align: right; font-weight: bold; color: #008d54;">+${detail.count}</td>
+                                `;
+                                tbody.appendChild(tr);
+                            });
+                        } else {
+                            mergeBtn.style.display = 'none';
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Merge stats error:', err);
+                        mergeBtn.style.display = 'none';
+                    });
+            }
+
+            mergeBtn.addEventListener('click', () => {
+                mergeModal.style.display = 'flex';
+            });
+            
+            closeMergeBtn.addEventListener('click', () => {
+                mergeModal.style.display = 'none';
+            });
+            
+            mergeModal.addEventListener('click', (e) => {
+                if (e.target === mergeModal) {
+                    mergeModal.style.display = 'none';
+                }
+            });
+
+            // <i data-lucide="alert-triangle" class="icon-inline"></i> 画像読み込み失敗時のフォールバック
+            userImg.onerror = function() { 
+                this.style.background = '#334155';
+                this.style.display = 'flex';
+                this.style.alignItems = 'center';
+                this.style.justifyContent = 'center';
+                this.textContent = '<i data-lucide="folder" class="icon-inline"></i> 画像なし';
+                this.style.color = '#94a3b8';
+            };
+            targetImg.onerror = function() { 
+                this.style.background = '#334155';
+                this.style.display = 'flex';
+                this.style.alignItems = 'center';
+                this.style.justifyContent = 'center';
+                this.textContent = '<i data-lucide="folder" class="icon-inline"></i> 画像なし';
+                this.style.color = '#94a3b8';
+            };
+
+            // <i data-lucide="refresh-cw" class="icon-inline"></i> 画像IDの切り替えとビューの更新
+            function updateViewForImageId(imageId) {
+                if (!imageId) return;
+                activeImageId = imageId;
+                
+                displayImageId.innerText = `0x${imageId}`;
+
+                // アクティブメニューのハイライト
+                sessionItems.forEach(el => {
+                    if (el.dataset.id === imageId) el.classList.add('active');
+                    else el.classList.remove('active');
+                });
+
+                // 画像ソース・リンクの更新
+                targetImg.src = `/static/output/restored_ID_${imageId}.png?t=${timestamp}`;
+                userImg.src = `/static/output/user_ID_${imageId}.png?t=${timestamp}`;
+
+                // スコアの更新
+                if (imageId === currentUploadedId) {
+                    myContributionScore = "{{ contribution_score }}";
+                } else {
+                    myContributionScore = null;
+                }
+                
+                overallRestorationScore = "計算中...";
+                renderScore();
+
+                // APIリクエスト（不足パケット取得）
+                listEl.innerHTML = '<li><span style="color:#94a3b8;">通信中...</span></li>';
+                downloadBtn.disabled = true;
+
+                fetch(`/api/missing?image_id=${imageId}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        listEl.innerHTML = '';
+                        
+                        if (data.status === "success") {
+                            const totalBlocks = data.total_blocks || 2048;
+                            const missing = data.total_missing_found || 0;
+                            const present = totalBlocks - missing;
+                            
+                            if (data.overall_score !== undefined) {
+                                overallRestorationScore = data.overall_score.toFixed(1);
+                            } else {
+                                overallRestorationScore = (present / totalBlocks * 100).toFixed(1);
+                            }
+                            overallRestorationDetails = `<i data-lucide="package-check" class="icon-inline"></i> 現在 <strong>${present}</strong> / ${totalBlocks} パケット収集済み`;
+                        } else {
+                            overallRestorationScore = "0.0";
+                            overallRestorationDetails = "";
+                        }
+                        renderScore();
+                        
+                        if (data.status === "success" && data.missing_packets && data.missing_packets.length > 0) {
+                            missingPacketsData = data.missing_packets;
+                            
+                            const missingGrouped = {};
+                            const poorGrouped = {};
+                            let hasMissing = false;
+                            let hasPoor = false;
+
+                            missingPacketsData.forEach(pkt => {
+                                const lineNum = pkt.ty !== undefined ? pkt.ty : (pkt.row !== undefined ? pkt.row : "?");
+                                const blockNum = pkt.tx !== undefined ? pkt.tx : (pkt.col !== undefined ? pkt.col : "?");
+                                const status = pkt.status || "MISSING";
+                                const avgSnr = pkt.avg_snr !== undefined ? pkt.avg_snr : "?";
+                                
+                                if (status === "MISSING") {
+                                    if (!missingGrouped[lineNum]) missingGrouped[lineNum] = [];
+                                    missingGrouped[lineNum].push(blockNum);
+                                    hasMissing = true;
+                                } else if (status === "POOR") {
+                                    if (!poorGrouped[lineNum]) poorGrouped[lineNum] = [];
+                                    poorGrouped[lineNum].push(`${blockNum}(SNR:${avgSnr})`);
+                                    hasPoor = true;
+                                }
+                            });
+
+                            listEl.innerHTML = '';
+                            poorListEl.innerHTML = '';
+
+                            if (hasMissing) {
+                                for (const [line, blocks] of Object.entries(missingGrouped)) {
+                                    const li = document.createElement('li');
+                                    li.innerHTML = `<strong>行(Tile Y) ${line}:</strong> <span style="color: #dc2626;"><i data-lucide="x-circle" class="icon-inline"></i> 欠損 [ ${blocks.join(', ')} ]</span>`;
+                                    li.style.padding = '6px 10px';
+                                    li.style.marginBottom = '4px';
+                                    li.style.borderBottom = '1px dashed #e2e8f0';
+                                    li.style.background = '#fef2f2';
+                                    li.style.borderRadius = '4px';
+                                    listEl.appendChild(li);
+                                }
+                            } else {
+                                listEl.innerHTML = '<li style="color: #16a34a; font-weight: bold; padding: 10px 0;"><i data-lucide="check-circle" class="icon-inline"></i> 不足パケットはありません。</li>';
+                            }
+
+                            if (hasPoor) {
+                                for (const [line, blocks] of Object.entries(poorGrouped)) {
+                                    const li = document.createElement('li');
+                                    li.innerHTML = `<strong>行(Tile Y) ${line}:</strong> <span style="color: #d97706;"><i data-lucide="alert-triangle" class="icon-inline"></i> 低品質 [ ${blocks.join(', ')} ]</span>`;
+                                    li.style.padding = '6px 10px';
+                                    li.style.marginBottom = '4px';
+                                    li.style.borderBottom = '1px dashed #e2e8f0';
+                                    li.style.background = '#fffbeb';
+                                    li.style.borderRadius = '4px';
+                                    poorListEl.appendChild(li);
+                                }
+                            } else {
+                                poorListEl.innerHTML = '<li style="color: #16a34a; font-weight: bold; padding: 10px 0;"><i data-lucide="check-circle" class="icon-inline"></i> 低品質パケットはありません。</li>';
+                            }
+
+                            if (window.lucide) window.lucide.createIcons();
+                            downloadBtn.disabled = !hasMissing;
+                            downloadPoorBtn.disabled = !hasPoor;
+                        } else {
+                            missingPacketsData = [];
+                            listEl.innerHTML = '<li style="color: #16a34a; font-weight: bold; font-size: 1.1em; padding: 10px 0;"><i data-lucide="sparkles" class="icon-inline"></i> 完全復元達成！不足パケットはありません。</li>';
+                            poorListEl.innerHTML = '<li style="color: #16a34a; font-weight: bold; padding: 10px 0;"><i data-lucide="check-circle" class="icon-inline"></i> 低品質パケットもありません。</li>';
+                            downloadBtn.disabled = true;
+                            downloadPoorBtn.disabled = true;
+                        }
+                    })
+                    .catch(err => {
+                        console.error("エラー:", err);
+                        listEl.innerHTML = '<li style="color: #dc2626;"><i data-lucide="alert-triangle" class="icon-inline"></i> サーバーとの通信に失敗しました。</li>';
+                    });
+            }
+
+            function renderScore() {
+                const scoreDetailsEl = document.getElementById('score-details');
+                if (currentScoreMode === 0) {
+                    scoreLabel.innerText = "この画像に対するあなたの貢献度（パケット一致率）";
+                    scoreDetailsEl.style.display = 'none';
+                    if (myContributionScore !== null) {
+                        scoreText.innerText = `${myContributionScore}%`;
+                        scoreText.style.color = '#0b57d0';
+                        progressBar.style.width = `${myContributionScore}%`;
+                        progressBar.style.background = 'linear-gradient(90deg, #0b57d0, #38bdf8)';
+                    } else {
+                        scoreText.innerText = `(過去データ)`;
+                        scoreText.style.color = '#94a3b8';
+                        progressBar.style.width = `0%`;
+                        progressBar.style.background = '#e2e8f0';
+                    }
+                } else {
+                    scoreLabel.innerText = "ネットワーク全体の画像復元度（パケット到達率）";
+                    if (overallRestorationDetails) {
+                        scoreDetailsEl.innerHTML = overallRestorationDetails;
+                        scoreDetailsEl.style.display = 'block';
+                        if (window.lucide) window.lucide.createIcons();
+                    } else {
+                        scoreDetailsEl.style.display = 'none';
+                    }
+                    
+                    if (overallRestorationScore === "計算中...") {
+                        scoreText.innerText = `...`;
+                        scoreText.style.color = '#94a3b8';
+                        progressBar.style.width = `0%`;
+                        progressBar.style.background = '#e2e8f0';
+                    } else {
+                        scoreText.innerText = `${overallRestorationScore}%`;
+                        scoreText.style.color = '#16a34a';
+                        progressBar.style.width = `${overallRestorationScore}%`;
+                        progressBar.style.background = 'linear-gradient(90deg, #16a34a, #4ade80)';
+                    }
+                }
+            }
+
+            if (toggleScoreBtn) {
+                toggleScoreBtn.addEventListener('click', () => {
+                    currentScoreMode = currentScoreMode === 0 ? 1 : 0;
+                    renderScore();
+                });
+            }
+
+            // サイドバーの「画像ID」アイテムのみにクリックイベントを付与
+            const imageSessionItems = document.querySelectorAll('.session-item[data-id]');
+            imageSessionItems.forEach(item => {
+                item.addEventListener('click', function() {
+                    // スマホ幅の時はクリック後に自動でサイドバーを閉じる
+                    if (window.innerWidth <= 768) {
+                        sidebar.classList.add('collapsed');
+                    }
+                    const imageId = this.dataset.id;
+                    updateViewForImageId(imageId);
+                    checkMergeStats(imageId);
+                });
+            });
+
+            // <i data-lucide="rocket" class="icon-inline"></i> 初期ロード実行
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlImageId = urlParams.get('image_id');
+            const initialId = urlImageId || document.querySelector('.session-item.active')?.dataset.id || '{{ current_image_id }}' || document.querySelector('.session-item')?.dataset.id;
+            
+            // URLパラメータをパースした後はURLバーをクリーンにする（SPA挙動維持のため）
+            if (urlImageId) {
+                window.history.replaceState({}, '', '/result');
+            }
+            
+            updateViewForImageId(initialId);
+            checkMergeStats(initialId);
+
+            // 画像ダウンロード処理
+            function downloadImage(imgElementId, filenamePrefix) {
+                const imgEl = document.getElementById(imgElementId);
+                if (!imgEl || !imgEl.src || imgEl.src.includes('placeholder')) {
+                    alert('ダウンロードできる画像がまだありません。');
+                    return;
+                }
+                
+                // URLからクエリパラメータ（?t=...）を除外して元の拡張子を保持しやすくする
+                const url = imgEl.src;
+                
+                // リンクを生成してクリック
+                const dummyLink = document.createElement("a");
+                dummyLink.href = url;
+                dummyLink.setAttribute("download", `${filenamePrefix}_ID_${activeImageId}.png`);
+                document.body.appendChild(dummyLink);
+                dummyLink.click();
+                document.body.removeChild(dummyLink);
+            }
+
+            const dlUserBtn = document.getElementById('download-user-img-btn');
+            if (dlUserBtn) {
+                dlUserBtn.addEventListener('click', () => downloadImage('user-img', 'user_restored'));
+            }
+
+            const dlTargetBtn = document.getElementById('download-target-img-btn');
+            if (dlTargetBtn) {
+                dlTargetBtn.addEventListener('click', () => downloadImage('target-img', 'aggregated_restored'));
+            }
+
+            // CSVダウンロード処理 (共通関数)
+            function downloadCsv(targetStatus, filenameSuffix) {
+                if (!missingPacketsData || missingPacketsData.length === 0) return;
+
+                const filtered = missingPacketsData.filter(p => (p.status || "MISSING") === targetStatus);
+                if (filtered.length === 0) return;
+
+                let csvContent = `IMAGE_ID,LINE,BLOCK,STATUS,AVG_SNR\n`;
+                for (let i = 0; i < filtered.length; i++) {
+                    const pkt = filtered[i];
+                    const lineNum = pkt.ty !== undefined ? pkt.ty : (pkt.row !== undefined ? pkt.row : "?");
+                    const blockNum = pkt.tx !== undefined ? pkt.tx : (pkt.col !== undefined ? pkt.col : "?");
+                    const status = pkt.status || "MISSING";
+                    const avgSnr = pkt.avg_snr !== undefined ? pkt.avg_snr : "";
+                    csvContent += `0x${activeImageId},${lineNum},${blockNum},${status},${avgSnr}\n`;
+                }
+
+                const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+                const blob = new Blob([bom, csvContent], { type: "text/csv;charset=utf-8;" });
+                const url = URL.createObjectURL(blob);
+                
+                const dummyLink = document.createElement("a");
+                dummyLink.href = url;
+                dummyLink.setAttribute("download", `${filenameSuffix}_ID_${activeImageId}.csv`);
+                document.body.appendChild(dummyLink);
+                dummyLink.click();
+                document.body.removeChild(dummyLink);
+                URL.revokeObjectURL(url);
+            }
+
+            downloadBtn.addEventListener('click', function() {
+                downloadCsv("MISSING", "missing_packets");
+            });
+
+            if (downloadPoorBtn) {
+                downloadPoorBtn.addEventListener('click', function() {
+                    downloadCsv("POOR", "poor_packets");
+                });
+            }
+
+            // <i data-lucide="toggle-left" class="icon-inline"></i> 表示/非表示の切り替え
+            toggleMissingBtn.addEventListener('click', () => {
+                if (listEl.style.display === 'none') {
+                    listEl.style.display = 'block';
+                    missingChevron.style.transform = 'rotate(0deg)';
+                } else {
+                    listEl.style.display = 'none';
+                    missingChevron.style.transform = 'rotate(-90deg)';
+                }
+            });
+
+            togglePoorBtn.addEventListener('click', () => {
+                if (poorListEl.style.display === 'none') {
+                    poorListEl.style.display = 'block';
+                    poorChevron.style.transform = 'rotate(0deg)';
+                } else {
+                    poorListEl.style.display = 'none';
+                    poorChevron.style.transform = 'rotate(-90deg)';
+                }
+            });
+        });
+    </script>
+<script>lucide.createIcons();</script>
+<script>
+
+        const _sidebar = document.getElementById('sidebar');
+        const _toggleBtn = document.getElementById('toggle-btn');
+        const _closeBtn = document.getElementById('close-sidebar');
+        if(_toggleBtn && _sidebar) {
+            _toggleBtn.addEventListener('click', function() {
+                _sidebar.classList.toggle('collapsed');
+            });
+        }
+        if(_closeBtn && _sidebar) {
+            _closeBtn.addEventListener('click', function() {
+                _sidebar.classList.add('collapsed');
+            });
+        }
+    
+</script>
+</body>
+</html>

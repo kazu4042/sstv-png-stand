@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSTV Aggregator - アップロード</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Tailwind Config -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        forest: '#008d54',
+                        forestLight: '#e6f3ec',
+                        earth: '#8b7d6b',
+                        ink: '#231815',
+                        paper: '#f9f9f9'
+                    },
+                    fontFamily: {
+                        sans: ['"Zen Kaku Gothic New"', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+
+        /* 📱 統一サイドバー */
+        .sidebar { 
+            background: #ffffff; 
+            border-right: 1px solid rgba(0,0,0,0.05);
+            z-index: 50;
+            display: flex; flex-direction: column;
+            width: 280px;
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            overflow-x: hidden;
+            white-space: nowrap;
+        }
+        .sidebar.collapsed { width: 0; padding-left: 0; padding-right: 0; }
+        @media (max-width: 768px) {
+            .sidebar { position: fixed; height: 100%; transform: translateX(0); }
+            .sidebar.collapsed { transform: translateX(-100%); width: 280px; }
+        }
+
+        body { background-color: #f9f9f9; color: #231815; font-family: 'Zen Kaku Gothic New', sans-serif; }
+        
+        /* 🍔 トップナビゲーションバー */
+        
+
+        /* 📱 左サイドバー */
+        
+        
+        @media (min-width: 1024px) {
+            
+            
+        }
+
+        .session-item {
+            transition: all 0.2s;
+        }
+        .session-item:hover { background: #e6f3ec; color: #008d54; }
+        .session-item.active { background: #008d54; color: #ffffff; font-weight: bold; }
+        .session-item.active .lucide { color: #ffffff; }
+
+        .btn-submit {
+            transition: transform 0.1s, box-shadow 0.2s;
+        }
+        .btn-submit:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,141,84, 0.4); }
+        .btn-submit:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+        /* 🌊 ウォーターフォール用キャンバス */
+        .waterfall-wrapper {
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: max-height 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s ease, margin-top 0.4s ease, margin-bottom 0.4s ease;
+        }
+        .waterfall-wrapper.active {
+            max-height: 300px;
+            opacity: 1;
+            margin-top: 1rem;
+            margin-bottom: 1rem;
+        }
+        
+        /* 観測地情報などの入力 */
+        input[type="text"], input[type="number"] {
+            transition: all 0.2s;
+        }
+        input[type="text"]:focus, input[type="number"]:focus {
+            border-color: #008d54;
+            box-shadow: 0 0 0 2px rgba(0,141,84, 0.2);
+            outline: none;
+        }
+        
+        /* プログレスバーUI */
+        .progress-wrapper {
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: max-height 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s ease, margin-top 0.4s ease;
+        }
+        .progress-wrapper.active {
+            max-height: 100px;
+            opacity: 1;
+            margin-top: 1.5rem;
+        }
+        .progress-fill {
+            transition: width 0.3s ease;
+        }
+        
+        /* カスタムトグルスイッチ */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #008d54;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #008d54;
+        }
+        .toggle-checkbox {
+            right: 0;
+            z-index: 1;
+            border-color: #e5e7eb;
+        }
+    </style>
+</head>
+<body class="flex h-screen overflow-hidden">
+    <!-- Sidebar -->
+    {% include 'sidebar.html' %}
+
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col overflow-hidden bg-paper relative">
+        
+        <header class="top-nav h-16 px-4 flex items-center shrink-0 bg-white border-b border-gray-100 shadow-sm" style="z-index: 30;">
+            <button class="p-2 rounded-full hover:bg-gray-100 text-ink/70 transition-colors" id="toggle-btn" style="background:transparent; border:none; cursor:pointer;">
+                <i data-lucide="menu" class="w-6 h-6"></i>
+            </button>
+            <span class="ml-4 font-bold text-ink tracking-widest" style="font-size: 1.1rem;">SSTV Aggregator</span>
+        </header>
+
+
+        <div class="flex-1 overflow-y-auto p-4 md:p-8 flex justify-center items-start">
+            <div class="bg-white p-6 md:p-10 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.04)] w-full max-w-2xl border border-gray-100">
+                <div class="text-center mb-8">
+                    <h1 class="text-2xl md:text-3xl font-bold text-ink tracking-widest flex items-center justify-center gap-3 mb-2">
+                        <i data-lucide="radio" class="text-forest w-8 h-8"></i> SSTV 協調復元エンジン
+                    </h1>
+                    <div class="text-sm text-earth font-medium tracking-wider">4-FSK Audio Signal Aggregator v1.2</div>
+                </div>
+
+                <form action="/api/upload" method="POST" enctype="multipart/form-data" id="upload-form">
+                    <!-- File Upload -->
+                    <div class="flex flex-col md:flex-row gap-4 mb-4">
+                        <div class="relative flex-1">
+                            <div class="flex items-center justify-center w-full p-4 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 hover:bg-forestLight hover:border-forest text-ink/70 hover:text-forest transition-all cursor-pointer font-bold tracking-widest h-full" id="upload-btn-text">
+                                <i data-lucide="folder-up" class="w-5 h-5 mr-2"></i> 音声ファイル (.wav) を選択
+                            </div>
+                            <input type="file" name="file" id="audio-file" accept=".wav" required class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+                        </div>
+                        <button type="button" id="btn-preview" class="bg-forestLight text-forest px-6 py-4 rounded-xl font-bold tracking-widest flex items-center justify-center gap-2 hover:bg-forest hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                            <i data-lucide="play" class="w-5 h-5"></i> プレビュー
+                        </button>
+                    </div>
+                    
+                    <div id="file-name-display" class="text-center text-sm text-forest font-bold mb-6 min-h-[1.5rem] tracking-widest"></div>
+
+                    <!-- Spectrum Toggle -->
+                    <div class="flex items-center justify-between p-4 bg-gray-50 rounded-xl mb-6 border border-gray-100">
+                        <div class="flex items-center gap-3">
+                            <i data-lucide="activity" class="text-earth w-5 h-5"></i>
+                            <span class="text-sm font-bold text-ink tracking-widest">音声スペクトルを表示する</span>
+                        </div>
+                        <div class="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in">
+                            <input type="checkbox" name="toggle" id="spectrum-toggle" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all duration-300"/>
+                            <label for="spectrum-toggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer transition-all duration-300"></label>
+                        </div>
+                    </div>
+
+                    <!-- Waterfall Canvas -->
+                    <div class="waterfall-wrapper bg-black rounded-xl border-2 border-gray-200 overflow-hidden relative" id="waterfall-wrapper">
+                        <canvas id="waterfall" class="w-full h-[200px] block"></canvas>
+                        <div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, rgba(255,255,255,0) 15%, rgba(255,255,255,0.1) 15%, rgba(255,255,255,0) 16%, rgba(255,255,255,0) 45%, rgba(255,255,255,0.1) 45%, rgba(255,255,255,0) 46%);"></div>
+                    </div>
+
+                    <!-- 観測地情報 -->
+                    <div class="bg-paper p-6 rounded-xl mb-8 border border-gray-200">
+                        <h3 class="text-forest font-bold text-sm tracking-widest mb-4 flex items-center gap-2">
+                            <i data-lucide="map-pin" class="w-4 h-4"></i> 観測地情報（オプション）
+                        </h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
+                            <div class="flex flex-col">
+                                <label for="callsign" class="text-xs font-bold text-ink/60 mb-2 tracking-widest">コールサイン / 名前</label>
+                                <input type="text" name="callsign" id="callsign" placeholder="例：JA0XYZ" maxlength="20" class="bg-white border border-gray-300 text-ink text-sm rounded-lg p-3 w-full shadow-sm focus:border-forest focus:ring-2 focus:ring-forestLight outline-none transition-all">
+                            </div>
+                            
+                            <div class="flex flex-col">
+                                <label for="country" class="text-xs font-bold text-ink/60 mb-2 tracking-widest">国 / 地域</label>
+                                <select name="country" id="country" class="bg-white border border-gray-300 text-ink text-sm rounded-lg p-3 w-full shadow-sm focus:border-forest focus:ring-2 focus:ring-forestLight outline-none transition-all">
+                                    <option value="">選択してください (任意)</option>
+                                    <option value="Japan" data-lat="36.2048" data-lon="138.2529">Japan (日本)</option>
+                                    <option value="United States" data-lat="37.0902" data-lon="-95.7129">United States (米国)</option>
+                                    <option value="United Kingdom" data-lat="55.3781" data-lon="-3.4360">United Kingdom (英国)</option>
+                                    <option value="Australia" data-lat="-25.2744" data-lon="133.7751">Australia (豪州)</option>
+                                    <option value="Germany" data-lat="51.1657" data-lon="10.4515">Germany (ドイツ)</option>
+                                    <option value="France" data-lat="46.2276" data-lon="2.2137">France (フランス)</option>
+                                    <option value="Canada" data-lat="56.1304" data-lon="-106.3468">Canada (カナダ)</option>
+                                    <option value="China" data-lat="35.8617" data-lon="104.1954">China (中国)</option>
+                                    <option value="India" data-lat="20.5937" data-lon="78.9629">India (インド)</option>
+                                    <option value="Brazil" data-lat="-14.2350" data-lon="-51.9253">Brazil (ブラジル)</option>
+                                    <option value="Russia" data-lat="61.5240" data-lon="105.3188">Russia (ロシア)</option>
+                                    <option value="South Korea" data-lat="35.9078" data-lon="127.7669">South Korea (韓国)</option>
+                                    <option value="Czech Republic" data-lat="49.8175" data-lon="15.4730">Czech Republic (チェコ)</option>
+                                </select>
+                            </div>
+                            
+                            <div class="flex flex-col">
+                                <label for="grid" class="text-xs font-bold text-ink/60 mb-2 tracking-widest">グリッドロケーター</label>
+                                <input type="text" name="grid" id="grid" placeholder="例：PM95ab" maxlength="10" class="bg-white border border-gray-300 text-ink text-sm rounded-lg p-3 w-full shadow-sm focus:border-forest focus:ring-2 focus:ring-forestLight outline-none transition-all">
+                            </div>
+                            
+                            <div class="flex flex-col">
+                                <label for="latitude" class="text-xs font-bold text-ink/60 mb-2 tracking-widest">北緯 (LATITUDE)</label>
+                                <input type="number" name="latitude" id="latitude" placeholder="例：35.6762" min="-90" max="90" step="0.0001" class="bg-white border border-gray-300 text-ink text-sm rounded-lg p-3 w-full shadow-sm focus:border-forest focus:ring-2 focus:ring-forestLight outline-none transition-all">
+                            </div>
+                            
+                            <div class="flex flex-col md:col-span-2">
+                                <label for="longitude" class="text-xs font-bold text-ink/60 mb-2 tracking-widest">東経 (LONGITUDE)</label>
+                                <input type="number" name="longitude" id="longitude" placeholder="例：139.6503" min="-180" max="180" step="0.0001" class="bg-white border border-gray-300 text-ink text-sm rounded-lg p-3 w-full shadow-sm focus:border-forest focus:ring-2 focus:ring-forestLight outline-none transition-all">
+                            </div>
+                        </div>
+                        <div class="text-[11px] text-ink/50 leading-relaxed bg-white p-3 rounded-lg border border-gray-100">
+                            <i data-lucide="info" class="w-3 h-3 inline mr-1"></i> <strong>観測地情報</strong>を入力すると、SNRヒートマップに受信局が表示されます。<br>
+                            座標がない場合は国名またはグリッドロケーターで自動判定します。コールサインはランキングに表示されます（空の場合は「匿名」）。
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn-submit w-full bg-forest text-white py-4 rounded-xl font-bold tracking-widest flex justify-center items-center gap-2" id="btn-submit" disabled>
+                        <i data-lucide="rocket" class="w-5 h-5"></i> サーバーに送信して解析を開始
+                    </button>
+
+                    <!-- プログレスバー -->
+                    <div class="progress-wrapper" id="progress-wrapper">
+                        <div class="text-center text-sm font-bold text-earth tracking-widest mb-2" id="progress-text">処理中... 0%</div>
+                        <div class="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
+                            <div class="progress-fill h-full bg-forest w-0" id="progress-fill"></div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        lucide.createIcons();
+        
+        const fileInput = document.getElementById('audio-file');
+        const fileNameDisplay = document.getElementById('file-name-display');
+        const btnPreview = document.getElementById('btn-preview');
+        const btnSubmit = document.getElementById('btn-submit');
+        const waterfallWrapper = document.getElementById('waterfall-wrapper'); 
+        const spectrumToggle = document.getElementById('spectrum-toggle');
+        const canvas = document.getElementById('waterfall');
+        const ctx = canvas.getContext('2d', { alpha: false }); 
+
+        let audioContext;
+        let analyser;
+        let source;
+        let animationId;
+        let isPlaying = false;
+        
+        // 国・地域選択時に緯度・経度を自動入力
+        const countrySelect = document.getElementById('country');
+        const latitudeInput = document.getElementById('latitude');
+        const longitudeInput = document.getElementById('longitude');
+
+        countrySelect.addEventListener('change', function() {
+            const selectedOption = this.options[this.selectedIndex];
+            if (selectedOption.value) {
+                const lat = selectedOption.getAttribute('data-lat');
+                const lon = selectedOption.getAttribute('data-lon');
+                if (lat && lon) {
+                    latitudeInput.value = lat;
+                    longitudeInput.value = lon;
+                }
+            } else {
+                latitudeInput.value = '';
+                longitudeInput.value = '';
+            }
+        });
+        
+        // スペクトルの表示/非表示の切り替え
+        spectrumToggle.addEventListener('change', function() {
+            if (this.checked && fileInput.files.length > 0) {
+                waterfallWrapper.classList.add('active');
+            } else {
+                waterfallWrapper.classList.remove('active');
+            }
+        });
+
+        // キャンバスのサイズ設定
+        canvas.width = 600;
+        canvas.height = 200;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // カラーマップ関数
+        function getColor(value) {
+            if (value === 0) return [0, 0, 0];
+            let r, g, b;
+            if (value < 64) { r = 0; g = 0; b = value * 4; }
+            else if (value < 128) { r = 0; g = (value - 64) * 4; b = 255 - (value - 64) * 4; }
+            else if (value < 192) { r = (value - 128) * 4; g = 255; b = 0; }
+            else { r = 255; g = 255 - (value - 192) * 4; b = 0; }
+            return [r, g, b];
+        }
+
+        // ファイル選択時の処理
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            
+            if (isPlaying) {
+                btnPreview.click();
+            }
+
+            if (file) {
+                fileNameDisplay.innerHTML = `<i data-lucide="file-audio" class="w-4 h-4 inline mr-1"></i> ${file.name}`;
+                lucide.createIcons();
+                btnPreview.disabled = false;
+                btnSubmit.disabled = false;
+                if (spectrumToggle.checked) {
+                    waterfallWrapper.classList.add('active');
+                }
+            } else {
+                fileNameDisplay.innerHTML = '';
+                btnPreview.disabled = true;
+                btnSubmit.disabled = true;
+                waterfallWrapper.classList.remove('active');
+            }
+        });
+
+        // プレビュー再生ボタンの処理
+        btnPreview.addEventListener('click', async function() {
+            if (isPlaying) {
+                // 停止処理
+                if (source) source.stop();
+                cancelAnimationFrame(animationId);
+                btnPreview.innerHTML = '<i data-lucide="play" class="w-5 h-5"></i> プレビュー';
+                btnPreview.classList.remove('bg-red-50', 'text-red-600', 'hover:bg-red-600', 'hover:text-white');
+                btnPreview.classList.add('bg-forestLight', 'text-forest', 'hover:bg-forest', 'hover:text-white');
+                lucide.createIcons();
+                isPlaying = false;
+                return;
+            }
+
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            // ボタンの状態変更
+            btnPreview.innerHTML = '<i data-lucide="pause" class="w-5 h-5"></i> 停止';
+            btnPreview.classList.remove('bg-forestLight', 'text-forest', 'hover:bg-forest', 'hover:text-white');
+            btnPreview.classList.add('bg-red-50', 'text-red-600', 'hover:bg-red-600', 'hover:text-white');
+            lucide.createIcons();
+            isPlaying = true;
+            
+            // Toggleがオフでも再生したらオンにする
+            if (!spectrumToggle.checked) {
+                spectrumToggle.checked = true;
+                waterfallWrapper.classList.add('active');
+            }
+
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            const arrayBuffer = await file.arrayBuffer();
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 2048; 
+            analyser.smoothingTimeConstant = 0.2; 
+
+            source = audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            
+            source.connect(analyser);
+            analyser.connect(audioContext.destination);
+
+            source.start(0);
+
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+            const nyquist = audioContext.sampleRate / 2;
+            const maxDisplayFreq = 6000; 
+            const maxBinIndex = Math.floor((maxDisplayFreq / nyquist) * bufferLength);
+            const imgData = ctx.createImageData(canvas.width, 1);
+
+            function drawWaterfall() {
+                if (!isPlaying) return;
+                animationId = requestAnimationFrame(drawWaterfall);
+
+                analyser.getByteFrequencyData(dataArray);
+
+                ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height - 1, 0, 1, canvas.width, canvas.height - 1);
+
+                for (let x = 0; x < canvas.width; x++) {
+                    const binIndex = Math.floor((x / canvas.width) * maxBinIndex);
+                    const val = dataArray[binIndex];
+                    
+                    const [r, g, b] = getColor(val);
+                    const pxOffset = x * 4;
+                    imgData.data[pxOffset] = r;
+                    imgData.data[pxOffset + 1] = g;
+                    imgData.data[pxOffset + 2] = b;
+                    imgData.data[pxOffset + 3] = 255;
+                }
+                ctx.putImageData(imgData, 0, 0);
+            }
+
+            drawWaterfall();
+
+            source.onended = () => {
+                isPlaying = false;
+                cancelAnimationFrame(animationId);
+                btnPreview.innerHTML = '<i data-lucide="play" class="w-5 h-5"></i> プレビュー';
+                btnPreview.classList.remove('bg-red-50', 'text-red-600', 'hover:bg-red-600', 'hover:text-white');
+                btnPreview.classList.add('bg-forestLight', 'text-forest', 'hover:bg-forest', 'hover:text-white');
+                lucide.createIcons();
+            };
+        });
+
+        // フォーム送信時のプログレス処理
+        const uploadForm = document.getElementById('upload-form');
+        const progressWrapper = document.getElementById('progress-wrapper');
+        const progressFill = document.getElementById('progress-fill');
+        const progressText = document.getElementById('progress-text');
+
+        uploadForm.addEventListener('submit', function(e) {
+            e.preventDefault(); // デフォルトのページ遷移をキャンセル
+
+            // UIを更新
+            btnSubmit.disabled = true;
+            btnSubmit.innerHTML = '<i data-lucide="hourglass" class="w-5 h-5"></i> 処理中...';
+            lucide.createIcons();
+            
+            // プログレスバーをスライドイン
+            progressWrapper.classList.add('active');
+
+            // SSEで進捗を受信
+            const evtSource = new EventSource('/api/progress-stream');
+            evtSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                const progress = parseInt(data.progress);
+                if (!isNaN(progress)) {
+                    progressFill.style.width = progress + '%';
+                    progressText.innerText = `処理中... ${progress}%`;
+                    
+                    if (progress >= 100) {
+                        progressText.innerText = "完了！画面が切り替わります...";
+                        evtSource.close();
+                        window.location.href = '/turbo_png/result';
+                    } else if (data.error && data.error.length > 0) {
+                        alert(data.error);
+                        btnSubmit.disabled = false;
+                        btnSubmit.innerHTML = '<i data-lucide="rocket" class="w-5 h-5"></i> サーバーに送信して解析を開始';
+                        lucide.createIcons();
+                        progressWrapper.classList.remove('active');
+                        evtSource.close();
+                    }
+                }
+            };
+            
+            evtSource.onerror = function() {
+                evtSource.close();
+            };
+
+            // AJAXでファイルを送信
+            const formData = new FormData(uploadForm);
+            fetch('/api/upload', {
+                method: 'POST',
+                body: formData
+            }).then(response => {
+                if (!response.ok) {
+                    response.text().then(text => {
+                        alert(text);
+                        // エラー時にUIを元に戻す
+                        btnSubmit.disabled = false;
+                        btnSubmit.innerHTML = '<i data-lucide="rocket" class="w-5 h-5"></i> サーバーに送信して解析を開始';
+                        lucide.createIcons();
+                        progressWrapper.classList.remove('active');
+                        evtSource.close();
+                    });
+                }
+            }).catch(err => {
+                alert("通信エラーが発生しました: " + err);
+                btnSubmit.disabled = false;
+                btnSubmit.innerHTML = '<i data-lucide="rocket" class="w-5 h-5"></i> サーバーに送信して解析を開始';
+                lucide.createIcons();
+                progressWrapper.classList.remove('active');
+                evtSource.close();
+            });
+        });
+
+        // サイドバーのトグル
+        const sidebar = document.getElementById('sidebar');
+        
+        
+    </script>
+<script>
+
+        const _sidebar = document.getElementById('sidebar');
+        const _toggleBtn = document.getElementById('toggle-btn');
+        const _closeBtn = document.getElementById('close-sidebar');
+        if(_toggleBtn && _sidebar) {
+            _toggleBtn.addEventListener('click', function() {
+                _sidebar.classList.toggle('collapsed');
+            });
+        }
+        if(_closeBtn && _sidebar) {
+            _closeBtn.addEventListener('click', function() {
+                _sidebar.classList.add('collapsed');
+            });
+        }
+    
+</script>
+</body>
+</html>
+

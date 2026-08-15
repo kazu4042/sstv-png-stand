@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="ja" class="scroll-smooth bg-[#f9f9f9] text-[#111111]">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSTV AGGREGATOR | Noise to Signal</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        forest: '#008d54',
+                        forestLight: '#e6f3ec',
+                        earth: '#8b7d6b',
+                        ink: '#111111',
+                        paper: '#f9f9f9',
+                        surface: '#ffffff'
+                    },
+                    fontFamily: {
+                        sans: ['"Zen Kaku Gothic New"', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        body {
+            background-color: #f9f9f9;
+            color: #111111;
+            font-family: 'Zen Kaku Gothic New', sans-serif;
+            overflow-x: hidden;
+            cursor: default;
+        }
+
+        /* -------------------------------------
+           Soft Glass UI (Apple/Modern Light Theme)
+           ------------------------------------- */
+        .glass-nav {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+        }
+
+        .clean-card {
+            background: #ffffff;
+            border-radius: 24px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.03);
+            border: 1px solid rgba(0, 0, 0, 0.03);
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .clean-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 20px 40px rgba(0, 141, 84, 0.08);
+            border-color: rgba(0, 141, 84, 0.2);
+        }
+
+        /* -------------------------------------
+           Text Utilities
+           ------------------------------------- */
+        .text-gradient {
+            background: linear-gradient(135deg, #008d54, #8b7d6b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        /* -------------------------------------
+           Scroll Reveal Animation
+           ------------------------------------- */
+        .reveal {
+            opacity: 0;
+            transform: translateY(30px);
+            transition: opacity 1s cubic-bezier(0.16, 1, 0.3, 1), transform 1s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .reveal.active {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* -------------------------------------
+           Hero Background Elements
+           ------------------------------------- */
+        .hero-bg {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            overflow: hidden;
+            z-index: -1;
+            pointer-events: none;
+        }
+        .blob {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.15;
+            animation: float 20s infinite ease-in-out alternate;
+        }
+        .blob-1 {
+            background: #008d54;
+            width: 600px; height: 600px;
+            top: -200px; right: -100px;
+        }
+        .blob-2 {
+            background: #8b7d6b;
+            width: 500px; height: 500px;
+            bottom: -100px; left: -200px;
+            animation-delay: -5s;
+        }
+        @keyframes float {
+            0% { transform: translate(0, 0) scale(1); }
+            100% { transform: translate(50px, 50px) scale(1.1); }
+        }
+
+        /* -------------------------------------
+           Modern Button
+           ------------------------------------- */
+        .btn-primary {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            background: #008d54;
+            color: #ffffff;
+            padding: 16px 40px;
+            border-radius: 100px;
+            font-weight: 700;
+            font-size: 1.1rem;
+            letter-spacing: 0.05em;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 141, 84, 0.3);
+        }
+        .btn-primary:hover {
+            background: #007a48;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 141, 84, 0.4);
+            color: #ffffff;
+        }
+
+    </style>
+</head>
+<body class="selection:bg-forest selection:text-white">
+
+    <div class="hero-bg">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="fixed top-0 w-full z-50 glass-nav">
+        <div class="max-w-7xl mx-auto px-6 lg:px-8 py-4 flex justify-between items-center">
+            <a href="/" class="flex items-center gap-3 text-ink hover:text-forest transition-colors">
+                <i data-lucide="radio" class="w-6 h-6 text-forest"></i>
+                <span class="font-black text-xl tracking-widest">SSTV AGGREGATOR</span>
+            </a>
+            <div class="hidden md:flex items-center gap-10">
+                <a href="#about" class="text-sm font-bold tracking-widest text-earth hover:text-forest transition-colors">VISION</a>
+                <a href="#features" class="text-sm font-bold tracking-widest text-earth hover:text-forest transition-colors">SYSTEM</a>
+                <a href="/app" class="text-sm font-bold tracking-widest px-6 py-2 border border-forest text-forest hover:bg-forest hover:text-white rounded-full transition-colors">
+                    APP ENTRY
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- HERO SECTION -->
+    <section class="min-h-[90vh] flex flex-col justify-center items-center px-6 pt-32 text-center relative">
+        <div class="max-w-5xl mx-auto">
+            <div class="inline-block bg-forestLight text-forest font-bold tracking-widest px-4 py-2 rounded-full text-xs mb-8 reveal">
+                NEXT GEN COLLABORATIVE DECODING
+            </div>
+            
+            <h1 class="text-5xl md:text-7xl lg:text-[6rem] font-black leading-[1.1] tracking-tight mb-8 reveal" style="transition-delay: 100ms;">
+                宇宙のノイズを、<br>
+                <span class="text-gradient">クリアな一枚へ。</span>
+            </h1>
+            
+            <p class="text-xl md:text-2xl text-ink/70 font-medium leading-relaxed max-w-3xl mx-auto mb-16 reveal" style="transition-delay: 200ms;">
+                世界中の受信家から集められた断片をつなぎ合わせ、<br>
+                極限までノイズを排除するSSTV画像復元プラットフォーム。
+            </p>
+
+            <div class="reveal" style="transition-delay: 300ms;">
+                <a href="/app" class="btn-primary">
+                    システムを起動
+                    <i data-lucide="arrow-right" class="w-5 h-5"></i>
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- VISION SECTION -->
+    <section id="about" class="py-32 px-6 bg-surface">
+        <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-20 items-center">
+            <div class="reveal">
+                <h3 class="text-earth font-bold tracking-[0.2em] mb-4 text-sm uppercase">Our Vision</h3>
+                <h2 class="text-4xl md:text-5xl font-black mb-8 leading-tight text-ink">想いをつなぎ、<br>真実を復元する。</h2>
+                <p class="text-lg leading-loose text-ink/80 font-medium">
+                    遥か上空を飛ぶ人工衛星から届けられる、微弱なSSTV（低走査テレビジョン）信号。<br><br>
+                    ノイズの海に埋もれ、ひとりの力では解読不可能なそのデータも、世界中の受信家から集められた断片をつなぎ合わせることで、美しい1枚の画像として蘇ります。<br><br>
+                    当社の「重み付き多数決エンジン」は、皆様から提供されるデータの品質を正確に評価し、世界規模の協調作業によって真実の姿を復元します。
+                </p>
+            </div>
+            <div class="relative h-[400px] md:h-[500px] rounded-[2rem] overflow-hidden reveal shadow-2xl" style="transition-delay: 200ms;">
+                <img src="https://images.unsplash.com/photo-1446776811953-b23d57bd21aa?q=80&w=2072&auto=format&fit=crop" class="w-full h-full object-cover" alt="Space">
+            </div>
+        </div>
+    </section>
+
+    <!-- FEATURES SECTION -->
+    <section id="features" class="py-32 px-6">
+        <div class="max-w-7xl mx-auto">
+            <div class="text-center mb-20 reveal">
+                <h3 class="text-earth font-bold tracking-[0.2em] mb-4 text-sm uppercase">Core Technology</h3>
+                <h2 class="text-4xl md:text-5xl font-black leading-tight text-ink">ノイズの海から真実を引き出す</h2>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <!-- Feature 1 -->
+                <div class="clean-card p-10 reveal">
+                    <div class="w-16 h-16 rounded-2xl bg-forestLight text-forest flex items-center justify-center mb-8">
+                        <i data-lucide="cpu" class="w-8 h-8"></i>
+                    </div>
+                    <h4 class="text-2xl font-bold mb-4 text-ink">SNR Weighted Engine</h4>
+                    <p class="text-ink/70 font-medium leading-relaxed">
+                        電波品質（SNR）を重みとして集計し、ノイズを極限まで排除。質の高いパケットを優先して画像を合成する独自のエンジンです。
+                    </p>
+                </div>
+
+                <!-- Feature 2 -->
+                <div class="clean-card p-10 reveal" style="transition-delay: 100ms;">
+                    <div class="w-16 h-16 rounded-2xl bg-[#f0ede8] text-earth flex items-center justify-center mb-8">
+                        <i data-lucide="zoom-in" class="w-8 h-8"></i>
+                    </div>
+                    <h4 class="text-2xl font-bold mb-4 text-ink">Precision Zoom Scope</h4>
+                    <p class="text-ink/70 font-medium leading-relaxed">
+                        パケット単位のズームと、ソースごとのHex差分解析ビューを提供。ビットレベルでデータの不整合を分析可能です。
+                    </p>
+                </div>
+
+                <!-- Feature 3 -->
+                <div class="clean-card p-10 reveal" style="transition-delay: 200ms;">
+                    <div class="w-16 h-16 rounded-2xl bg-slate-100 text-slate-600 flex items-center justify-center mb-8">
+                        <i data-lucide="globe-2" class="w-8 h-8"></i>
+                    </div>
+                    <h4 class="text-2xl font-bold mb-4 text-ink">Global Contribution</h4>
+                    <p class="text-ink/70 font-medium leading-relaxed">
+                        世界の誰がどのピクセルに貢献したかをトラッキング。リアルタイムに変動するヒートマップで観測状況を可視化します。
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA SECTION -->
+    <section class="py-32 px-6">
+        <div class="max-w-4xl mx-auto clean-card p-16 text-center reveal bg-forest overflow-hidden relative border-none shadow-2xl">
+            <!-- Background Decoration -->
+            <div class="absolute top-[-50%] right-[-10%] w-96 h-96 bg-white opacity-10 rounded-full blur-3xl pointer-events-none"></div>
+            
+            <h2 class="text-3xl md:text-5xl font-black mb-8 text-white relative z-10">解析を始める準備はできましたか？</h2>
+            <p class="text-lg text-white/80 mb-12 font-medium relative z-10">あなたの受信したデータが、真実のピースになる。</p>
+            <a href="/app" class="inline-flex items-center gap-3 bg-white text-forest px-10 py-5 rounded-full font-bold text-lg hover:scale-105 transition-transform shadow-lg relative z-10">
+                APP ENTRY <i data-lucide="arrow-right" class="w-5 h-5"></i>
+            </a>
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="bg-surface border-t border-black/5 py-12 px-6 mt-12">
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
+            <div class="flex items-center gap-3">
+                <i data-lucide="radio" class="w-6 h-6 text-forest"></i>
+                <span class="font-black tracking-widest text-ink">SSTV AGGREGATOR</span>
+            </div>
+            <div class="text-ink/50 font-medium text-sm tracking-widest">
+                &copy; 2026 SSTV Collaborative Decoding Project
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        lucide.createIcons();
+
+        // ----------------------------------------------------
+        // Scroll Reveal Observer
+        // ----------------------------------------------------
+        const observerOptions = { root: null, rootMargin: '0px', threshold: 0.1 };
+        const observer = new IntersectionObserver((entries, observer) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('active');
+                    observer.unobserve(entry.target);
+                }
+            });
+        }, observerOptions);
+        document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+    </script>
+</body>
+</html>
