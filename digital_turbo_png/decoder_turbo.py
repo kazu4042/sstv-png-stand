@@ -12,12 +12,101 @@ import os
 import io
 from PIL import Image
 from datetime import datetime
+import numba
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
 from digital_turbo_png import config_turbo as config
+
+@numba.njit
+def fast_detect_sync_long_dft(audio_segment, sync_long_samples, sync_win, sync_phase_long_cos, sync_phase_long_sin):
+    if len(audio_segment) < sync_long_samples:
+        return 0.0
+    c = 0.0
+    s = 0.0
+    for i in range(sync_long_samples):
+        val = audio_segment[i] * sync_win[i]
+        c += val * sync_phase_long_cos[i]
+        s += val * sync_phase_long_sin[i]
+    return c*c + s*s
+
+@numba.njit
+def fast_detect_symbol_dft(audio_segment, samples_per_symbol, hamming_win, target_phases_cos, target_phases_sin):
+    if len(audio_segment) < samples_per_symbol:
+        return 0, 0.0
+
+    num_phases = target_phases_cos.shape[0]
+    powers = np.zeros(num_phases, dtype=np.float64)
+
+    for p in range(num_phases):
+        c = 0.0
+        s = 0.0
+        for i in range(samples_per_symbol):
+            val = audio_segment[i] * hamming_win[i]
+            c += val * target_phases_cos[p, i]
+            s += val * target_phases_sin[p, i]
+        powers[p] = c*c + s*s
+
+    best_idx = 0
+    peak_power = powers[0]
+    for p in range(1, num_phases):
+        if powers[p] > peak_power:
+            best_idx = p
+            peak_power = powers[p]
+
+    noise_sum = 0.0
+    for p in range(num_phases):
+        if p != best_idx:
+            noise_sum += powers[p]
+            
+    noise_power = (noise_sum / (num_phases - 1)) + 1e-10
+    snr = peak_power / noise_power
+
+    return best_idx, snr
+
+@numba.njit
+def fast_decode_symbols_exact(audio_data, start_idx, num_symbols, samples_per_symbol, hamming_win, target_phases_cos, target_phases_sin):
+    all_bits = np.zeros(num_symbols * 2, dtype=np.int32)
+    snr_sum = 0.0
+    
+    bits_map_0 = np.array([0, 0, 1, 1], dtype=np.int32)
+    bits_map_1 = np.array([0, 1, 0, 1], dtype=np.int32)
+
+    valid_symbols = 0
+    for s in range(num_symbols):
+        pos = start_idx + s * samples_per_symbol
+        if pos + samples_per_symbol > len(audio_data):
+            break
+        
+        segment = audio_data[pos : pos + samples_per_symbol]
+        best_idx, snr = fast_detect_symbol_dft(segment, samples_per_symbol, hamming_win, target_phases_cos, target_phases_sin)
+        
+        all_bits[s*2] = bits_map_0[best_idx]
+        all_bits[s*2+1] = bits_map_1[best_idx]
+        snr_sum += snr
+        valid_symbols += 1
+
+    avg_snr = snr_sum / valid_symbols if valid_symbols > 0 else 0.0
+    return all_bits[:valid_symbols*2], avg_snr
+
+@numba.njit
+def fast_calculate_crc16_bits(bit_array, poly=0x1021, init_val=0xFFFF):
+    crc = init_val
+    for bit in bit_array:
+        inv = ((crc >> 15) ^ bit) & 1
+        crc = (crc << 1) & 0xFFFF
+        if inv:
+            crc ^= poly
+    return crc
+
+@numba.njit
+def fast_bits_to_int(bits):
+    val = 0
+    for b in bits:
+        val = (val << 1) | b
+    return val
 
 class DigitalTurboPNGDecoder:
     def __init__(self):
@@ -35,60 +124,27 @@ class DigitalTurboPNGDecoder:
         # 累積サンプリング誤差をシャットアウトするため、エンコーダと完全一致させる
         self.samples_per_symbol = max(1, int(config.SAMPLE_RATE * config.MS_SYMBOL / 1000))
         self.t_arr = np.arange(self.samples_per_symbol) / config.SAMPLE_RATE
-        self.target_phases = [2 * np.pi * f * self.t_arr for f in config.TARGET_FREQS]
+        target_phases = np.array([2 * np.pi * f * self.t_arr for f in config.TARGET_FREQS], dtype=np.float64)
+        self.target_phases_cos = np.cos(target_phases)
+        self.target_phases_sin = np.sin(target_phases)
+        self.hamming_win = np.hamming(self.samples_per_symbol)
 
         # 誤検出回避用の5msロング Sync 判定用
         self.sync_long_samples = max(10, int(config.SAMPLE_RATE * 0.005))
         self.sync_t_arr = np.arange(self.sync_long_samples) / config.SAMPLE_RATE
-        self.sync_phase_long = 2 * np.pi * config.FREQ_SYNC * self.sync_t_arr
+        sync_phase_long = 2 * np.pi * config.FREQ_SYNC * self.sync_t_arr
+        self.sync_phase_long_cos = np.cos(sync_phase_long)
+        self.sync_phase_long_sin = np.sin(sync_phase_long)
         self.sync_win = np.hamming(self.sync_long_samples)
 
     def detect_sync_long_dft(self, audio_segment):
-        if len(audio_segment) < self.sync_long_samples:
-            return 0.0
-        segment = audio_segment[:self.sync_long_samples] * self.sync_win
-        c = np.sum(segment * np.cos(self.sync_phase_long))
-        s = np.sum(segment * np.sin(self.sync_phase_long))
-        return float(c*c + s*s)
+        return fast_detect_sync_long_dft(audio_segment, self.sync_long_samples, self.sync_win, self.sync_phase_long_cos, self.sync_phase_long_sin)
 
     def detect_symbol_dft(self, audio_segment):
-        if len(audio_segment) < self.samples_per_symbol:
-            return 0, 0.0
-
-        segment = audio_segment[:self.samples_per_symbol] * np.hamming(self.samples_per_symbol)
-
-        powers = []
-        for phase in self.target_phases:
-            c = np.sum(segment * np.cos(phase))
-            s = np.sum(segment * np.sin(phase))
-            powers.append(float(c*c + s*s))
-
-        best_idx = np.argmax(powers)
-        peak_power = powers[best_idx]
-
-        other_powers = [p for i, p in enumerate(powers) if i != best_idx]
-        noise_power = np.mean(other_powers) + 1e-10
-        snr = float(peak_power / noise_power)
-
-        return best_idx, snr
+        return fast_detect_symbol_dft(audio_segment, self.samples_per_symbol, self.hamming_win, self.target_phases_cos, self.target_phases_sin)
 
     def decode_symbols_exact(self, audio_data, start_idx, num_symbols):
-        """累積誤差ゼロの正確な間隔（samples_per_symbol）でのシンボル切り出し・復号"""
-        all_bits = []
-        snr_list = []
-        bits_map = {0: [0, 0], 1: [0, 1], 2: [1, 0], 3: [1, 1]}
-
-        for s in range(num_symbols):
-            pos = start_idx + s * self.samples_per_symbol
-            segment = audio_data[pos : pos + self.samples_per_symbol]
-            if len(segment) < self.samples_per_symbol:
-                break
-            best_idx, snr = self.detect_symbol_dft(segment)
-            all_bits.extend(bits_map[best_idx])
-            snr_list.append(snr)
-
-        avg_snr = np.mean(snr_list) if snr_list else 0.0
-        return all_bits, avg_snr
+        return fast_decode_symbols_exact(audio_data, start_idx, num_symbols, self.samples_per_symbol, self.hamming_win, self.target_phases_cos, self.target_phases_sin)
 
     def calculate_snr_to_4bit(self, avg_snr):
         snr_max = getattr(config, "SNR_MAX_THRESH", 15.0)
@@ -103,28 +159,19 @@ class DigitalTurboPNGDecoder:
         return bin(score)[2:].zfill(4)
 
     def bits_to_int(self, bits):
-        val = 0
-        for b in bits:
-            val = (val << 1) | b
-        return val
+        return fast_bits_to_int(bits)
 
     def bits_to_bytearray(self, bits):
         byte_list = []
         for i in range(0, len(bits), 8):
             chunk = bits[i:i+8]
             if len(chunk) == 8:
-                byte_list.append(self.bits_to_int(chunk))
+                byte_list.append(fast_bits_to_int(chunk))
         return bytearray(byte_list)
 
     @staticmethod
     def calculate_crc16_bits(bit_list, poly=0x1021, init_val=0xFFFF):
-        crc = init_val
-        for bit in bit_list:
-            inv = ((crc >> 15) ^ bit) & 1
-            crc = (crc << 1) & 0xFFFF
-            if inv:
-                crc ^= poly
-        return crc
+        return fast_calculate_crc16_bits(bit_list, poly, init_val)
 
     def run(self, wav_path):
         self.update_cache()

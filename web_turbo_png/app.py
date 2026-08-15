@@ -20,6 +20,7 @@ for stream in (sys.stdout, sys.stderr):
         except Exception:
             pass
 
+# pyrefly: ignore [missing-import]
 from flask import Flask
 from web_turbo_png.routes.upload_routes import upload_bp
 from web_turbo_png.routes.api_routes import api_bp
