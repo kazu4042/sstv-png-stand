@@ -177,7 +177,7 @@ class TurboPNGAggregator:
                     score_1 = np.zeros(payload_bit_len, dtype=np.float64)
 
                     valid_count = 0
-                    for payload_bits_str, weight, _, _ in packets:
+                    for payload_bits_str, weight, _, _, _ in packets:
                         if len(payload_bits_str) < payload_bit_len:
                             continue
                         valid_count += 1
@@ -220,13 +220,18 @@ class TurboPNGAggregator:
                             print(f"  [ERROR] タイル({tx},{ty}) PNG復元失敗 (投票数:{valid_count}): {e}")
 
             # PNG形式で保存（JPEGではなくPNG）
-            out_path = os.path.join(output_dir, f"restored_ID_{img_id:04X}.png")
+            if user_id is not None:
+                filename = f"user_cumulative_{user_id}_ID_{img_id:04X}.png"
+            else:
+                filename = f"restored_ID_{img_id:04X}.png"
+                
+            out_path = os.path.join(output_dir, filename)
             canvas.save(out_path, format="PNG", compress_level=config.PNG_COMPRESS)
 
             # Webシステム用に static/output にもコピー保存
             static_out = os.path.join(root_dir, "web_turbo_png", "static", "output")
             os.makedirs(static_out, exist_ok=True)
-            static_path = os.path.join(static_out, f"restored_ID_{img_id:04X}.png")
+            static_path = os.path.join(static_out, filename)
             canvas.save(static_path, format="PNG", compress_level=config.PNG_COMPRESS)
 
             saved_files.append(out_path)

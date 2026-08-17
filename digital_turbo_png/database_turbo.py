@@ -111,24 +111,24 @@ class PacketDatabaseTurboPNG:
         cursor = self.conn.cursor()
         if user_id:
             cursor.execute("""
-                SELECT tile_x, tile_y, payload_length, payload_bits, snr, file_name, user_id
+                SELECT tile_x, tile_y, payload_length, payload_bits, snr, file_name, user_id, imported_at
                 FROM packets
                 WHERE image_id = ? AND user_id = ?
                 ORDER BY tile_y, tile_x
             """, (target_image_id, user_id))
         else:
             cursor.execute("""
-                SELECT tile_x, tile_y, payload_length, payload_bits, snr, file_name, user_id
+                SELECT tile_x, tile_y, payload_length, payload_bits, snr, file_name, user_id, imported_at
                 FROM packets
                 WHERE image_id = ?
                 ORDER BY tile_y, tile_x
             """, (target_image_id,))
 
-        # 構造: data[tile_y][tile_x][payload_length] = [(payload_bits, snr, file_name, user_id), ...]
+        # 構造: data[tile_y][tile_x][payload_length] = [(payload_bits, snr, file_name, user_id, imported_at), ...]
         data = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
         for row in cursor.fetchall():
-            tile_x, tile_y, payload_length, payload_bits, snr, file_name, p_user_id = row
-            data[tile_y][tile_x][payload_length].append((payload_bits, snr, file_name, p_user_id))
+            tile_x, tile_y, payload_length, payload_bits, snr, file_name, p_user_id, imported_at = row
+            data[tile_y][tile_x][payload_length].append((payload_bits, snr, file_name, p_user_id, imported_at))
 
         return data
 

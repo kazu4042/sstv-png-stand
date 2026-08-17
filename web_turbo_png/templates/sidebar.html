@@ -162,9 +162,9 @@
                     document.getElementById('sidebar').classList.add('collapsed');
                 }
                 
-                // アナリティクス画面の場合はクエリパラメータをつけてリロード
+                // アナリティクス画面の場合も、ページ内でAJAX的に処理するため遷移しない
                 if (currentPath === '/analytics') {
-                    window.location.href = `/analytics?image_id=${imageId}`;
+                    // 何もしない (analytics.html 内のイベントリスナーで処理される)
                 } 
                 // result 画面の場合は、result.html の JS が動的に処理するので
                 // ここではページ遷移は行わない (result.html 側に任せる)

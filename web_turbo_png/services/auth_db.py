@@ -51,6 +51,11 @@ class AuthDB:
             return {"id": row[0], "email": row[1], "created_at": row[2]}
         return None
 
+    def get_all_users(self):
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT id, email, created_at FROM users ORDER BY created_at DESC")
+        return [{"id": row[0], "email": row[1], "created_at": row[2]} for row in cursor.fetchall()]
+
     def close(self):
         self.conn.close()
 

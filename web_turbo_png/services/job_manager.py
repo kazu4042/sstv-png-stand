@@ -28,7 +28,8 @@ def update_job(job_id, progress=None, status=None, error=None, result_data=None)
             "progress": 0,
             "status": "",
             "error": "",
-            "result_data": {}
+            "result_data": {},
+            "updated_at": 0.0
         }
     
     if progress is not None:

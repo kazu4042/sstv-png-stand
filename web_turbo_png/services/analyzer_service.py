@@ -71,7 +71,7 @@ class TurboPNGAnalyzerService:
 
                     packets = len_dict[best_plen]
                     total_files = len(packets)
-                    total_weight = sum(weight for _, weight, _, _ in packets)
+                    total_weight = sum(weight for _, weight, _, _, _ in packets)
                     avg_snr = (total_weight / total_files) - 1.0 if total_files > 0 else 0
 
                     if avg_snr <= poor_threshold:
@@ -98,6 +98,15 @@ class TurboPNGAnalyzerService:
         tiles_data = self._get_tiles_data(target_id_int)
         if not tiles_data:
             return reliability_map
+
+        # ユーザー情報を取得してIDからメールアドレスに変換する辞書を作成
+        from web_turbo_png.services.auth_db import get_auth_db
+        try:
+            db = get_auth_db()
+            users = db.get_all_users()
+            user_dict = {u['id']: u['email'] for u in users}
+        except Exception:
+            user_dict = {}
 
         tile_count_x = config.TILE_COUNT_X
         tile_count_y = config.TILE_COUNT_Y
@@ -126,15 +135,15 @@ class TurboPNGAnalyzerService:
                 payload_len = best_plen * 8
 
                 total_files = len(packets)
-                total_weight_sum = sum(weight for _, weight, _, _ in packets)
+                total_weight_sum = sum(weight for _, weight, _, _, _ in packets)
 
                 score_0 = np.zeros(payload_len, dtype=float)
                 score_1 = np.zeros(payload_len, dtype=float)
                 
                 is_contributed = False
 
-                for payload_bits_str, weight, file_name, p_user_id in packets:
-                    if current_user_id and p_user_id == current_user_id:
+                for payload_bits_str, weight, file_name, p_user_id, imported_at in packets:
+                    if current_user_id and str(p_user_id) == str(current_user_id):
                         is_contributed = True
                         
                     if len(payload_bits_str) < payload_len:
@@ -156,11 +165,14 @@ class TurboPNGAnalyzerService:
 
                 sources = []
                 for idx_pkt, pkt_info in enumerate(packets):
+                    payload_bits_str, weight, file_name, p_user_id, imported_at = pkt_info
+                    sender_name = user_dict.get(p_user_id, f"ユーザー #{p_user_id}" if p_user_id else "匿名")
+                    
                     sources.append({
-                        "sender": "Local Demo",
-                        "location": "Local",
-                        "received_at": "Now",
-                        "file_name": f"local_data_{idx_pkt}"
+                        "sender": sender_name,
+                        "location": "未設定",
+                        "received_at": imported_at,
+                        "file_name": file_name
                     })
 
                 reliability_map.append({
@@ -169,7 +181,7 @@ class TurboPNGAnalyzerService:
                     "score": round(avg_confidence, 1),
                     "avg_snr": round(avg_snr, 1),
                     "samples": total_files,
-                    "total_weight": int(total_weight_sum),
+                    "total_weight": total_weight_sum,
                     "sources": sources,
                     "is_contributed": is_contributed
                 })

@@ -132,6 +132,10 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
         aggregator = TurboPNGAggregator(log_dir=log_dir_path)
         # 全員のパケットで多数決画像を生成（user_idフィルタなし）
         aggregator.process_and_save_images(min_tile_ratio=0.0, user_id=None)
+        if user_id:
+            # そのユーザー単体の累積画像も生成
+            aggregator.process_and_save_images(min_tile_ratio=0.0, user_id=user_id)
+            
         update_job(job_id, progress=70, status="復元画像を生成中...")
 
         # 復元画像を output ディレクトリに保存
@@ -192,7 +196,7 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                         payload_bit_len = best_plen * 8
                         score_0 = np.zeros(payload_bit_len, dtype=float)
                         score_1 = np.zeros(payload_bit_len, dtype=float)
-                        for p_bits_str, weight, _, _ in db_packets:
+                        for p_bits_str, weight, _, _, _ in db_packets:
                             if len(p_bits_str) < payload_bit_len:
                                 continue
                             for i, bit_char in enumerate(p_bits_str[:payload_bit_len]):
@@ -227,11 +231,11 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                 except Exception:
                     pass
 
-            user_img_path = os.path.join(output_dir, f"user_ID_{img_id_hex}.png")
+            user_img_path = os.path.join(output_dir, f"user_{user_id}_ID_{img_id_hex}.png")
             user_image_buffer.save(user_img_path, format="PNG")
 
             if img_id_hex == current_image_id:
-                user_output_url = f"/static/output/user_ID_{img_id_hex}.png"
+                user_output_url = f"/static/output/user_{user_id}_ID_{img_id_hex}.png"
                 main_score = round((matched_packets / total_required_packets) * 100, 1)
                 if main_score > 100.0:
                     main_score = 100.0
@@ -290,9 +294,11 @@ def upload_file():
         return jsonify({'success': False, 'error': "ファイルが見つかりません"}), 400
 
     file = request.files['file']
-    if file.filename == '':
+    if file.filename == '' or file.filename is None:
         update_job(job_id, progress=100, status="エラー", error="ファイルが選択されていません")
         return jsonify({'success': False, 'error': "ファイルが選択されていません"}), 400
+
+    filename = file.filename
 
     if file and allowed_file(file.filename):
         try:
@@ -300,16 +306,16 @@ def upload_file():
 
             os.makedirs(current_app.config['UPLOAD_FOLDER'], exist_ok=True)
             from werkzeug.utils import secure_filename
-            save_path = os.path.join(current_app.config['UPLOAD_FOLDER'], secure_filename(file.filename))
+            save_path = os.path.join(current_app.config['UPLOAD_FOLDER'], secure_filename(filename))
             file.save(save_path)
 
             import threading
-            app = current_app._get_current_object()
+            app = current_app._get_current_object()  # pyrefly: ignore
             
             # 古いジョブやファイルのクリーンアップ処理（バックグラウンドではなくここで軽く実行）
             cleanup_old_jobs(max_age_seconds=86400)
             
-            thread = threading.Thread(target=process_upload, args=(save_path, secure_filename(file.filename), job_id, app, user_id))
+            thread = threading.Thread(target=process_upload, args=(save_path, secure_filename(filename), job_id, app, user_id))
             thread.start()
 
             return jsonify({'success': True, 'message': 'Processing started in background', 'job_id': job_id})

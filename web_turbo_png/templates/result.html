@@ -60,7 +60,7 @@
         .image-card p { color: #e2e8f0; margin-top: 0; margin-bottom: 15px; font-weight: bold; font-size: 1rem; }
         .badge-user { color: #facc15; }
         .badge-all { color: #4ade80; }
-        .restored-img { max-width: 100%; height: auto; border-radius: 8px; background: #000; display: block; margin: 0 auto; min-width: 200px; min-height: 200px; }
+        .restored-img { max-width: 100%; height: auto; border-radius: 8px; background: #000; display: block; margin: 0 auto; min-width: 200px; min-height: 200px; transition: opacity 0.3s ease-in-out; }
 
         .missing-box { background: white; padding: 25px; border-radius: 12px; border: 1px solid #e2e8f0; margin-top: 30px; box-shadow: 0 2px 6px rgba(0,0,0,0.02); }
         .missing-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; margin-bottom: 15px; }
@@ -210,7 +210,19 @@
                 <div class="image-section">
                     <div class="image-card">
                         <p><span class="badge-user"><i data-lucide="camera" class="icon-inline"></i> 1. あなたの音声だけ</span> の抽出パーツ</p>
-                        <img id="user-img" src="/static/user_slices_placeholder.png" class="restored-img" alt="単体復元画像">
+                        
+                        <div style="display: flex; justify-content: center; gap: 8px; margin-bottom: 12px;">
+                            <button id="view-mode-session" style="font-size: 0.75rem; padding: 4px 12px; border-radius: 12px; font-weight: bold; cursor: pointer; border: none; background: #008d54; color: white;">今回の送信分</button>
+                            <button id="view-mode-cumulative" style="font-size: 0.75rem; padding: 4px 12px; border-radius: 12px; font-weight: bold; cursor: pointer; border: 1px solid #cbd5e1; background: #f1f5f9; color: #475569;">今までの累積</button>
+                        </div>
+                        
+                        <div id="user-img-container" style="position: relative;">
+                            <img id="user-img" src="/static/user_slices_placeholder.png" class="restored-img" alt="単体復元画像">
+                            <div id="user-img-not-posted" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; align-items: center; justify-content: center; background: rgba(241, 245, 249, 0.85); border-radius: 12px; color: #475569; font-weight: bold; flex-direction: column; gap: 10px; z-index: 10;">
+                                <i data-lucide="image-off" style="width: 40px; height: 40px;"></i>
+                                <span style="font-size: 1.05rem;">まだ投稿していません</span>
+                            </div>
+                        </div>
                         <button id="download-user-img-btn" class="btn-download-img">
                             <i data-lucide="download" class="icon-inline"></i> 単体画像を保存
                         </button>
@@ -361,6 +373,70 @@
                 this.style.color = '#94a3b8';
             };
 
+            let userImgMode = 'session'; // 'session' or 'cumulative'
+            const viewModeSessionBtn = document.getElementById('view-mode-session');
+            const viewModeCumulativeBtn = document.getElementById('view-mode-cumulative');
+            
+            function updateUserImageSource() {
+                const currentUserId = "{{ session.get('user_id', '') }}";
+                const notPostedOverlay = document.getElementById('user-img-not-posted');
+                
+                // 一瞬画像を透明にして切り替わりを演出
+                userImg.style.opacity = '0';
+                
+                setTimeout(() => {
+                    if (notPostedOverlay) {
+                        notPostedOverlay.style.display = 'none';
+                    }
+                    
+                    userImg.onerror = function() {
+                        this.onerror = null;
+                        this.src = "/static/user_slices_placeholder.png";
+                        if (notPostedOverlay) {
+                            notPostedOverlay.style.display = 'flex';
+                            this.style.opacity = '0.3';
+                        }
+                    };
+
+                    userImg.onload = function() {
+                        this.style.opacity = '1';
+                    };
+
+                    if (userImgMode === 'session') {
+                        userImg.src = `/static/output/user_${currentUserId}_ID_${activeImageId}.png?t=${timestamp}`;
+                        if (viewModeSessionBtn && viewModeCumulativeBtn) {
+                            viewModeSessionBtn.style.background = '#008d54';
+                            viewModeSessionBtn.style.color = 'white';
+                            viewModeSessionBtn.style.border = 'none';
+                            viewModeCumulativeBtn.style.background = '#f1f5f9';
+                            viewModeCumulativeBtn.style.color = '#475569';
+                            viewModeCumulativeBtn.style.border = '1px solid #cbd5e1';
+                        }
+                    } else {
+                        userImg.src = `/static/output/user_cumulative_${currentUserId}_ID_${activeImageId}.png?t=${timestamp}`;
+                        if (viewModeSessionBtn && viewModeCumulativeBtn) {
+                            viewModeCumulativeBtn.style.background = '#008d54';
+                            viewModeCumulativeBtn.style.color = 'white';
+                            viewModeCumulativeBtn.style.border = 'none';
+                            viewModeSessionBtn.style.background = '#f1f5f9';
+                            viewModeSessionBtn.style.color = '#475569';
+                            viewModeSessionBtn.style.border = '1px solid #cbd5e1';
+                        }
+                    }
+                }, 150);
+            }
+
+            if (viewModeSessionBtn && viewModeCumulativeBtn) {
+                viewModeSessionBtn.addEventListener('click', () => {
+                    userImgMode = 'session';
+                    updateUserImageSource();
+                });
+                viewModeCumulativeBtn.addEventListener('click', () => {
+                    userImgMode = 'cumulative';
+                    updateUserImageSource();
+                });
+            }
+
             // <i data-lucide="refresh-cw" class="icon-inline"></i> 画像IDの切り替えとビューの更新
             function updateViewForImageId(imageId) {
                 if (!imageId) return;
@@ -376,7 +452,9 @@
 
                 // 画像ソース・リンクの更新
                 targetImg.src = `/static/output/restored_ID_${imageId}.png?t=${timestamp}`;
-                userImg.src = `/static/output/user_ID_${imageId}.png?t=${timestamp}`;
+                
+                // ユーザー単体画像の更新 (トグル状態を引き継ぐ)
+                updateUserImageSource();
 
                 // スコアの更新
                 if (imageId === currentUploadedId) {

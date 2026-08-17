@@ -1,5 +1,9 @@
 import sys
 import os
+from dotenv import load_dotenv
+
+# パスワードなどを書いた .env ファイルを読み込む
+load_dotenv()
 
 # ====================================================================
 # プロジェクトルートを検索パスに追加
@@ -16,7 +20,7 @@ if PROJECT_ROOT not in sys.path:
 for stream in (sys.stdout, sys.stderr):
     if hasattr(stream, 'reconfigure'):
         try:
-            stream.reconfigure(encoding='utf-8', errors='replace')
+            stream.reconfigure(encoding='utf-8', errors='replace')  # pyrefly: ignore
         except Exception:
             pass
 
@@ -38,16 +42,16 @@ app = Flask(__name__,
 if os.environ.get('VERCEL') == '1':
     app.config['UPLOAD_FOLDER'] = os.path.join(tempfile.gettempdir(), 'uploads')
 else:
-    app.config['UPLOAD_FOLDER'] = os.path.join(app.static_folder, 'uploads')
+    app.config['UPLOAD_FOLDER'] = os.path.join(app.static_folder or '', 'uploads')
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', os.urandom(24))
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB limit
 
-# Basic Auth 設定
-BASIC_AUTH_USERNAME = os.environ.get('BASIC_AUTH_USERNAME', 'Nagasaki')
-BASIC_AUTH_PASSWORD = os.environ.get('BASIC_AUTH_PASSWORD', '123456789')
+# Basic Auth 設定 (実際のパスワードは .env ファイルから読み込みます)
+BASIC_AUTH_USERNAME = os.environ.get('BASIC_AUTH_USERNAME', 'admin')
+BASIC_AUTH_PASSWORD = os.environ.get('BASIC_AUTH_PASSWORD', 'password123')
 
 def check_basic_auth(username, password):
     return username == BASIC_AUTH_USERNAME and password == BASIC_AUTH_PASSWORD

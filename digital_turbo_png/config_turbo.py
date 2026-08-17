@@ -44,7 +44,7 @@ TEXT_LOG_DIR = "data/logs"
 TEXT_LOG_PREFIX = "turbo_png_bitstream"
 IMAGE_OUT_DIR = "data/images"
 IMAGE_OUT_NAME = "decoded_result_turbo.png"
-INPUT_IMAGE = "data/input/test.jpg"
+INPUT_IMAGE = "data/input/test2.jpeg"
 OUTPUT_WAV = "data/audio/turbo_png_256_256.wav"
 
 # --- テスト用ノイズ設定 ---

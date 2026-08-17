@@ -139,9 +139,53 @@
             max-height: 180px;
             overflow-y: auto;
         }
-        /* スクロールバー装飾 */
         .source-list::-webkit-scrollbar { width: 6px; }
         .source-list::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+
+        /* トグルスイッチのスタイル */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-switch .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #cbd5e1;
+            transition: .3s;
+        }
+        .toggle-switch .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s;
+        }
+        .toggle-switch input:checked + .slider {
+            background-color: #10b981; /* Tailwind emerald-500 */
+        }
+        .toggle-switch input:checked + .slider:before {
+            transform: translateX(20px);
+        }
+        .toggle-switch .slider.round {
+            border-radius: 24px;
+        }
+        .toggle-switch .slider.round:before {
+            border-radius: 50%;
+        }
 
         .source-item {
             background: #ffffff;
@@ -267,22 +311,29 @@
             <h1>
                 
                 <i data-lucide="activity" class="icon-inline"></i> 精密パケット・ズームスコープ (SNR Weighted)
-                <select id="image-selector" class="badge-id" style="cursor: pointer; font-size: 1rem;">
-                    <option value="">Image ID: ----</option>
-                </select>
+                <span id="current-image-label" class="badge-id" style="font-size: 1rem;">Image ID: ----</span>
             </h1>
             <a href="/result" id="back-link" class="btn-back"><i data-lucide="chevron-left" class="icon-inline"></i> 復元結果に戻る</a>
         </div>
 
         <div class="dashboard">
             <div class="main-panel">
-                <div style="text-align: left; font-size: 0.85rem; color: #94a3b8; margin-bottom: 10px; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;">
-                    <div>
-                        <i data-lucide="lightbulb" class="icon-inline"></i> <strong>画像の上にマウスを移動させる</strong>と、十字線の中心にあるパケットが拡大され、パケットの区切り線（グリッド）が表示されます。
+                <div style="text-align: left; font-size: 0.85rem; color: #94a3b8; margin-bottom: 10px; display: flex; flex-direction: column; gap: 10px;">
+                    <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;">
+                        <div>
+                            <i data-lucide="lightbulb" class="icon-inline"></i> <strong>画像の上にマウスを移動させる</strong>と、十字線の中心にあるパケットが拡大され、パケットの区切り線（グリッド）が表示されます。
+                        </div>
+                        <button id="info-btn" style="background: #e6f3ec; border: 1px solid #34d399; border-radius: 20px; padding: 4px 12px; cursor: pointer; color: #008d54; font-weight: bold; font-size: 0.8rem; display: flex; align-items: center; gap: 4px; flex-shrink: 0; transition: all 0.2s;" onmouseover="this.style.background='#d1fae5'" onmouseout="this.style.background='#e6f3ec'">
+                            <i data-lucide="info" class="icon-inline" style="width: 16px; height: 16px;"></i> 貢献度の見方
+                        </button>
                     </div>
-                    <button id="info-btn" style="background: #e6f3ec; border: 1px solid #34d399; border-radius: 20px; padding: 4px 12px; cursor: pointer; color: #008d54; font-weight: bold; font-size: 0.8rem; display: flex; align-items: center; gap: 4px; flex-shrink: 0; transition: all 0.2s;" onmouseover="this.style.background='#d1fae5'" onmouseout="this.style.background='#e6f3ec'">
-                        <i data-lucide="info" class="icon-inline" style="width: 16px; height: 16px;"></i> 貢献度の見方
-                    </button>
+                    <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px;">
+                        <span style="font-size: 0.8rem; color: #475569; font-weight: bold; user-select: none;">貢献度の影</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="toggle-green-cover" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
                 </div>
                 
                 <div class="image-container" id="stage">
@@ -359,45 +410,79 @@
             const canvas = document.getElementById('pointer-layer');
             const ctx = canvas.getContext('2d');
 
-            const imageSelector = document.getElementById('image-selector');
+            const currentImageLabel = document.getElementById('current-image-label');
 
             // 🔗 URLから image_id を取得
             const urlParams = new URLSearchParams(window.location.search);
             let currentImageId = urlParams.get('image_id');
 
-            // <i data-lucide="radio" class="icon-inline"></i> APIコール（利用可能な画像IDのリストを取得してセレクトボックスを構築）
-            fetch('/api/images')
-                .then(res => res.json())
-                .then(data => {
-                    if (data.status === 'success' && data.image_ids.length > 0) {
-                        imageSelector.innerHTML = ''; // クリア
-                        data.image_ids.forEach(id => {
-                            const option = document.createElement('option');
-                            option.value = id;
-                            option.textContent = `Image ID: 0x${id}`;
-                            imageSelector.appendChild(option);
-                        });
-                        
-                        // URLにパラメータがなければ最初のIDを選択
-                        if (!currentImageId) {
-                            currentImageId = data.image_ids[0];
-                            // 画面の再読み込みを避けるため、後続の処理に進む
-                            imageSelector.value = currentImageId;
-                            loadImageAndData(currentImageId);
-                        } else {
-                            imageSelector.value = currentImageId;
-                            loadImageAndData(currentImageId);
-                        }
+            function switchToImage(newImageId, skipPushState = false) {
+                if (!newImageId) return;
+                if (newImageId === currentImageId && img.src !== "") return;
+                currentImageId = newImageId;
+                
+                if (currentImageLabel) {
+                    currentImageLabel.textContent = `Image ID: 0x${newImageId}`;
+                }
+                
+                // URLをリロードせずに更新
+                if (!skipPushState) {
+                    history.pushState(null, '', `?image_id=${newImageId}`);
+                }
+                
+                // フェードアウト効果
+                img.style.transition = 'opacity 0.3s ease';
+                img.style.opacity = '0.3';
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // サイドバーのハイライト更新
+                document.querySelectorAll('.session-img-item').forEach(el => {
+                    if (el.dataset.id === newImageId) {
+                        el.classList.add('active');
                     } else {
-                        imageSelector.innerHTML = '<option value="">画像なし</option>';
+                        el.classList.remove('active');
                     }
-                })
-                .catch(err => console.error("画像リスト取得エラー:", err));
+                });
+                
+                loadImageAndData(newImageId);
+            }
 
-            // セレクトボックスが変更されたらページをリロードする
-            imageSelector.addEventListener('change', function(e) {
-                if (e.target.value) {
-                    window.location.search = `?image_id=${e.target.value}`;
+            // 初期ロード処理
+            if (!currentImageId) {
+                const firstItem = document.querySelector('.session-img-item');
+                if (firstItem) {
+                    currentImageId = firstItem.dataset.id;
+                }
+            }
+            if (currentImageId) {
+                // 初回はフェードをスキップして直接読み込むため currentImageId を一時的にクリアして呼ぶ
+                const initialId = currentImageId;
+                currentImageId = null; 
+                switchToImage(initialId, true);
+            }
+
+            // 画像の読み込み完了時にフェードイン
+            img.addEventListener('load', function() {
+                img.style.opacity = '1';
+            });
+
+            // サイドバーの画像項目クリック時もリロードせずに同期
+            document.querySelectorAll('.session-img-item').forEach(item => {
+                item.addEventListener('click', function(e) {
+                    const newImageId = this.dataset.id;
+                    if (newImageId && newImageId !== currentImageId) {
+                        e.preventDefault();
+                        switchToImage(newImageId);
+                    }
+                });
+            });
+            
+            // ブラウザの戻る・進む操作に対応
+            window.addEventListener('popstate', function() {
+                const params = new URLSearchParams(window.location.search);
+                const poppedId = params.get('image_id');
+                if (poppedId && poppedId !== currentImageId) {
+                    switchToImage(poppedId, true);
                 }
             });
 
@@ -423,6 +508,9 @@
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 if (!packetDatabase || packetDatabase.length === 0) return;
                 
+                const showGreenCover = document.getElementById('toggle-green-cover');
+                if (showGreenCover && !showGreenCover.checked) return;
+                
                 ctx.fillStyle = 'rgba(52, 211, 153, 0.35)'; // 少し緑がかった薄い影
                 packetDatabase.forEach(pkt => {
                     if (pkt.is_contributed) {
@@ -433,6 +521,12 @@
                         ctx.fillRect(x, y, w, h);
                     }
                 });
+            }
+
+            // チェックボックスの変更イベントを監視
+            const toggleGreenCover = document.getElementById('toggle-green-cover');
+            if (toggleGreenCover) {
+                toggleGreenCover.addEventListener('change', drawStaticOverlay);
             }
 
             const nativeW = img.naturalWidth || parseInt("{{ image_width }}") || 256;
@@ -449,6 +543,11 @@
                 canvas.height = img.clientHeight;
                 displayToNativeScaleX = canvas.width / (img.naturalWidth || parseInt("{{ image_width }}") || 256);
                 displayToNativeScaleY = canvas.height / (img.naturalHeight || parseInt("{{ image_height }}") || 256);
+                
+                // キャンバスサイズ変更で内容がクリアされるため再描画
+                if (packetDatabase && packetDatabase.length > 0) {
+                    drawStaticOverlay();
+                }
             });
         
 
@@ -658,6 +757,9 @@
 
                 sourceListEl.appendChild(li);
             });
+            
+            // 動的に追加されたアイコンを再描画する
+            lucide.createIcons();
         }
         
         // サイドバーのトグル
