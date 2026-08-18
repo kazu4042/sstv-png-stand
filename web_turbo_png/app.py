@@ -45,9 +45,17 @@ else:
     app.config['UPLOAD_FOLDER'] = os.path.join(app.static_folder or '', 'uploads')
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+from datetime import timedelta
+from werkzeug.middleware.proxy_fix import ProxyFix
+from web_turbo_png.services.auth_db import get_auth_db
+
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'sstv_turbo_png_secure_persistent_key_2026')
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB limit
+
+# ProxyFix を適用して Nginx からの HTTPS ヘッダーを正しく解釈
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 # Basic Auth 設定 (実際のパスワードは .env ファイルから読み込みます)
 BASIC_AUTH_USERNAME = os.environ.get('BASIC_AUTH_USERNAME', 'admin')
@@ -63,9 +71,15 @@ def authenticate():
     )
 
 @app.before_request
-def require_basic_auth():
-    # 開発時にBasic Authをオフにしたい場合は環境変数でスキップできるようにする
+def require_basic_auth_and_auto_login():
+    from flask import session
+
+    # 開発時にBasic Authをオフにしたい場合
     if os.environ.get('DISABLE_BASIC_AUTH') == '1':
+        if 'user_id' not in session:
+            session.permanent = True
+            session['user_id'] = 1
+            session['email'] = 'developer@local'
         return
         
     # 静的ファイルへのアクセスは除外
@@ -75,6 +89,20 @@ def require_basic_auth():
     auth = request.authorization
     if not auth or not check_basic_auth(auth.username, auth.password):
         return authenticate()
+
+    # Basic認証を通過したユーザーは自動的にセッションログイン状態にする
+    if 'user_id' not in session:
+        session.permanent = True
+        try:
+            db = get_auth_db()
+            uid = db.verify_user(auth.username, auth.password)
+            if not uid:
+                uid = db.create_user(auth.username, auth.password)
+            session['user_id'] = uid or 1
+            session['email'] = auth.username
+        except Exception as e:
+            session['user_id'] = 1
+            session['email'] = auth.username
 
 
 # ====================================================================

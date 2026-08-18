@@ -82,13 +82,18 @@ def ranking():
 def result():
     """デコード結果画面を表示"""
     job_id = request.args.get('job_id')
+    result_data = {}
+    
     if job_id:
         from web_turbo_png.services.job_manager import get_job
         job = get_job(job_id)
-        if job:
-            session['result_data'] = job.get("result_data", {})
+        if job and "result_data" in job:
+            result_data = job.get("result_data", {})
+            session['result_data'] = result_data
     
-    result_data = session.get('result_data', {})
+    if not result_data:
+        result_data = session.get('result_data', {})
+        
     return render_template(
         'result.html',
         show_heatmap=getattr(config, 'ENABLE_HEATMAP', False),
