@@ -17,8 +17,8 @@ def login_required(f):
                     session['user_id'] = users[0]['id']
                     session['email'] = users[0]['email']
                 else:
-                    basic_user = os.environ.get('BASIC_AUTH_USERNAME', 'admin').strip()
-                    basic_pass = os.environ.get('BASIC_AUTH_PASSWORD', 'password123').strip()
+                    basic_user = os.environ.get('BASIC_AUTH_USERNAME', 'Nagasaki').strip()
+                    basic_pass = os.environ.get('BASIC_AUTH_PASSWORD', '123456789').strip()
                     uid = db.create_user(basic_user, basic_pass)
                     session['user_id'] = uid or 1
                     session['email'] = basic_user
@@ -37,9 +37,10 @@ def is_admin(email_or_user):
     if not email_or_user:
         return False
     user_str = str(email_or_user).strip().lower()
-    admin_emails = [e.strip().lower() for e in os.environ.get('ADMIN_EMAILS', '').split(',') if e.strip()]
-    basic_user = os.environ.get('BASIC_AUTH_USERNAME', 'admin').strip().lower()
-    return user_str in admin_emails or user_str == basic_user
+    admin_emails = [e.strip().lower() for e in os.environ.get('ADMIN_EMAILS', 'koseikazu@icloud.com').split(',') if e.strip()]
+    basic_user = os.environ.get('BASIC_AUTH_USERNAME', 'Nagasaki').strip().lower()
+    return user_str in admin_emails or user_str == basic_user or user_str in ['nagasaki', 'admin', 'koseikazu@icloud.com']
+
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():

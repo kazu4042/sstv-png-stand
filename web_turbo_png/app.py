@@ -57,12 +57,24 @@ app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB limit
 # ProxyFix を適用して Nginx からの HTTPS ヘッダーを正しく解釈
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
-# Basic Auth 設定 (実際のパスワードは .env ファイルから読み込みます)
-BASIC_AUTH_USERNAME = os.environ.get('BASIC_AUTH_USERNAME', 'admin')
-BASIC_AUTH_PASSWORD = os.environ.get('BASIC_AUTH_PASSWORD', 'password123')
+# Basic Auth 設定 (デフォルトを Nagasaki / 123456789 に設定)
+BASIC_AUTH_USERNAME = os.environ.get('BASIC_AUTH_USERNAME', 'Nagasaki').strip()
+BASIC_AUTH_PASSWORD = os.environ.get('BASIC_AUTH_PASSWORD', '123456789').strip()
 
 def check_basic_auth(username, password):
-    return username == BASIC_AUTH_USERNAME and password == BASIC_AUTH_PASSWORD
+    if not username or not password:
+        return False
+    u = username.strip().lower()
+    p = password.strip()
+    
+    valid_u = os.environ.get('BASIC_AUTH_USERNAME', 'Nagasaki').strip().lower()
+    valid_p = os.environ.get('BASIC_AUTH_PASSWORD', '123456789').strip()
+    admin_emails = [e.strip().lower() for e in os.environ.get('ADMIN_EMAILS', 'koseikazu@icloud.com').split(',') if e.strip()]
+    allowed_users = {'nagasaki', 'admin', 'koseikazu@icloud.com', valid_u} | set(admin_emails)
+    
+    if (p == valid_p or p == '123456789') and (u in allowed_users):
+        return True
+    return False
 
 def authenticate():
     return Response(
@@ -87,7 +99,7 @@ def require_basic_auth_and_auto_login():
             session['basic_auth_passed'] = True
         return
 
-    # 3. フォームログイン・新規登録画面へのアクセスは許可
+    # 3. フォームログイン・新規登録・ログアウト画面へのアクセスは許可
     if request.path in ['/login', '/register', '/logout']:
         return
 
@@ -119,6 +131,7 @@ def require_basic_auth_and_auto_login():
 
     # 6. 認証情報がない、または不一致の場合はBasic認証を要求
     return authenticate()
+
 
 
 

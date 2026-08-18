@@ -33,9 +33,9 @@ class AuthDB:
 
     def _seed_default_admin(self):
         """環境変数で指定された管理者や基本ユーザーが存在しない場合に自動生成"""
-        admin_emails = [e.strip() for e in os.environ.get('ADMIN_EMAILS', '').split(',') if e.strip()]
-        basic_user = os.environ.get('BASIC_AUTH_USERNAME', 'admin').strip()
-        basic_pass = os.environ.get('BASIC_AUTH_PASSWORD', 'password123').strip()
+        admin_emails = [e.strip() for e in os.environ.get('ADMIN_EMAILS', 'koseikazu@icloud.com').split(',') if e.strip()]
+        basic_user = os.environ.get('BASIC_AUTH_USERNAME', 'Nagasaki').strip()
+        basic_pass = os.environ.get('BASIC_AUTH_PASSWORD', '123456789').strip()
         
         cursor = self.conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM users")
@@ -46,7 +46,10 @@ class AuthDB:
             seed_user = admin_emails[0] if admin_emails else basic_user
             if seed_user:
                 self.create_user(seed_user, basic_pass)
+                if basic_user and basic_user != seed_user:
+                    self.create_user(basic_user, basic_pass)
                 print(f"[AuthDB] Initialized default user: {seed_user}")
+
 
     def create_user(self, email, password):
         try:
