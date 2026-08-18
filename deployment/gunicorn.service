@@ -1,0 +1,27 @@
+[Unit]
+Description=Gunicorn instance to serve SSTV Aggregator
+After=network.target
+
+[Service]
+# 実行ユーザーとグループ（通常は www-data または作業ユーザー）
+User=www-data
+Group=www-data
+
+# プロジェクトのルートディレクトリに書き換えてください（例: /var/www/sstv-png-stand）
+WorkingDirectory=/var/www/sstv-png-stand
+Environment="PATH=/var/www/sstv-png-stand/.venv/bin"
+
+# 仮想環境のGunicornへのパス
+ExecStart=/var/www/sstv-png-stand/.venv/bin/gunicorn \
+    --workers 2 \
+    --threads 4 \
+    --timeout 180 \
+    --bind unix:sstv.sock \
+    -m 007 \
+    "web_turbo_png.app:app"
+
+# エラー発生時の自動再起動
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

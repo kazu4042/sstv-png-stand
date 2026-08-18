@@ -167,12 +167,47 @@ class TurboPNGAggregator:
                     if not len_dict:
                         continue
 
+                    # ===== Fast Path: 個別パケットの直接検証 =====
+                    # すべての payload_length におけるパケットを試し、PNGとしてデコードできるか確認する
+                    valid_tile_img = None
+                    total_packets = 0
+                    for plen, pkt_list in len_dict.items():
+                        total_packets += len(pkt_list)
+                        for payload_bits_str, weight, _, _, _ in pkt_list:
+                            try:
+                                p_bytes = self.bits_to_bytearray(payload_bits_str)
+                                temp_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
+                                valid_tile_img = temp_img
+                                break
+                            except Exception:
+                                pass
+                        if valid_tile_img:
+                            break
+                    
+                    if valid_tile_img:
+                        # 個別のパケットが完璧だった場合、多数決はスキップ
+                        tw, th = valid_tile_img.size
+                        paste_x = tx * tw
+                        paste_y = ty * th
+                        if paste_x + tw <= config.WIDTH and paste_y + th <= config.HEIGHT:
+                            canvas.paste(valid_tile_img, (paste_x, paste_y))
+                            success_tiles += 1
+                        else:
+                            # キャンバスに収まらない場合はクロップして貼り付け
+                            valid_tile_img = valid_tile_img.crop((0, 0,
+                                min(tw, config.WIDTH - paste_x),
+                                min(th, config.HEIGHT - paste_y)))
+                            canvas.paste(valid_tile_img, (paste_x, paste_y))
+                            success_tiles += 1
+                        continue
+
+                    # ===== Fallback: SNR重み付き多数決投票 =====
+                    # どの個別パケットも単独ではデコードできなかった場合
                     # SNR重みの合計が最大のpayload_lengthを選択
                     best_plen = max(len_dict.keys(), key=lambda k: sum(p[1] for p in len_dict[k]))
                     packets = len_dict[best_plen]
                     payload_bit_len = best_plen * 8
 
-                    # ===== SNR重み付き多数決投票 =====
                     score_0 = np.zeros(payload_bit_len, dtype=np.float64)
                     score_1 = np.zeros(payload_bit_len, dtype=np.float64)
 
@@ -188,6 +223,7 @@ class TurboPNGAggregator:
                                 score_0[i] += weight  # '0' を確実に加算
 
                     if valid_count == 0:
+                        error_tiles += 1
                         continue
 
                     # 各ビット: 得票数が多い方を採用
@@ -217,7 +253,7 @@ class TurboPNGAggregator:
                     except Exception as e:
                         error_tiles += 1
                         if error_tiles <= 5:
-                            print(f"  [ERROR] タイル({tx},{ty}) PNG復元失敗 (投票数:{valid_count}): {e}")
+                            print(f"  [ERROR] タイル({tx},{ty}) PNG復元失敗 (受信パケット総数:{total_packets}, 多数決投票数:{valid_count}): {e}")
 
             # PNG形式で保存（JPEGではなくPNG）
             if user_id is not None:

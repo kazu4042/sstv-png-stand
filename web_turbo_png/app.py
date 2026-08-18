@@ -1,10 +1,6 @@
 import sys
 import os
 from dotenv import load_dotenv
-
-# パスワードなどを書いた .env ファイルを読み込む
-load_dotenv()
-
 # ====================================================================
 # プロジェクトルートを検索パスに追加
 # ====================================================================
@@ -15,6 +11,10 @@ if CURRENT_DIR not in sys.path:
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 # ====================================================================
+
+# パスワードなどを書いた .env ファイルを確実に読み込む
+load_dotenv(os.path.join(PROJECT_ROOT, '.env'))
+load_dotenv(os.path.join(CURRENT_DIR, '.env'))
 
 # Windowsでの絵文字printエラーやログ出力エラーを回避
 for stream in (sys.stdout, sys.stderr):

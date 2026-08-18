@@ -415,74 +415,115 @@
             };
         });
 
-        // フォーム送信時のプログレス処理
+        // フォーム送信時のプログレス処理（アップロード進捗 ＋ サーバー解析進捗）
         const uploadForm = document.getElementById('upload-form');
         const progressWrapper = document.getElementById('progress-wrapper');
         const progressFill = document.getElementById('progress-fill');
         const progressText = document.getElementById('progress-text');
 
-        uploadForm.addEventListener('submit', async function(e) {
+        uploadForm.addEventListener('submit', function(e) {
             e.preventDefault();
 
             btnSubmit.disabled = true;
             btnSubmit.innerHTML = '<i data-lucide="hourglass" class="w-5 h-5"></i> 処理中...';
             lucide.createIcons();
             progressWrapper.classList.add('active');
+            progressFill.style.width = '0%';
+            progressText.innerText = 'ファイルをサーバーに送信中... 0%';
 
             const formData = new FormData(uploadForm);
-            try {
-                const response = await fetch('/api/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-                const data = await response.json();
-                
-                if (data.success && data.job_id) {
-                    const evtSource = new EventSource(`/api/progress-stream?job_id=${data.job_id}`);
-                    
-                    evtSource.onmessage = function(event) {
-                        const sseData = JSON.parse(event.data);
-                        
-                        if (sseData.error) {
-                            alert(sseData.error);
-                            btnSubmit.disabled = false;
-                            btnSubmit.innerHTML = '<i data-lucide="rocket" class="w-5 h-5"></i> サーバーに送信して解析を開始';
-                            lucide.createIcons();
-                            progressWrapper.classList.remove('active');
-                            evtSource.close();
-                            return;
-                        }
-                        
-                        const progress = parseInt(sseData.progress);
-                        if (!isNaN(progress)) {
-                            progressFill.style.width = progress + '%';
-                            progressText.innerText = `処理中... ${progress}%`;
-                            
-                            if (progress >= 100) {
-                                progressText.innerText = "完了！画面が切り替わります...";
-                                evtSource.close();
-                                window.location.href = `/result?job_id=${data.job_id}`;
-                            }
-                        }
-                    };
-                    
-                    evtSource.onerror = function() {
-                        evtSource.close();
-                    };
-                } else {
-                    alert(data.error || "アップロードに失敗しました");
-                    btnSubmit.disabled = false;
-                    btnSubmit.innerHTML = '<i data-lucide="rocket" class="w-5 h-5"></i> サーバーに送信して解析を開始';
-                    lucide.createIcons();
-                    progressWrapper.classList.remove('active');
+            const xhr = new XMLHttpRequest();
+
+            // 1. アップロード送信中の進捗（0%〜100%）
+            xhr.upload.addEventListener('progress', function(event) {
+                if (event.lengthComputable) {
+                    const percent = Math.round((event.loaded / event.total) * 100);
+                    const loadedMB = (event.loaded / (1024 * 1024)).toFixed(1);
+                    const totalMB = (event.total / (1024 * 1024)).toFixed(1);
+                    progressFill.style.width = (percent * 0.3) + '%'; // 送信フェーズは全体の30%分
+                    progressText.innerText = `ファイルを送信中... ${percent}% (${loadedMB}MB / ${totalMB}MB)`;
                 }
-            } catch (err) {
-                alert("通信エラーが発生しました: " + err);
+            });
+
+            // 2. サーバー到達後の処理（SSEで解析進捗を購読）
+            xhr.addEventListener('load', function() {
+                if (xhr.status === 200) {
+                    try {
+                        const data = JSON.parse(xhr.responseText);
+                        if (data.success && data.job_id) {
+                            progressText.innerText = 'サーバーで高速デコード解析中...';
+                            progressFill.style.width = '35%';
+
+                            const evtSource = new EventSource(`/api/progress-stream?job_id=${data.job_id}`);
+                            
+                            evtSource.onmessage = function(event) {
+                                const sseData = JSON.parse(event.data);
+                                
+                                if (sseData.error) {
+                                    alert(sseData.error);
+                                    btnSubmit.disabled = false;
+                                    btnSubmit.innerHTML = '<i data-lucide="rocket" class="w-5 h-5"></i> サーバーに送信して解析を開始';
+                                    lucide.createIcons();
+                                    progressWrapper.classList.remove('active');
+                                    evtSource.close();
+                                    return;
+                                }
+                                
+                                const serverProg = parseInt(sseData.progress);
+                                const statusMsg = sseData.status || '解析中...';
+                                if (!isNaN(serverProg)) {
+                                    // 30%〜100% にマッピング
+                                    const totalDisplayProg = Math.min(100, Math.round(30 + (serverProg * 0.7)));
+                                    progressFill.style.width = totalDisplayProg + '%';
+                                    progressText.innerText = `${statusMsg} (${totalDisplayProg}%)`;
+                                    
+                                    if (serverProg >= 100) {
+                                        progressText.innerText = "✨ デコード完了！結果画面へ移動します...";
+                                        progressFill.style.width = '100%';
+                                        evtSource.close();
+                                        setTimeout(() => {
+                                            window.location.href = `/result?job_id=${data.job_id}`;
+                                        }, 600);
+                                    }
+                                }
+                            };
+                            
+                            evtSource.onerror = function() {
+                                evtSource.close();
+                            };
+                        } else {
+                            alert(data.error || "アップロードに失敗しました");
+                            resetSubmitBtn();
+                        }
+                    } catch (e) {
+                        alert("レスポンス解析エラーが発生しました");
+                        resetSubmitBtn();
+                    }
+                } else {
+                    let errMsg = "サーバーエラーが発生しました";
+                    try {
+                        const errData = JSON.parse(xhr.responseText);
+                        if (errData.error) errMsg = errData.error;
+                    } catch (_) {}
+                    alert(errMsg);
+                    resetSubmitBtn();
+                }
+            });
+
+            xhr.addEventListener('error', function() {
+                alert("通信エラーが発生しました。ネットワーク接続をご確認ください。");
+                resetSubmitBtn();
+            });
+
+            function resetSubmitBtn() {
                 btnSubmit.disabled = false;
                 btnSubmit.innerHTML = '<i data-lucide="rocket" class="w-5 h-5"></i> サーバーに送信して解析を開始';
                 lucide.createIcons();
                 progressWrapper.classList.remove('active');
             }
+
+            xhr.open('POST', '/api/upload');
+            xhr.send(formData);
         });
 
         // サイドバーのトグル

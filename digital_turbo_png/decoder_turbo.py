@@ -13,6 +13,7 @@ import io
 from PIL import Image
 from datetime import datetime
 import numba
+from scipy.signal import butter, lfilter
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
 if ROOT_DIR not in sys.path:
@@ -108,6 +109,31 @@ def fast_bits_to_int(bits):
         val = (val << 1) | b
     return val
 
+@numba.njit
+def fast_find_header_alignment(data, start_scan, end_scan, header_symbols, samples_per_symbol, hamming_win, target_phases_cos, target_phases_sin, info_bits_count, header_crc_bits):
+    best_pos = -1
+    best_snr = -1.0
+    best_bits = np.zeros(header_symbols * 2, dtype=np.int32)
+    
+    for pos in range(start_scan, end_scan):
+        h_bits, h_snr = fast_decode_symbols_exact(data, pos, header_symbols, samples_per_symbol, hamming_win, target_phases_cos, target_phases_sin)
+        if len(h_bits) < info_bits_count + header_crc_bits:
+            continue
+        info_bits = h_bits[:info_bits_count]
+        crc_bits = h_bits[info_bits_count : info_bits_count + header_crc_bits]
+        
+        expected_crc = fast_calculate_crc16_bits(info_bits)
+        actual_crc = fast_bits_to_int(crc_bits)
+        
+        if expected_crc == actual_crc:
+            if h_snr > best_snr:
+                best_snr = h_snr
+                best_pos = pos
+                best_bits = h_bits.copy()
+                
+    return best_pos, best_snr, best_bits
+
+
 class DigitalTurboPNGDecoder:
     def __init__(self, user_id=None):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -195,6 +221,19 @@ class DigitalTurboPNGDecoder:
         if max_val > 0:
             data = data.astype(np.float32) / max_val
 
+        # --- ノイズ耐性向上: バンドパスフィルタ ---
+        if getattr(config, "BANDPASS_ENABLE", False):
+            print(f"[Decode] バンドパスフィルタ適用 ({config.VALID_BAND_MIN}Hz - {config.VALID_BAND_MAX}Hz)")
+            nyq = 0.5 * rate
+            low = config.VALID_BAND_MIN / nyq
+            high = config.VALID_BAND_MAX / nyq
+            b, a = butter(4, [low, high], btype='band')
+            data = lfilter(b, a, data)
+            # フィルタ後の再正規化
+            max_val = np.max(np.abs(data))
+            if max_val > 0:
+                data = data.astype(np.float32) / max_val
+
         samples_sync_full = int(config.SAMPLE_RATE * config.MS_SYNC / 1000)
 
         info_bits_count = config.BIT_IMAGE_CRC + config.BIT_TILE_X + config.BIT_TILE_Y + config.BIT_PAYLOAD_LENGTH
@@ -233,7 +272,8 @@ class DigitalTurboPNGDecoder:
 
                     sync_power = self.detect_sync_long_dft(data[i : i + self.sync_long_samples])
 
-                    if sync_power > 10.0:
+                    # 同期検出の固定閾値を下げ、微弱な信号も拾いやすくする（ノイズ判定は後続のCRCで弾く）
+                    if sync_power > 1.5:
                         search_ptr = i + int(samples_sync_full * 0.5)
                         fine_step = max(1, int(config.SAMPLE_RATE * 0.0005))
                         while search_ptr < len(data) - self.sync_long_samples:
@@ -246,24 +286,14 @@ class DigitalTurboPNGDecoder:
                         start_scan = max(0, search_ptr - align_range)
                         end_scan = min(len(data) - header_samples, search_ptr + align_range)
 
-                        best_match = None
-                        max_snr = -1.0
+                        best_pos, max_snr, h_bits = fast_find_header_alignment(
+                            data, start_scan, end_scan, header_symbols,
+                            self.samples_per_symbol, self.hamming_win,
+                            self.target_phases_cos, self.target_phases_sin,
+                            info_bits_count, config.BIT_HEADER_CRC
+                        )
 
-                        for pos in range(start_scan, end_scan, 1):  # 1サンプル刻みの極細アライメント
-                            h_bits, h_snr = self.decode_symbols_exact(data, pos, header_symbols)
-                            info_bits = h_bits[:info_bits_count]
-                            crc_bits = h_bits[info_bits_count : info_bits_count + config.BIT_HEADER_CRC]
-
-                            expected_crc = self.calculate_crc16_bits(info_bits)
-                            actual_crc = self.bits_to_int(crc_bits)
-
-                            if expected_crc == actual_crc:
-                                if h_snr > max_snr:
-                                    max_snr = h_snr
-                                    best_match = (pos, h_bits)
-
-                        if best_match is not None:
-                            best_pos, h_bits = best_match
+                        if best_pos >= 0:
                             idx = 0
                             image_id = self.bits_to_int(h_bits[idx : idx+config.BIT_IMAGE_CRC])
                             idx += config.BIT_IMAGE_CRC
@@ -279,6 +309,12 @@ class DigitalTurboPNGDecoder:
 
                             if payload_start + payload_samples <= len(data):
                                 p_bits, p_snr = self.decode_symbols_exact(data, payload_start, payload_symbols)
+
+                                # --- 堅牢性（Robustness）の向上 ---
+                                # CRC16を偶然通過したノイズ（約1/65536の確率）を確実に排除するため、
+                                # ペイロード全体のSNRを評価し、基準値未満ならノイズとみなして破棄する
+                                if p_snr < 1.5:
+                                    continue
 
                                 payload_bits_str = "".join(str(b) for b in p_bits[:payload_length*8])
                                 snr_4bit_str = self.calculate_snr_to_4bit(p_snr)

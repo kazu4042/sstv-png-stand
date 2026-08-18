@@ -11,6 +11,7 @@ from PIL import Image
 from scipy.io import wavfile
 import io
 import os
+import random
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
@@ -145,6 +146,9 @@ class DigitalTurboPNGEncoder:
         print(f"  -> 全 {len(packet_list)} パケット生成完了！ (総データ量: {total_payload_bytes} Bytes)")
         print(f"  -> 音声伝送時間: {total_time_ms / 1000.0:.2f} 秒 ({total_time_ms / 60000.0:.2f} 分)")
 
+        # パネルの送信順序をランダム化
+        random.shuffle(packet_list)
+
         final_wave = np.concatenate(packet_list)
         final_wave = final_wave / np.max(np.abs(final_wave)) * 0.8
 
@@ -158,7 +162,10 @@ class DigitalTurboPNGEncoder:
         if output_wav_path is None:
             output_wav_path = os.path.join(root_dir, config.OUTPUT_WAV)
 
-        os.makedirs(os.path.dirname(output_wav_path), exist_ok=True)
+        output_dir = os.path.dirname(os.path.abspath(output_wav_path))
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+            
         wavfile.write(output_wav_path, config.SAMPLE_RATE, (final_wave * 32767).astype(np.int16))
         print(f"  -> 音声ファイル保存完了: {output_wav_path}\n")
 

@@ -105,7 +105,8 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
         
         def decode_progress_callback(prog):
             # progは0.0〜100.0のパーセンテージ
-            update_job(job_id, progress=5 + int(prog * 0.45))
+            calc_prog = 5 + int(prog * 0.55)
+            update_job(job_id, progress=calc_prog, status=f"音声信号の高速デコード中... {int(prog)}%")
                 
         success_count, log_path = decoder.run(filepath, progress_callback=decode_progress_callback)
         
@@ -281,6 +282,14 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
         import traceback
         traceback.print_exc()
         update_job(job_id, progress=100, status="エラー", error=str(e))
+    finally:
+        # 処理終了後、必ず音声ファイルを削除する（ディスク容量対策）
+        if os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+                print(f"[Cleanup] Deleted audio file: {filepath}")
+            except Exception as del_err:
+                print(f"[Cleanup Error] Failed to delete {filepath}: {del_err}")
 
 @upload_bp.route('/upload', methods=['POST'])
 @login_required
