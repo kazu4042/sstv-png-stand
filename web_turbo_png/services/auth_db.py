@@ -50,7 +50,7 @@ class AuthDB:
 
     def create_user(self, email, password):
         try:
-            password_hash = generate_password_hash(password)
+            password_hash = generate_password_hash(password.strip())
             with self.conn:
                 cursor = self.conn.execute(
                     "INSERT INTO users (email, password_hash) VALUES (?, ?)",
@@ -60,34 +60,62 @@ class AuthDB:
         except sqlite3.IntegrityError:
             return None  # Email already exists
 
+    def update_password(self, user_id, new_password):
+        """ユーザーのパスワードハッシュを更新"""
+        try:
+            password_hash = generate_password_hash(new_password.strip())
+            with self.conn:
+                self.conn.execute(
+                    "UPDATE users SET password_hash = ? WHERE id = ?",
+                    (password_hash, user_id)
+                )
+            return True
+        except Exception as e:
+            print(f"[AuthDB] Update password error: {e}")
+            return False
+
     def verify_user(self, email, password):
+        """メールアドレス/ユーザー名とパスワードを検証（フォールバックと自動同期を含む）"""
+        if not email or not password:
+            return None
+            
         email_clean = email.strip()
+        pwd_clean = password.strip()
+        
+        basic_user = os.environ.get('BASIC_AUTH_USERNAME', 'Nagasaki').strip()
+        basic_pass = os.environ.get('BASIC_AUTH_PASSWORD', '123456789').strip()
+        admin_emails = [e.strip().lower() for e in os.environ.get('ADMIN_EMAILS', '').split(',') if e.strip()]
+        
         cursor = self.conn.cursor()
         cursor.execute("SELECT id, password_hash FROM users WHERE email = ? COLLATE NOCASE", (email_clean,))
         row = cursor.fetchone()
+        
         if row:
             user_id, password_hash = row
-            if check_password_hash(password_hash, password):
+            # 1. DB内のハッシュと一致する場合
+            if check_password_hash(password_hash, password) or check_password_hash(password_hash, pwd_clean):
                 return user_id
                 
-        # フォールバック: .env の BASIC_AUTH_USERNAME / BASIC_AUTH_PASSWORD と一致する場合
-        basic_user = os.environ.get('BASIC_AUTH_USERNAME', '').strip()
-        basic_pass = os.environ.get('BASIC_AUTH_PASSWORD', '').strip()
-        admin_emails = [e.strip() for e in os.environ.get('ADMIN_EMAILS', '').split(',') if e.strip()]
-        
-        if basic_user and basic_pass and password == basic_pass:
-            if email_clean.lower() == basic_user.lower() or email_clean in admin_emails:
-                # ユーザーが存在しなければ自動作成
-                uid = self.create_user(email_clean, password)
+            # 2. DB内のハッシュが不一致でも、.envの管理者/Basic認証パスワードと一致する場合（パスワード自動同期）
+            if (email_clean.lower() == basic_user.lower() or email_clean.lower() in admin_emails) and (password == basic_pass or pwd_clean == basic_pass):
+                self.update_password(user_id, pwd_clean)
+                print(f"[AuthDB] Synchronized password for user: {email_clean}")
+                return user_id
+                
+        else:
+            # 3. ユーザーがまだDBに存在しない場合（.envの管理者またはBasic認証ユーザーなら自動作成）
+            if (email_clean.lower() == basic_user.lower() or email_clean.lower() in admin_emails) and (password == basic_pass or pwd_clean == basic_pass):
+                uid = self.create_user(email_clean, pwd_clean)
                 if uid:
+                    print(f"[AuthDB] Created missing admin user: {email_clean}")
                     return uid
-                # 既存なら再取得
                 cursor.execute("SELECT id FROM users WHERE email = ? COLLATE NOCASE", (email_clean,))
                 r = cursor.fetchone()
                 if r:
                     return r[0]
                     
         return None
+
 
     def get_user_by_id(self, user_id):
         cursor = self.conn.cursor()

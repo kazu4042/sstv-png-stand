@@ -87,14 +87,20 @@ def require_basic_auth_and_auto_login():
             session['basic_auth_passed'] = True
         return
 
-    # 3. すでにBasic認証を通過済みのセッションであれば再要求しない
-    if session.get('basic_auth_passed'):
+    # 3. フォームログイン・新規登録画面へのアクセスは許可
+    if request.path in ['/login', '/register', '/logout']:
+        return
+
+    # 4. すでにセッションが存在する場合（フォームログイン済み、またはBasic認証通過済み）
+    if session.get('user_id') or session.get('basic_auth_passed'):
+        session.permanent = True
+        session['basic_auth_passed'] = True
         if 'user_id' not in session:
             session['user_id'] = 1
             session['email'] = BASIC_AUTH_USERNAME
         return
 
-    # 4. 初回アクセス時: Authorizationヘッダーを検証
+    # 5. 初回アクセス時: Authorizationヘッダーを検証
     auth = request.authorization
     if auth and check_basic_auth(auth.username, auth.password):
         session.permanent = True
@@ -111,8 +117,9 @@ def require_basic_auth_and_auto_login():
             session['email'] = auth.username
         return
 
-    # 5. 認証情報がない、または不一致の場合はBasic認証を要求
+    # 6. 認証情報がない、または不一致の場合はBasic認証を要求
     return authenticate()
+
 
 
 

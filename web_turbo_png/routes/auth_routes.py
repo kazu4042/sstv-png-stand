@@ -51,17 +51,18 @@ def login():
         user_id = db.verify_user(email, password)
         
         if user_id:
+            session.permanent = True
             session['user_id'] = user_id
             session['email'] = email
+            session['basic_auth_passed'] = True  # Basic認証も通過扱いにする
+            
             next_url = request.form.get('next')
             go_to_admin = request.form.get('go_to_admin')
             
             # チェックボックスがオンの場合は管理者画面へ移動
             if go_to_admin == '1':
-                if not is_admin(email):
-                    # 管理者でない場合はメッセージを表示して通常画面へ
-                    return redirect(url_for('main.index'))
-                return redirect(url_for('auth.admin_dashboard'))
+                if is_admin(email):
+                    return redirect(url_for('auth.admin_dashboard'))
             
             # オープンリダイレクト脆弱性・無限ループ対策
             if next_url and next_url.startswith('/') and not next_url.startswith('//'):
@@ -87,18 +88,22 @@ def register():
         user_id = db.create_user(email, password)
         
         if user_id:
+            session.permanent = True
             session['user_id'] = user_id
             session['email'] = email
+            session['basic_auth_passed'] = True
             return redirect(url_for('main.index'))
         else:
             return render_template('register.html', error='このメールアドレスは既に登録されています。')
             
     return render_template('register.html')
 
+
 @auth_bp.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for('main.landing'))
+    return redirect(url_for('auth.login'))
+
 
 @auth_bp.route('/admin')
 @login_required
