@@ -74,25 +74,31 @@ def authenticate():
 def require_basic_auth_and_auto_login():
     from flask import session
 
-    # 開発時にBasic Authをオフにしたい場合
+    # 1. 静的ファイルへのアクセスは除外
+    if request.path.startswith('/static/'):
+        return
+
+    # 2. 開発時にBasic Authをオフにしたい場合
     if os.environ.get('DISABLE_BASIC_AUTH') == '1':
         if 'user_id' not in session:
             session.permanent = True
             session['user_id'] = 1
             session['email'] = 'developer@local'
-        return
-        
-    # 静的ファイルへのアクセスは除外
-    if request.path.startswith('/static/'):
+            session['basic_auth_passed'] = True
         return
 
+    # 3. すでにBasic認証を通過済みのセッションであれば再要求しない
+    if session.get('basic_auth_passed'):
+        if 'user_id' not in session:
+            session['user_id'] = 1
+            session['email'] = BASIC_AUTH_USERNAME
+        return
+
+    # 4. 初回アクセス時: Authorizationヘッダーを検証
     auth = request.authorization
-    if not auth or not check_basic_auth(auth.username, auth.password):
-        return authenticate()
-
-    # Basic認証を通過したユーザーは自動的にセッションログイン状態にする
-    if 'user_id' not in session:
+    if auth and check_basic_auth(auth.username, auth.password):
         session.permanent = True
+        session['basic_auth_passed'] = True
         try:
             db = get_auth_db()
             uid = db.verify_user(auth.username, auth.password)
@@ -103,6 +109,11 @@ def require_basic_auth_and_auto_login():
         except Exception as e:
             session['user_id'] = 1
             session['email'] = auth.username
+        return
+
+    # 5. 認証情報がない、または不一致の場合はBasic認証を要求
+    return authenticate()
+
 
 
 # ====================================================================

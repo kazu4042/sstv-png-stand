@@ -93,10 +93,14 @@ def progress_stream():
             if job["progress"] >= 100 or job["error"]:
                 break
             time.sleep(0.1)
-    return Response(generate(), mimetype='text/event-stream')
+            
+    response = Response(generate(), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['X-Accel-Buffering'] = 'no'
+    return response
 
 def process_upload(filepath, original_filename, job_id, app, user_id):
-    """アップロードされたファイルの処理（バックグラウンド）"""
+    """アップロードされた音声ファイルの処理（バックグラウンド）"""
     try:
         update_job(job_id, progress=5, status="音声のデコード中...")
 
@@ -109,7 +113,7 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
             update_job(job_id, progress=calc_prog, status=f"音声信号の高速デコード中... {int(prog)}%")
                 
         success_count, log_path = decoder.run(filepath, progress_callback=decode_progress_callback)
-        
+
         decoded_bits_list = []
         if os.path.exists(log_path):
             with open(log_path, "r", encoding="utf-8") as f:
@@ -119,7 +123,7 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
             update_job(job_id, progress=100, status="エラー", error="SSTV TurboPNGの信号が検出できませんでした。")
             return
             
-        update_job(job_id, progress=50, status="データベースへの登録中...")
+        update_job(job_id, progress=60, status="データベースへの登録中...")
 
         # ===== Step2: アグリゲータでDBに蓄積 =====
         log_dir = getattr(config, "TEXT_LOG_DIR", "data/digital_turbo_png/logs")
@@ -128,7 +132,7 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
         else:
             log_dir_path = log_dir
         
-        update_job(job_id, progress=60, status="統合処理中 (Aggregator)...")
+        update_job(job_id, progress=70, status="統合処理中 (Aggregator)...")
         
         aggregator = TurboPNGAggregator(log_dir=log_dir_path)
         # 全員のパケットで多数決画像を生成（user_idフィルタなし）
@@ -137,7 +141,7 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
             # そのユーザー単体の累積画像も生成
             aggregator.process_and_save_images(min_tile_ratio=0.0, user_id=user_id)
             
-        update_job(job_id, progress=70, status="復元画像を生成中...")
+        update_job(job_id, progress=85, status="復元画像を生成中...")
 
         # 復元画像を output ディレクトリに保存
         output_dir = os.path.join(app.static_folder, "output")
@@ -283,11 +287,11 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
         traceback.print_exc()
         update_job(job_id, progress=100, status="エラー", error=str(e))
     finally:
-        # 処理終了後、必ず音声ファイルを削除する（ディスク容量対策）
+        # 処理終了後、アップロードされた音声ファイルを削除する（ディスク容量対策）
         if os.path.exists(filepath):
             try:
                 os.remove(filepath)
-                print(f"[Cleanup] Deleted audio file: {filepath}")
+                print(f"[Cleanup] Deleted file: {filepath}")
             except Exception as del_err:
                 print(f"[Cleanup Error] Failed to delete {filepath}: {del_err}")
 
@@ -321,10 +325,13 @@ def upload_file():
             import threading
             app = current_app._get_current_object()  # pyrefly: ignore
             
-            # 古いジョブやファイルのクリーンアップ処理（バックグラウンドではなくここで軽く実行）
+            # 古いジョブやファイルのクリーンアップ処理
             cleanup_old_jobs(max_age_seconds=86400)
             
-            thread = threading.Thread(target=process_upload, args=(save_path, secure_filename(filename), job_id, app, user_id))
+            thread = threading.Thread(
+                target=process_upload, 
+                args=(save_path, secure_filename(filename), job_id, app, user_id)
+            )
             thread.start()
 
             return jsonify({'success': True, 'message': 'Processing started in background', 'job_id': job_id})
@@ -335,5 +342,7 @@ def upload_file():
             upload_error = f"エラーが発生しました: {str(e)}"
             return jsonify({'success': False, 'error': upload_error}), 500
 
-    upload_error = "許可されていないファイル形式です"
+    upload_error = "許可されていないファイル形式です（.wav のみ対応）"
     return jsonify({'success': False, 'error': upload_error}), 400
+
+

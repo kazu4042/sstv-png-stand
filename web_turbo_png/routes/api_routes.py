@@ -189,13 +189,22 @@ def get_rankings():
         if ranking_json_path.is_file():
             with open(ranking_json_path, 'r', encoding='utf-8') as f:
                 rankings = json.load(f)
-            return jsonify(list(rankings.values()) if isinstance(rankings, dict) else rankings)
+            if isinstance(rankings, dict):
+                rankings_list = []
+                for cs, data in rankings.items():
+                    if isinstance(data, dict):
+                        d = data.copy()
+                        d['callsign'] = d.get('callsign') or cs
+                        rankings_list.append(d)
+                return jsonify(rankings_list)
+            return jsonify(rankings)
         return jsonify([])
     except Exception as e:
         return jsonify({
             "status": "error",
             "message": f"ランキング取得エラー: {str(e)}"
         }), 500
+
 
 
 @api_bp.route('/heatmap-data', methods=['GET'])

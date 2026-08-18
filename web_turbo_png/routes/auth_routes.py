@@ -9,39 +9,29 @@ def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
-            # 1. Basic認証情報がある場合は自動照合してセッションを生成
-            auth = request.authorization
-            db = get_auth_db()
-            if auth and auth.username:
-                uid = db.verify_user(auth.username, auth.password)
-                if uid:
-                    session['user_id'] = uid
-                    session['email'] = auth.username
-                    return f(*args, **kwargs)
-            
-            # 2. データベース内のデフォルト管理者・ユーザーで自動補完
-            users = db.get_all_users()
-            if users:
-                session['user_id'] = users[0]['id']
-                session['email'] = users[0]['email']
+            # Basic認証を通過している場合は自動的に有効なuser_idを補完
+            if session.get('basic_auth_passed'):
+                db = get_auth_db()
+                users = db.get_all_users()
+                if users:
+                    session['user_id'] = users[0]['id']
+                    session['email'] = users[0]['email']
+                else:
+                    basic_user = os.environ.get('BASIC_AUTH_USERNAME', 'admin').strip()
+                    basic_pass = os.environ.get('BASIC_AUTH_PASSWORD', 'password123').strip()
+                    uid = db.create_user(basic_user, basic_pass)
+                    session['user_id'] = uid or 1
+                    session['email'] = basic_user
                 return f(*args, **kwargs)
 
-            # 3. ユーザーが1人もいない場合は初期ユーザーを自動作成してログイン
-            basic_user = os.environ.get('BASIC_AUTH_USERNAME', 'admin').strip()
-            basic_pass = os.environ.get('BASIC_AUTH_PASSWORD', 'password123').strip()
-            uid = db.create_user(basic_user, basic_pass)
-            if uid:
-                session['user_id'] = uid
-                session['email'] = basic_user
-                return f(*args, **kwargs)
-
-            # 4. 万が一どうしてもセッションが取れない場合
+            # 未認証の場合
             if request.path.startswith('/api/'):
-                return jsonify({'error': 'Unauthorized'}), 401
+                return jsonify({'error': 'Unauthorized', 'status': 'error'}), 401
             return redirect(url_for('auth.login', next=request.url))
 
         return f(*args, **kwargs)
     return decorated_function
+
 
 def is_admin(email_or_user):
     if not email_or_user:

@@ -148,7 +148,7 @@
                             <i data-lucide="play" class="w-5 h-5"></i> プレビュー
                         </button>
                     </div>
-                    
+
                     <div id="file-name-display" class="text-center text-sm text-forest font-bold mb-6 min-h-[1.5rem] tracking-widest"></div>
 
                     <!-- Spectrum Toggle -->
@@ -164,61 +164,9 @@
                     </div>
 
                     <!-- Waterfall Canvas -->
-                    <div class="waterfall-wrapper bg-black rounded-xl border-2 border-gray-200 overflow-hidden relative" id="waterfall-wrapper">
+                    <div class="waterfall-wrapper bg-black rounded-xl border-2 border-gray-200 overflow-hidden relative mb-6" id="waterfall-wrapper">
                         <canvas id="waterfall" class="w-full h-[200px] block"></canvas>
                         <div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, rgba(255,255,255,0) 15%, rgba(255,255,255,0.1) 15%, rgba(255,255,255,0) 16%, rgba(255,255,255,0) 45%, rgba(255,255,255,0.1) 45%, rgba(255,255,255,0) 46%);"></div>
-                    </div>
-
-                    <!-- 観測地情報 -->
-                    <div class="bg-paper p-6 rounded-xl mb-8 border border-gray-200">
-                        <h3 class="text-forest font-bold text-sm tracking-widest mb-4 flex items-center gap-2">
-                            <i data-lucide="map-pin" class="w-4 h-4"></i> 観測地情報（オプション）
-                        </h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-4">
-                            <div class="flex flex-col">
-                                <label for="callsign" class="text-xs font-bold text-ink/60 mb-2 tracking-widest">コールサイン / 名前</label>
-                                <input type="text" name="callsign" id="callsign" placeholder="例：JA0XYZ" maxlength="20" class="bg-white border border-gray-300 text-ink text-sm rounded-lg p-3 w-full shadow-sm focus:border-forest focus:ring-2 focus:ring-forestLight outline-none transition-all">
-                            </div>
-                            
-                            <div class="flex flex-col">
-                                <label for="country" class="text-xs font-bold text-ink/60 mb-2 tracking-widest">国 / 地域</label>
-                                <select name="country" id="country" class="bg-white border border-gray-300 text-ink text-sm rounded-lg p-3 w-full shadow-sm focus:border-forest focus:ring-2 focus:ring-forestLight outline-none transition-all">
-                                    <option value="">選択してください (任意)</option>
-                                    <option value="Japan" data-lat="36.2048" data-lon="138.2529">Japan (日本)</option>
-                                    <option value="United States" data-lat="37.0902" data-lon="-95.7129">United States (米国)</option>
-                                    <option value="United Kingdom" data-lat="55.3781" data-lon="-3.4360">United Kingdom (英国)</option>
-                                    <option value="Australia" data-lat="-25.2744" data-lon="133.7751">Australia (豪州)</option>
-                                    <option value="Germany" data-lat="51.1657" data-lon="10.4515">Germany (ドイツ)</option>
-                                    <option value="France" data-lat="46.2276" data-lon="2.2137">France (フランス)</option>
-                                    <option value="Canada" data-lat="56.1304" data-lon="-106.3468">Canada (カナダ)</option>
-                                    <option value="China" data-lat="35.8617" data-lon="104.1954">China (中国)</option>
-                                    <option value="India" data-lat="20.5937" data-lon="78.9629">India (インド)</option>
-                                    <option value="Brazil" data-lat="-14.2350" data-lon="-51.9253">Brazil (ブラジル)</option>
-                                    <option value="Russia" data-lat="61.5240" data-lon="105.3188">Russia (ロシア)</option>
-                                    <option value="South Korea" data-lat="35.9078" data-lon="127.7669">South Korea (韓国)</option>
-                                    <option value="Czech Republic" data-lat="49.8175" data-lon="15.4730">Czech Republic (チェコ)</option>
-                                </select>
-                            </div>
-                            
-                            <div class="flex flex-col">
-                                <label for="grid" class="text-xs font-bold text-ink/60 mb-2 tracking-widest">グリッドロケーター</label>
-                                <input type="text" name="grid" id="grid" placeholder="例：PM95ab" maxlength="10" class="bg-white border border-gray-300 text-ink text-sm rounded-lg p-3 w-full shadow-sm focus:border-forest focus:ring-2 focus:ring-forestLight outline-none transition-all">
-                            </div>
-                            
-                            <div class="flex flex-col">
-                                <label for="latitude" class="text-xs font-bold text-ink/60 mb-2 tracking-widest">北緯 (LATITUDE)</label>
-                                <input type="number" name="latitude" id="latitude" placeholder="例：35.6762" min="-90" max="90" step="0.0001" class="bg-white border border-gray-300 text-ink text-sm rounded-lg p-3 w-full shadow-sm focus:border-forest focus:ring-2 focus:ring-forestLight outline-none transition-all">
-                            </div>
-                            
-                            <div class="flex flex-col md:col-span-2">
-                                <label for="longitude" class="text-xs font-bold text-ink/60 mb-2 tracking-widest">東経 (LONGITUDE)</label>
-                                <input type="number" name="longitude" id="longitude" placeholder="例：139.6503" min="-180" max="180" step="0.0001" class="bg-white border border-gray-300 text-ink text-sm rounded-lg p-3 w-full shadow-sm focus:border-forest focus:ring-2 focus:ring-forestLight outline-none transition-all">
-                            </div>
-                        </div>
-                        <div class="text-[11px] text-ink/50 leading-relaxed bg-white p-3 rounded-lg border border-gray-100">
-                            <i data-lucide="info" class="w-3 h-3 inline mr-1"></i> <strong>観測地情報</strong>を入力すると、SNRヒートマップに受信局が表示されます。<br>
-                            座標がない場合は国名またはグリッドロケーターで自動判定します。コールサインはランキングに表示されます（空の場合は「匿名」）。
-                        </div>
                     </div>
 
                     <button type="submit" class="btn-submit w-full bg-forest text-white py-4 rounded-xl font-bold tracking-widest flex justify-center items-center gap-2" id="btn-submit" disabled>
@@ -233,6 +181,7 @@
                         </div>
                     </div>
                 </form>
+
             </div>
         </div>
     </main>
@@ -324,6 +273,8 @@
                 waterfallWrapper.classList.remove('active');
             }
         });
+
+
 
         // プレビュー再生ボタンの処理
         btnPreview.addEventListener('click', async function() {
