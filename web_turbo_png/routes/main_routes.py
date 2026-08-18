@@ -82,6 +82,7 @@ def ranking():
 def result():
     """デコード結果画面を表示"""
     job_id = request.args.get('job_id')
+    image_id = request.args.get('image_id')
     result_data = {}
     
     if job_id:
@@ -93,6 +94,10 @@ def result():
     
     if not result_data:
         result_data = session.get('result_data', {})
+
+    if image_id:
+        result_data = dict(result_data)
+        result_data['current_image_id'] = image_id
         
     return render_template(
         'result.html',
@@ -100,6 +105,7 @@ def result():
         show_ranking=getattr(config, 'ENABLE_RANKING', False),
         **result_data
     )
+
 
 
 @main_bp.route('/calendar')

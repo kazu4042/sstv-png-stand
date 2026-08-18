@@ -175,7 +175,7 @@ class TurboPNGAggregator:
                         total_packets += len(pkt_list)
                         for payload_bits_str, weight, _, _, _ in pkt_list:
                             try:
-                                p_bytes = self.bits_to_bytearray(payload_bits_str)
+                                p_bytes = self.bits_to_bytearray(payload_bits_str)[:plen]
                                 temp_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
                                 valid_tile_img = temp_img
                                 break
@@ -232,7 +232,7 @@ class TurboPNGAggregator:
                         for i in range(payload_bit_len)
                     )
 
-                    p_bytes = self.bits_to_bytearray(voted_payload)
+                    p_bytes = self.bits_to_bytearray(voted_payload)[:best_plen]
 
                     try:
                         # PNGとして復元（JPEGではなくPNG）
@@ -254,6 +254,7 @@ class TurboPNGAggregator:
                         error_tiles += 1
                         if error_tiles <= 5:
                             print(f"  [ERROR] タイル({tx},{ty}) PNG復元失敗 (受信パケット総数:{total_packets}, 多数決投票数:{valid_count}): {e}")
+
 
             # PNG形式で保存（JPEGではなくPNG）
             if user_id is not None:

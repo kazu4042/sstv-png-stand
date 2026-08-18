@@ -391,11 +391,19 @@
                     
                     userImg.onerror = function() {
                         this.onerror = null;
-                        this.src = "/static/user_slices_placeholder.png";
-                        if (notPostedOverlay) {
-                            notPostedOverlay.style.display = 'flex';
-                            this.style.opacity = '0.3';
-                        }
+                        this.src = `/static/output/user_cumulative_${currentUserId}_ID_${activeImageId}.png?t=${timestamp}`;
+                        this.onerror = function() {
+                            this.onerror = null;
+                            this.src = `/static/output/restored_ID_${activeImageId}.png?t=${timestamp}`;
+                            this.onerror = function() {
+                                this.onerror = null;
+                                this.src = "/static/user_slices_placeholder.png";
+                                if (notPostedOverlay) {
+                                    notPostedOverlay.style.display = 'flex';
+                                    this.style.opacity = '0.3';
+                                }
+                            };
+                        };
                     };
 
                     userImg.onload = function() {
@@ -425,6 +433,7 @@
                     }
                 }, 150);
             }
+
 
             if (viewModeSessionBtn && viewModeCumulativeBtn) {
                 viewModeSessionBtn.addEventListener('click', () => {
@@ -631,7 +640,10 @@
             // <i data-lucide="rocket" class="icon-inline"></i> 初期ロード実行
             const urlParams = new URLSearchParams(window.location.search);
             const urlImageId = urlParams.get('image_id');
-            const initialId = urlImageId || document.querySelector('.session-item.active')?.dataset.id || '{{ current_image_id }}' || document.querySelector('.session-item')?.dataset.id;
+            const activeSessionId = document.querySelector('.session-img-item.active')?.dataset.id;
+            const firstSessionId = document.querySelector('.session-img-item')?.dataset.id;
+            const templateImageId = '{{ current_image_id }}';
+            const initialId = urlImageId || (templateImageId && templateImageId !== 'None' && templateImageId !== '0000' ? templateImageId : '') || activeSessionId || firstSessionId || 'ABE5';
             
             // URLパラメータをパースした後はURLバーをクリーンにする（SPA挙動維持のため）
             if (urlImageId) {
@@ -640,6 +652,7 @@
             
             updateViewForImageId(initialId);
             checkMergeStats(initialId);
+
 
             // 画像ダウンロード処理
             function downloadImage(imgElementId, filenamePrefix) {
