@@ -294,7 +294,7 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
 @upload_bp.route('/upload', methods=['POST'])
 @login_required
 def upload_file():
-    user_id = session.get('user_id')
+    user_id = session.get('user_id') or 1
     job_id = uuid.uuid4().hex
     create_job(job_id)
 

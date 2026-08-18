@@ -45,7 +45,7 @@ else:
     app.config['UPLOAD_FOLDER'] = os.path.join(app.static_folder or '', 'uploads')
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', os.urandom(24))
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'sstv_turbo_png_secure_persistent_key_2026')
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB limit
 
