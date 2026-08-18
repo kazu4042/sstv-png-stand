@@ -17,11 +17,19 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+def is_admin(email_or_user):
+    if not email_or_user:
+        return False
+    user_str = str(email_or_user).strip().lower()
+    admin_emails = [e.strip().lower() for e in os.environ.get('ADMIN_EMAILS', '').split(',') if e.strip()]
+    basic_user = os.environ.get('BASIC_AUTH_USERNAME', 'admin').strip().lower()
+    return user_str in admin_emails or user_str == basic_user
+
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        email = request.form.get('email')
-        password = request.form.get('password')
+        email = request.form.get('email', '').strip()
+        password = request.form.get('password', '')
         
         db = get_auth_db()
         user_id = db.verify_user(email, password)
@@ -32,29 +40,29 @@ def login():
             next_url = request.form.get('next')
             go_to_admin = request.form.get('go_to_admin')
             
-            # チェックボックスがオンの場合は管理者画面へ強制移動
+            # チェックボックスがオンの場合は管理者画面へ移動
             if go_to_admin == '1':
-                admin_emails = os.environ.get('ADMIN_EMAILS', '').split(',')
-                if email not in admin_emails:
-                    session.clear()
-                    return render_template('login.html', error='不正なログインです。')
+                if not is_admin(email):
+                    # 管理者でない場合はメッセージを表示して通常画面へ
+                    return redirect(url_for('main.index'))
                 return redirect(url_for('auth.admin_dashboard'))
             
-            # オープンリダイレクト脆弱性対策: next_url が相対パス（'/'で始まり '//'で始まらない）であることを確認
-            if next_url and not (next_url.startswith('/') and not next_url.startswith('//')):
-                next_url = url_for('main.index')
+            # オープンリダイレクト脆弱性・無限ループ対策
+            if next_url and next_url.startswith('/') and not next_url.startswith('//'):
+                if not next_url.startswith('/login') and not next_url.startswith('/logout'):
+                    return redirect(next_url)
                 
-            return redirect(next_url or url_for('main.index'))
+            return redirect(url_for('main.index'))
         else:
-            return render_template('login.html', error='メールアドレスまたはパスワードが間違っています。')
+            return render_template('login.html', error='メールアドレス/ユーザー名 または パスワードが間違っています。')
             
     return render_template('login.html')
 
 @auth_bp.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        email = request.form.get('email')
-        password = request.form.get('password')
+        email = request.form.get('email', '').strip()
+        password = request.form.get('password', '')
         
         if not email or not password:
             return render_template('register.html', error='メールアドレスとパスワードを入力してください。')
@@ -74,16 +82,15 @@ def register():
 @auth_bp.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for('main.index'))
+    return redirect(url_for('main.landing'))
 
 @auth_bp.route('/admin')
 @login_required
 def admin_dashboard():
     # 管理者権限のチェック
-    admin_emails = os.environ.get('ADMIN_EMAILS', '').split(',')
     current_email = session.get('email')
     
-    if current_email not in admin_emails:
+    if not is_admin(current_email):
         # 管理者でない場合はトップページへリダイレクト
         return redirect(url_for('main.index'))
         
@@ -91,3 +98,4 @@ def admin_dashboard():
     users = db.get_all_users()
     
     return render_template('admin.html', users=users)
+
