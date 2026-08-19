@@ -90,16 +90,18 @@
         <ul class="flex flex-col gap-2" id="session-list">
             {% if available_image_ids is defined and available_image_ids %}
                 {% for img_id in available_image_ids %}
-                <li class="session-item flex items-center justify-between px-4 py-3 rounded-lg cursor-pointer session-img-item" data-id="{{ img_id }}">
+                <li class="session-item flex items-center justify-between px-4 py-3 rounded-lg cursor-pointer session-img-item {% if img_id == current_image_id %}active{% endif %}" data-id="{{ img_id }}">
                     <div class="flex items-center gap-2">
                         <i data-lucide="image" class="w-4 h-4 img-icon text-ink/50"></i>
                         <span class="session-id font-mono text-sm tracking-widest text-ink">0x{{ img_id }}</span>
                     </div>
-                    {% if img_id == current_image_id %}
-                    <span class="badge-status text-[10px] bg-forest text-white px-2 py-0.5 rounded-full tracking-widest font-bold">NEW</span>
-                    {% else %}
-                    <span class="badge-status text-[10px] bg-gray-200 text-earth px-2 py-0.5 rounded-full tracking-widest font-bold">STORED</span>
-                    {% endif %}
+                    <div class="flex items-center gap-1">
+                        {% if user_contributed_ids is defined and img_id in user_contributed_ids %}
+                        <span class="badge-status text-[10px] bg-forestLight text-forest border border-forest/30 px-2 py-0.5 rounded-full tracking-wider font-bold" title="あなたが投稿したデータがあります">YOU</span>
+                        {% else %}
+                        <span class="badge-status text-[10px] bg-gray-100 text-earth px-2 py-0.5 rounded-full tracking-wider font-medium" title="ネットワーク全体のデータのみ">ALL</span>
+                        {% endif %}
+                    </div>
                 </li>
                 {% endfor %}
             {% else %}

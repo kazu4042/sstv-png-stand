@@ -123,29 +123,36 @@ app.register_blueprint(auth_bp)
 
 @app.context_processor
 def inject_session_data():
-    """全画面共通のサイドバー向けデータを自動注入（ユーザーごとの履歴）"""
+    """全画面共通のサイドバー向けデータを自動注入（全体画像一覧とユーザーの貢献履歴）"""
     from flask import session
     result_data = session.get('result_data', {})
     user_id = session.get('user_id')
 
     available_image_ids = []
+    user_contributed_ids = []
     current_image_id = result_data.get('current_image_id', '')
 
-    if user_id:
-        try:
-            from web_turbo_png.routes.api_routes import get_analyzer
-            analyzer = get_analyzer()
-            available_image_ids = analyzer.get_available_image_ids(user_id=user_id)
-            if not current_image_id and available_image_ids:
-                current_image_id = available_image_ids[0]
-        except Exception as e:
-            print(f"⚠️ Context processor error: {e}")
-            pass
+    try:
+        from web_turbo_png.routes.api_routes import get_analyzer
+        analyzer = get_analyzer()
+        # 全ユーザー横断の画像ID一覧を取得
+        available_image_ids = analyzer.get_available_image_ids(user_id=None)
+        
+        # ログインユーザーが投稿している画像ID一覧
+        if user_id:
+            user_contributed_ids = analyzer.get_available_image_ids(user_id=user_id)
+            
+        if not current_image_id and available_image_ids:
+            current_image_id = available_image_ids[0]
+    except Exception as e:
+        print(f"⚠️ Context processor error: {e}")
+        pass
 
     import digital_turbo_png.config_turbo as config
 
     return {
         'available_image_ids': available_image_ids,
+        'user_contributed_ids': user_contributed_ids,
         'current_image_id': current_image_id,
         'show_heatmap': getattr(config, 'ENABLE_HEATMAP', False),
         'show_ranking': getattr(config, 'ENABLE_RANKING', False)

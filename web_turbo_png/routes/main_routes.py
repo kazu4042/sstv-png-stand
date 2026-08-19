@@ -82,7 +82,8 @@ def ranking():
 def result():
     """デコード結果画面を表示"""
     job_id = request.args.get('job_id')
-    image_id = request.args.get('image_id')
+    req_image_id = request.args.get('image_id')
+    user_id = session.get('user_id')
     result_data = {}
     
     if job_id:
@@ -95,10 +96,26 @@ def result():
     if not result_data:
         result_data = session.get('result_data', {})
 
-    if image_id:
+    from web_turbo_png.routes.api_routes import get_analyzer
+    analyzer = get_analyzer()
+    available_ids = analyzer.get_available_image_ids(user_id=None)
+
+    target_image_id = req_image_id or result_data.get('current_image_id')
+    if not target_image_id and available_ids:
+        target_image_id = available_ids[0]
+
+    if target_image_id:
+        status_info = analyzer.get_image_status(target_image_id, user_id=user_id)
         result_data = dict(result_data)
-        result_data['current_image_id'] = image_id
-        
+        result_data['current_image_id'] = target_image_id
+        result_data['main_score'] = status_info['user_score']
+        result_data['contribution_score'] = status_info['user_score']
+        result_data['network_score'] = status_info['network_score']
+        result_data['network_received'] = status_info['network_received']
+        result_data['user_has_data'] = status_info['user_has_data']
+        result_data['user_output_url'] = status_info['user_img_url'] or ''
+        result_data['available_image_ids'] = available_ids
+
     return render_template(
         'result.html',
         show_heatmap=getattr(config, 'ENABLE_HEATMAP', False),

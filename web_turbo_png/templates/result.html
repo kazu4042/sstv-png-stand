@@ -376,34 +376,39 @@
             let userImgMode = 'session'; // 'session' or 'cumulative'
             const viewModeSessionBtn = document.getElementById('view-mode-session');
             const viewModeCumulativeBtn = document.getElementById('view-mode-cumulative');
+            const dlUserBtn = document.getElementById('download-user-img-btn');
             
-            function updateUserImageSource() {
+            let currentUserStatus = null;
+
+            function updateUserImageSource(statusData) {
+                if (statusData !== undefined) {
+                    currentUserStatus = statusData;
+                }
                 const currentUserId = "{{ session.get('user_id', '') }}";
                 const notPostedOverlay = document.getElementById('user-img-not-posted');
                 
-                // 一瞬画像を透明にして切り替わりを演出
                 userImg.style.opacity = '0';
                 
                 setTimeout(() => {
-                    if (notPostedOverlay) {
-                        notPostedOverlay.style.display = 'none';
+                    // ユーザーがこの画像を投稿していない場合
+                    if (!currentUserStatus || !currentUserStatus.user_has_data || !currentUserId) {
+                        if (notPostedOverlay) notPostedOverlay.style.display = 'flex';
+                        userImg.src = "/static/user_slices_placeholder.png";
+                        userImg.style.opacity = '0.3';
+                        if (dlUserBtn) dlUserBtn.disabled = true;
+                        return;
                     }
-                    
+
+                    if (notPostedOverlay) notPostedOverlay.style.display = 'none';
+                    if (dlUserBtn) dlUserBtn.disabled = false;
+
                     userImg.onerror = function() {
                         this.onerror = null;
-                        this.src = `/static/output/user_cumulative_${currentUserId}_ID_${activeImageId}.png?t=${timestamp}`;
-                        this.onerror = function() {
-                            this.onerror = null;
-                            this.src = `/static/output/restored_ID_${activeImageId}.png?t=${timestamp}`;
-                            this.onerror = function() {
-                                this.onerror = null;
-                                this.src = "/static/user_slices_placeholder.png";
-                                if (notPostedOverlay) {
-                                    notPostedOverlay.style.display = 'flex';
-                                    this.style.opacity = '0.3';
-                                }
-                            };
-                        };
+                        this.src = "/static/user_slices_placeholder.png";
+                        if (notPostedOverlay) {
+                            notPostedOverlay.style.display = 'flex';
+                            this.style.opacity = '0.3';
+                        }
                     };
 
                     userImg.onload = function() {
@@ -459,21 +464,37 @@
                     else el.classList.remove('active');
                 });
 
-                // 画像ソース・リンクの更新
+                // 全員用の多数決画像ソース更新（どのアカウントでも全体画像は見られる）
                 targetImg.src = `/static/output/restored_ID_${imageId}.png?t=${timestamp}`;
-                
-                // ユーザー単体画像の更新 (トグル状態を引き継ぐ)
-                updateUserImageSource();
-
-                // スコアの更新
-                if (imageId === currentUploadedId) {
-                    myContributionScore = "{{ main_score }}";
-                } else {
-                    myContributionScore = null;
-                }
                 
                 overallRestorationScore = "計算中...";
                 renderScore();
+
+                // ユーザー状態の取得
+                fetch(`/api/image_status?image_id=${imageId}`)
+                    .then(response => response.json())
+                    .then(statusData => {
+                        if (statusData.status === "success") {
+                            updateUserImageSource(statusData);
+                            if (statusData.user_has_data) {
+                                myContributionScore = statusData.user_score.toFixed(1);
+                            } else {
+                                myContributionScore = "0.0";
+                            }
+                            overallRestorationScore = statusData.network_score.toFixed(1);
+                            overallRestorationDetails = `<i data-lucide="package-check" class="icon-inline"></i> 現在 <strong>${statusData.network_received}</strong> / ${statusData.total_required} パケット収集済み`;
+                        } else {
+                            updateUserImageSource(null);
+                            myContributionScore = "0.0";
+                        }
+                        renderScore();
+                    })
+                    .catch(err => {
+                        console.error("ステータス取得エラー:", err);
+                        updateUserImageSource(null);
+                        myContributionScore = "0.0";
+                        renderScore();
+                    });
 
                 // APIリクエスト（不足パケット取得）
                 listEl.innerHTML = '<li><span style="color:#94a3b8;">通信中...</span></li>';
@@ -491,13 +512,8 @@
                             
                             if (data.overall_score !== undefined) {
                                 overallRestorationScore = data.overall_score.toFixed(1);
-                            } else {
-                                overallRestorationScore = (present / totalBlocks * 100).toFixed(1);
                             }
                             overallRestorationDetails = `<i data-lucide="package-check" class="icon-inline"></i> 現在 <strong>${present}</strong> / ${totalBlocks} パケット収集済み`;
-                        } else {
-                            overallRestorationScore = "0.0";
-                            overallRestorationDetails = "";
                         }
                         renderScore();
                         
@@ -581,13 +597,13 @@
                 if (currentScoreMode === 0) {
                     scoreLabel.innerText = "この画像に対するあなたの貢献度（パケット一致率）";
                     scoreDetailsEl.style.display = 'none';
-                    if (myContributionScore !== null) {
+                    if (myContributionScore !== null && currentUserStatus && currentUserStatus.user_has_data) {
                         scoreText.innerText = `${myContributionScore}%`;
-                        scoreText.style.color = '#0b57d0';
+                        scoreText.style.color = '#008d54';
                         progressBar.style.width = `${myContributionScore}%`;
-                        progressBar.style.background = 'linear-gradient(90deg, #0b57d0, #38bdf8)';
+                        progressBar.style.background = 'linear-gradient(90deg, #008d54, #4ade80)';
                     } else {
-                        scoreText.innerText = `(過去データ)`;
+                        scoreText.innerText = `0.0% (未送信)`;
                         scoreText.style.color = '#94a3b8';
                         progressBar.style.width = `0%`;
                         progressBar.style.background = '#e2e8f0';
@@ -609,9 +625,9 @@
                         progressBar.style.background = '#e2e8f0';
                     } else {
                         scoreText.innerText = `${overallRestorationScore}%`;
-                        scoreText.style.color = '#16a34a';
+                        scoreText.style.color = '#008d54';
                         progressBar.style.width = `${overallRestorationScore}%`;
-                        progressBar.style.background = 'linear-gradient(90deg, #16a34a, #4ade80)';
+                        progressBar.style.background = 'linear-gradient(90deg, #008d54, #4ade80)';
                     }
                 }
             }
@@ -643,15 +659,17 @@
             const activeSessionId = document.querySelector('.session-img-item.active')?.dataset.id;
             const firstSessionId = document.querySelector('.session-img-item')?.dataset.id;
             const templateImageId = '{{ current_image_id }}';
-            const initialId = urlImageId || (templateImageId && templateImageId !== 'None' && templateImageId !== '0000' ? templateImageId : '') || activeSessionId || firstSessionId || 'ABE5';
+            const initialId = urlImageId || (templateImageId && templateImageId !== 'None' && templateImageId !== '0000' ? templateImageId : '') || activeSessionId || firstSessionId || '';
             
             // URLパラメータをパースした後はURLバーをクリーンにする（SPA挙動維持のため）
             if (urlImageId) {
                 window.history.replaceState({}, '', '/result');
             }
             
-            updateViewForImageId(initialId);
-            checkMergeStats(initialId);
+            if (initialId) {
+                updateViewForImageId(initialId);
+                checkMergeStats(initialId);
+            }
 
 
             // 画像ダウンロード処理

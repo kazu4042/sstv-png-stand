@@ -55,6 +55,32 @@ def get_available_images():
         }), 500
 
 
+@api_bp.route('/image_status', methods=['GET'])
+def get_image_status_api():
+    """指定画像の全体復元状況およびログインユーザーの貢献状況を返す"""
+    try:
+        image_id = request.args.get('image_id')
+        if not image_id:
+            return jsonify({
+                "status": "error",
+                "message": "リクエストに image_id が含まれていません。"
+            }), 400
+
+        user_id = session.get('user_id')
+        analyzer = get_analyzer()
+        status_info = analyzer.get_image_status(image_id, user_id=user_id)
+
+        return jsonify({
+            "status": "success",
+            **status_info
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"ステータス取得エラー: {str(e)}"
+        }), 500
+
+
 @api_bp.route('/missing', methods=['GET'])
 def get_missing_packets():
     """不足しているパケットの一覧をJSONデータとしてブラウザに返す"""
