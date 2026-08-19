@@ -94,7 +94,7 @@ def require_basic_auth_and_login():
         auth = request.authorization
         if auth is not None and auth.username and auth.password:
             if check_basic_auth(auth.username, auth.password):
-                session.permanent = True
+                session.permanent = False
                 session['basic_auth_passed'] = True
             else:
                 return authenticate()

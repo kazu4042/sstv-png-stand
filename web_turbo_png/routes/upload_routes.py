@@ -135,11 +135,9 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
         update_job(job_id, progress=70, status="統合処理中 (Aggregator)...")
         
         aggregator = TurboPNGAggregator(log_dir=log_dir_path)
+        aggregator.load_all_logs()
         # 全員のパケットで多数決画像を生成（user_idフィルタなし）
         aggregator.process_and_save_images(min_tile_ratio=0.0, user_id=None)
-        if user_id:
-            # そのユーザー単体の累積画像も生成
-            aggregator.process_and_save_images(min_tile_ratio=0.0, user_id=user_id)
             
         update_job(job_id, progress=85, status="復元画像を生成中...")
 
@@ -176,12 +174,13 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
         main_matched = 0
         user_output_url = ""
 
+        # 1. 今回送信された画像IDごとのセッション単体画像を生成
         for img_id_hex, packets in user_packets_by_id.items():
             if len(packets) > max_packets:
                 max_packets = len(packets)
                 current_image_id = img_id_hex
 
-            # ユーザー受信分の画像を描画
+            # 今回受信分の画像を描画
             user_image_buffer = Image.new("RGB", (config.WIDTH, config.HEIGHT), color="black")
             matched_packets = 0
 
@@ -236,6 +235,7 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                 except Exception:
                     pass
 
+            # 今回のセッション単体画像を保存
             user_img_path = os.path.join(output_dir, f"user_{user_id}_ID_{img_id_hex}.png")
             user_image_buffer.save(user_img_path, format="PNG")
 
@@ -245,6 +245,44 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                 if main_score > 100.0:
                     main_score = 100.0
                 main_matched = matched_packets
+
+        # 2. このユーザーが過去に送信したすべての画像IDについて累積画像をDBから完全合成して保存
+        if user_id:
+            user_counts = aggregator.db.get_all_image_ids_with_counts(user_id=user_id)
+            for u_img_id_int in user_counts.keys():
+                u_img_id_hex = f"{u_img_id_int:04X}"
+                user_all_tiles = aggregator.db.get_packets_for_image(u_img_id_int, user_id=user_id)
+                
+                cum_buffer = Image.new("RGB", (config.WIDTH, config.HEIGHT), color="black")
+                for ty in range(tile_count_y):
+                    for tx in range(tile_count_x):
+                        if ty not in user_all_tiles or tx not in user_all_tiles[ty]:
+                            continue
+                        len_dict = user_all_tiles[ty][tx]
+                        tile_drawn = False
+                        # 描画可能なパケットを探索
+                        for plen, pkts in len_dict.items():
+                            for p_bits, weight, _, _, _ in pkts:
+                                try:
+                                    p_b = bits_to_bytearray(p_bits)[:plen]
+                                    t_img = Image.open(io.BytesIO(p_b)).convert("RGB")
+                                    tw, th = t_img.size
+                                    paste_x = tx * tw
+                                    paste_y = ty * th
+                                    if paste_x + tw <= config.WIDTH and paste_y + th <= config.HEIGHT:
+                                        cum_buffer.paste(t_img, (paste_x, paste_y))
+                                    else:
+                                        t_img = t_img.crop((0, 0, min(tw, config.WIDTH - paste_x), min(th, config.HEIGHT - paste_y)))
+                                        cum_buffer.paste(t_img, (paste_x, paste_y))
+                                    tile_drawn = True
+                                    break
+                                except Exception:
+                                    pass
+                            if tile_drawn:
+                                break
+
+                cum_img_path = os.path.join(output_dir, f"user_cumulative_{user_id}_ID_{u_img_id_hex}.png")
+                cum_buffer.save(cum_img_path, format="PNG")
 
         if not current_image_id:
             current_image_id = available_image_ids[0] if available_image_ids else "0000"

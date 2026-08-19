@@ -37,7 +37,7 @@ def login():
         user_id = db.verify_user(email, password)
         
         if user_id:
-            session.permanent = True
+            session.permanent = False
             session['user_id'] = user_id
             session['email'] = email
             session['basic_auth_passed'] = True  # Basic認証も通過扱いにする

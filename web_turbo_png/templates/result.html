@@ -415,8 +415,23 @@
                         this.style.opacity = '1';
                     };
 
+                    const cacheBuster = new Date().getTime();
+
                     if (userImgMode === 'session') {
-                        userImg.src = `/static/output/user_${currentUserId}_ID_${activeImageId}.png?t=${timestamp}`;
+                        userImg.src = `/static/output/user_${currentUserId}_ID_${activeImageId}.png?t=${cacheBuster}`;
+                        userImg.onerror = function() {
+                            this.onerror = null;
+                            this.src = `/static/output/user_cumulative_${currentUserId}_ID_${activeImageId}.png?t=${cacheBuster}`;
+                            this.onerror = function() {
+                                this.onerror = null;
+                                this.src = "/static/user_slices_placeholder.png";
+                                if (notPostedOverlay) {
+                                    notPostedOverlay.style.display = 'flex';
+                                    this.style.opacity = '0.3';
+                                }
+                            };
+                        };
+
                         if (viewModeSessionBtn && viewModeCumulativeBtn) {
                             viewModeSessionBtn.style.background = '#008d54';
                             viewModeSessionBtn.style.color = 'white';
@@ -426,7 +441,20 @@
                             viewModeCumulativeBtn.style.border = '1px solid #cbd5e1';
                         }
                     } else {
-                        userImg.src = `/static/output/user_cumulative_${currentUserId}_ID_${activeImageId}.png?t=${timestamp}`;
+                        userImg.src = `/static/output/user_cumulative_${currentUserId}_ID_${activeImageId}.png?t=${cacheBuster}`;
+                        userImg.onerror = function() {
+                            this.onerror = null;
+                            this.src = `/static/output/user_${currentUserId}_ID_${activeImageId}.png?t=${cacheBuster}`;
+                            this.onerror = function() {
+                                this.onerror = null;
+                                this.src = "/static/user_slices_placeholder.png";
+                                if (notPostedOverlay) {
+                                    notPostedOverlay.style.display = 'flex';
+                                    this.style.opacity = '0.3';
+                                }
+                            };
+                        };
+
                         if (viewModeSessionBtn && viewModeCumulativeBtn) {
                             viewModeCumulativeBtn.style.background = '#008d54';
                             viewModeCumulativeBtn.style.color = 'white';

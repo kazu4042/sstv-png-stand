@@ -160,10 +160,10 @@ class TurboPNGAnalyzerService:
                 if user_score > 100.0:
                     user_score = 100.0
 
-        # 画像ファイルの存在確認
+        # 画像ファイルの存在確認（ユーザーデータが存在する場合のみURLを返す）
         static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
-        user_img_url = f"/static/output/user_{user_id}_ID_{target_image_id_hex}.png" if user_id and os.path.exists(os.path.join(static_out, f"user_{user_id}_ID_{target_image_id_hex}.png")) else None
-        user_cumulative_url = f"/static/output/user_cumulative_{user_id}_ID_{target_image_id_hex}.png" if user_id and os.path.exists(os.path.join(static_out, f"user_cumulative_{user_id}_ID_{target_image_id_hex}.png")) else None
+        user_img_url = f"/static/output/user_{user_id}_ID_{target_image_id_hex}.png" if (user_id and user_has_data and os.path.exists(os.path.join(static_out, f"user_{user_id}_ID_{target_image_id_hex}.png"))) else None
+        user_cumulative_url = f"/static/output/user_cumulative_{user_id}_ID_{target_image_id_hex}.png" if (user_id and user_has_data and os.path.exists(os.path.join(static_out, f"user_cumulative_{user_id}_ID_{target_image_id_hex}.png"))) else None
         restored_img_url = f"/static/output/restored_ID_{target_image_id_hex}.png" if os.path.exists(os.path.join(static_out, f"restored_ID_{target_image_id_hex}.png")) else None
 
         return {

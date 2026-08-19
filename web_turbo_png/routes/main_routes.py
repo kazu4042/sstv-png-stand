@@ -91,11 +91,7 @@ def result():
         job = get_job(job_id)
         if job and "result_data" in job:
             result_data = job.get("result_data", {})
-            session['result_data'] = result_data
     
-    if not result_data:
-        result_data = session.get('result_data', {})
-
     from web_turbo_png.routes.api_routes import get_analyzer
     analyzer = get_analyzer()
     available_ids = analyzer.get_available_image_ids(user_id=None)
