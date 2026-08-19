@@ -123,19 +123,20 @@ app.register_blueprint(auth_bp)
 
 @app.context_processor
 def inject_session_data():
-    """全画面共通のサイドバー向けデータを自動注入"""
+    """全画面共通のサイドバー向けデータを自動注入（ユーザーごとの履歴）"""
     from flask import session
     result_data = session.get('result_data', {})
+    user_id = session.get('user_id')
 
-    available_image_ids = result_data.get('available_image_ids', [])
+    available_image_ids = []
     current_image_id = result_data.get('current_image_id', '')
 
-    if not available_image_ids:
+    if user_id:
         try:
             from web_turbo_png.routes.api_routes import get_analyzer
             analyzer = get_analyzer()
-            available_image_ids = analyzer.get_available_image_ids()
-            if available_image_ids and not current_image_id:
+            available_image_ids = analyzer.get_available_image_ids(user_id=user_id)
+            if not current_image_id and available_image_ids:
                 current_image_id = available_image_ids[0]
         except Exception as e:
             print(f"⚠️ Context processor error: {e}")

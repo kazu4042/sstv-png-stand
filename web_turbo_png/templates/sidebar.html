@@ -103,16 +103,7 @@
                 </li>
                 {% endfor %}
             {% else %}
-                {% if current_image_id is defined and current_image_id %}
-                <li class="session-item flex items-center justify-between px-4 py-3 rounded-lg cursor-pointer session-img-item" data-id="{{ current_image_id }}">
-                    <div class="flex items-center gap-2">
-                        <i data-lucide="image" class="w-4 h-4 img-icon text-forest/80"></i>
-                        <span class="session-id font-mono text-sm tracking-widest text-forest font-bold">0x{{ current_image_id }}</span>
-                    </div>
-                </li>
-                {% else %}
-                <li class="px-4 py-2 text-xs text-earth">履歴がありません</li>
-                {% endif %}
+                <li class="px-4 py-2 text-xs text-earth">受信履歴がありません</li>
             {% endif %}
         </ul>
         

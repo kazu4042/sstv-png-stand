@@ -24,9 +24,9 @@ class TurboPNGAnalyzerService:
         self.aggregator = TurboPNGAggregator(log_dir=self.log_directory)
         self.aggregator.load_all_logs()
 
-    def get_available_image_ids(self):
-        """DB に存在する全画像IDを16進数文字列のリストで返す"""
-        image_counts = self.aggregator.db.get_all_image_ids_with_counts()
+    def get_available_image_ids(self, user_id=None):
+        """DB に存在する画像IDを16進数文字列のリストで返す（user_id指定時はそのユーザーのもののみ）"""
+        image_counts = self.aggregator.db.get_all_image_ids_with_counts(user_id=user_id)
         return sorted([f"{img_id:04X}" for img_id in image_counts.keys()])
 
     def get_merge_stats(self, target_image_id_hex):
