@@ -135,5 +135,48 @@ class PacketDatabaseTurboPNG:
 
         return data
 
+    def get_images_summary(self):
+        """管理画面用: すべての画像IDごとの統計情報を取得"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT 
+                image_id,
+                COUNT(*) as packet_count,
+                COUNT(DISTINCT tile_y || '_' || tile_x) as tile_count,
+                COUNT(DISTINCT user_id) as user_count,
+                MIN(imported_at) as first_received,
+                MAX(imported_at) as last_received
+            FROM packets
+            GROUP BY image_id
+            ORDER BY last_received DESC
+        """)
+        results = []
+        for row in cursor.fetchall():
+            img_id_int, p_count, t_count, u_count, first_rec, last_rec = row
+            if img_id_int is None:
+                continue
+            img_id_hex = f"{img_id_int:04X}"
+            results.append({
+                "image_id_int": img_id_int,
+                "image_id_hex": img_id_hex,
+                "packet_count": p_count,
+                "tile_count": t_count,
+                "user_count": u_count,
+                "first_received": first_rec,
+                "last_received": last_rec
+            })
+        return results
+
+    def delete_images_by_ids(self, image_ids_int_list):
+        """指定された画像IDのパケットをDBから完全削除"""
+        if not image_ids_int_list:
+            return 0
+        with self.conn:
+            placeholders = ",".join("?" for _ in image_ids_int_list)
+            cursor = self.conn.cursor()
+            cursor.execute(f"DELETE FROM packets WHERE image_id IN ({placeholders})", image_ids_int_list)
+            deleted_count = cursor.rowcount
+        return deleted_count
+
     def close(self):
         self.conn.close()

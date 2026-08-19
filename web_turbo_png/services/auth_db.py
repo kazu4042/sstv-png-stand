@@ -111,6 +111,15 @@ class AuthDB:
         cursor.execute("SELECT id, email, created_at FROM users ORDER BY created_at DESC")
         return [{"id": row[0], "email": row[1], "created_at": row[2]} for row in cursor.fetchall()]
 
+    def delete_user(self, user_id):
+        try:
+            with self.conn:
+                self.conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            return True
+        except Exception as e:
+            print(f"[AuthDB] Delete user error: {e}")
+            return False
+
     def close(self):
         self.conn.close()
 

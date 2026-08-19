@@ -106,5 +106,58 @@ def admin_dashboard():
     db = get_auth_db()
     users = db.get_all_users()
     
-    return render_template('admin.html', users=users)
+    from web_turbo_png.routes.api_routes import get_analyzer
+    analyzer = get_analyzer()
+    images = analyzer.get_all_images_summary()
+    
+    return render_template('admin.html', users=users, images=images)
+
+
+@auth_bp.route('/admin/delete_images', methods=['POST'])
+@login_required
+def admin_delete_images():
+    current_email = session.get('email')
+    if not is_admin(current_email):
+        return jsonify({'status': 'error', 'message': '権限がありません'}), 403
+
+    # JSONまたはフォームから画像IDリストを取得
+    data = request.get_json(silent=True) or {}
+    image_ids = data.get('image_ids')
+    
+    if not image_ids and 'image_ids' in request.form:
+        image_ids = request.form.getlist('image_ids')
+        if not image_ids and request.form.get('image_ids'):
+            image_ids = [request.form.get('image_ids')]
+
+    if not image_ids:
+        return jsonify({'status': 'error', 'message': '削除対象の画像IDが指定されていません'}), 400
+
+    from web_turbo_png.routes.api_routes import get_analyzer
+    analyzer = get_analyzer()
+    result = analyzer.delete_images(image_ids)
+
+    return jsonify({
+        'status': 'success',
+        'message': f"{result['deleted_images']}件の画像をクリーンしました（削除パケット数: {result['deleted_packets']}）",
+        'result': result
+    })
+
+
+@auth_bp.route('/admin/delete_user', methods=['POST'])
+@login_required
+def admin_delete_user():
+    current_email = session.get('email')
+    if not is_admin(current_email):
+        return jsonify({'status': 'error', 'message': '権限がありません'}), 403
+
+    data = request.get_json(silent=True) or {}
+    user_id = data.get('user_id') or request.form.get('user_id')
+
+    if not user_id:
+        return jsonify({'status': 'error', 'message': 'ユーザーIDが指定されていません'}), 400
+
+    db = get_auth_db()
+    db.delete_user(int(user_id))
+
+    return jsonify({'status': 'success', 'message': f'ユーザー #{user_id} を削除しました'})
 

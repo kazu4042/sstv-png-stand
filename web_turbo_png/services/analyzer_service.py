@@ -33,6 +33,80 @@ class TurboPNGAnalyzerService:
         """TurboPNG ではクラスタリングを行わないため空を返す"""
         return {"total_merged": 0, "details": []}
 
+    def get_all_images_summary(self):
+        """管理画面用: すべての画像IDの詳細一覧を取得"""
+        summaries = self.aggregator.db.get_images_summary()
+        total_required = config.TILE_COUNT_X * config.TILE_COUNT_Y
+        static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
+        
+        for item in summaries:
+            img_hex = item["image_id_hex"]
+            item["total_required"] = total_required
+            item["restoration_score"] = round((item["tile_count"] / total_required) * 100, 1) if total_required > 0 else 0.0
+            
+            # 画像プレビューパス
+            img_filename = f"restored_ID_{img_hex}.png"
+            if os.path.exists(os.path.join(static_out, img_filename)):
+                item["thumbnail_url"] = f"/static/output/{img_filename}"
+            else:
+                item["thumbnail_url"] = None
+
+        return summaries
+
+    def delete_images(self, image_ids_hex_list):
+        """指定された画像IDのDBレコードおよび画像ファイルを一括削除"""
+        if not image_ids_hex_list:
+            return {"deleted_packets": 0, "deleted_images": 0, "deleted_files": 0}
+
+        int_ids = []
+        for hex_id in image_ids_hex_list:
+            try:
+                int_ids.append(int(str(hex_id).strip(), 16))
+            except (ValueError, TypeError):
+                pass
+
+        if not int_ids:
+            return {"deleted_packets": 0, "deleted_images": 0, "deleted_files": 0}
+
+        # 1. DBからパケットを削除
+        deleted_packets = self.aggregator.db.delete_images_by_ids(int_ids)
+
+        # 2. 関連する画像ファイルを削除
+        import glob
+        deleted_files_count = 0
+        directories_to_clean = [
+            os.path.join(ROOT_DIR, "data", "images"),
+            os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
+        ]
+
+        for hex_id in image_ids_hex_list:
+            clean_hex = str(hex_id).strip().upper().zfill(4)
+            patterns = [
+                f"*ID_{clean_hex}*.png",
+                f"*ID_{clean_hex}*.jpg",
+                f"*ID_{str(hex_id).strip().upper()}*.png"
+            ]
+            for dir_path in directories_to_clean:
+                if not os.path.exists(dir_path):
+                    continue
+                for pat in patterns:
+                    for f in glob.glob(os.path.join(dir_path, pat)):
+                        try:
+                            os.remove(f)
+                            deleted_files_count += 1
+                        except Exception as e:
+                            print(f"Error removing {f}: {e}")
+
+        # 3. キャッシュ破棄
+        from web_turbo_png.routes.api_routes import invalidate_analyzer_cache
+        invalidate_analyzer_cache()
+
+        return {
+            "deleted_packets": deleted_packets,
+            "deleted_images": len(int_ids),
+            "deleted_files": deleted_files_count
+        }
+
     def get_image_status(self, target_image_id_hex, user_id=None):
         """指定画像の全体復元状況および特定ユーザーの貢献状況を高速取得"""
         try:

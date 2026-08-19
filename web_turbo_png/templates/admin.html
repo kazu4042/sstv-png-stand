@@ -30,72 +30,421 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         body { background-color: #f9f9f9; color: #231815; font-family: 'Zen Kaku Gothic New', sans-serif; }
+        .tab-btn.active {
+            border-color: #008d54;
+            color: #008d54;
+            background-color: #e6f3ec;
+        }
     </style>
 </head>
 <body class="flex h-screen overflow-hidden">
-    <!-- 管理者画面はサイドバーなし -->
 
     <!-- Main Content -->
     <main class="flex-1 flex flex-col overflow-hidden bg-paper relative w-full">
+        <!-- Top Nav -->
         <header class="top-nav h-16 px-6 flex items-center shrink-0 bg-white border-b border-gray-100 shadow-sm justify-between" style="z-index: 30;">
-            <div class="flex items-center">
-                <span class="font-bold text-ink tracking-widest flex items-center" style="font-size: 1.2rem;">
+            <div class="flex items-center gap-4">
+                <a href="/" class="text-xs font-bold text-earth hover:text-forest flex items-center gap-1 transition-colors">
+                    <i data-lucide="arrow-left" class="w-4 h-4"></i> トップへ戻る
+                </a>
+                <span class="text-gray-300">|</span>
+                <span class="font-bold text-ink tracking-widest flex items-center text-lg">
                     <i data-lucide="shield-check" class="w-6 h-6 inline mr-2 text-forest"></i> TurboPNG 管理システム
                 </span>
             </div>
-            <a href="/logout" class="text-sm font-bold text-red-600 hover:text-white hover:bg-red-600 px-4 py-2 rounded-lg transition-colors border border-red-600 flex items-center">
-                <i data-lucide="log-out" class="w-4 h-4 inline mr-1"></i> ログアウト
-            </a>
+            <div class="flex items-center gap-3">
+                <span class="text-xs text-earth hidden sm:inline"><i data-lucide="user" class="w-3 h-3 inline"></i> {{ session.get('email') }}</span>
+                <a href="/logout" class="text-xs font-bold text-red-600 hover:text-white hover:bg-red-600 px-3 py-1.5 rounded-lg transition-colors border border-red-600 flex items-center">
+                    <i data-lucide="log-out" class="w-3.5 h-3.5 inline mr-1"></i> ログアウト
+                </a>
+            </div>
         </header>
 
-        <div class="flex-1 overflow-y-auto p-4 md:p-8 flex justify-center items-start">
-            <div class="bg-white p-6 md:p-10 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.04)] w-full max-w-4xl border border-gray-100">
-                <div class="mb-8 border-b border-gray-100 pb-6 flex items-center justify-between">
-                    <div>
-                        <h1 class="text-2xl font-bold text-ink tracking-widest flex items-center gap-3">
-                            <i data-lucide="shield-check" class="text-forest w-8 h-8"></i> ユーザー管理
-                        </h1>
-                        <p class="text-earth text-sm mt-2 tracking-wider">登録されているすべてのアカウント情報</p>
-                    </div>
-                    <div class="bg-forestLight text-forest px-6 py-3 rounded-xl flex items-center gap-3">
-                        <i data-lucide="users" class="w-6 h-6"></i>
+        <!-- Main Content Area -->
+        <div class="flex-1 overflow-y-auto p-4 md:p-8">
+            <div class="max-w-6xl mx-auto space-y-6">
+
+                <!-- Header Stats Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-4">
+                        <div class="bg-forestLight p-3.5 rounded-xl text-forest">
+                            <i data-lucide="images" class="w-7 h-7"></i>
+                        </div>
                         <div>
-                            <div class="text-xs font-bold opacity-80">総アカウント数</div>
-                            <div class="text-2xl font-bold leading-none">{{ users|length }}</div>
+                            <div class="text-xs font-bold text-earth tracking-wider">総受信画像数</div>
+                            <div class="text-2xl font-bold text-ink leading-tight" id="stat-total-images">{{ images|length }}</div>
+                        </div>
+                    </div>
+                    <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-4">
+                        <div class="bg-sky-50 p-3.5 rounded-xl text-sky-600">
+                            <i data-lucide="layers" class="w-7 h-7"></i>
+                        </div>
+                        <div>
+                            <div class="text-xs font-bold text-earth tracking-wider">総蓄積パケット数</div>
+                            <div class="text-2xl font-bold text-ink leading-tight">
+                                {{ images|sum(attribute='packet_count') }}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-4">
+                        <div class="bg-amber-50 p-3.5 rounded-xl text-amber-600">
+                            <i data-lucide="users" class="w-7 h-7"></i>
+                        </div>
+                        <div>
+                            <div class="text-xs font-bold text-earth tracking-wider">登録アカウント数</div>
+                            <div class="text-2xl font-bold text-ink leading-tight">{{ users|length }}</div>
                         </div>
                     </div>
                 </div>
 
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse">
-                        <thead>
-                            <tr class="bg-gray-50 border-b border-gray-200">
-                                <th class="p-4 font-bold text-ink/70 text-sm tracking-widest">ID</th>
-                                <th class="p-4 font-bold text-ink/70 text-sm tracking-widest">メールアドレス</th>
-                                <th class="p-4 font-bold text-ink/70 text-sm tracking-widest">登録日時</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for user in users %}
-                            <tr class="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                                <td class="p-4 text-ink font-mono text-sm">#{{ user.id }}</td>
-                                <td class="p-4 text-ink font-bold">{{ user.email }}</td>
-                                <td class="p-4 text-earth text-sm">{{ user.created_at }}</td>
-                            </tr>
-                            {% else %}
-                            <tr>
-                                <td colspan="3" class="p-8 text-center text-earth">ユーザーはまだ登録されていません</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                <!-- Tabs & Container -->
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                    
+                    <!-- Tab Header -->
+                    <div class="flex border-b border-gray-100 px-6 pt-4 gap-2 bg-gray-50/50">
+                        <button id="tab-btn-images" class="tab-btn active px-5 py-3 text-sm font-bold rounded-t-xl border-b-2 flex items-center gap-2 transition-all">
+                            <i data-lucide="trash-2" class="w-4 h-4"></i> 受信画像管理 (選択クリーン)
+                        </button>
+                        <button id="tab-btn-users" class="tab-btn px-5 py-3 text-sm font-bold text-earth rounded-t-xl border-b-2 border-transparent hover:text-ink flex items-center gap-2 transition-all">
+                            <i data-lucide="users" class="w-4 h-4"></i> ユーザーアカウント管理
+                        </button>
+                    </div>
+
+                    <!-- TAB 1: 画像管理 (選択クリーン) -->
+                    <div id="tab-content-images" class="p-6">
+                        <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+                            <div>
+                                <h2 class="text-lg font-bold text-ink tracking-wider flex items-center gap-2">
+                                    <i data-lucide="image" class="w-5 h-5 text-forest"></i> データベース内の受信画像一覧
+                                </h2>
+                                <p class="text-earth text-xs mt-1">選択した画像IDのパケットデータおよび復元ファイルを安全に削除・クリーンアップできます。</p>
+                            </div>
+
+                            <!-- 一括操作ボタン -->
+                            <div class="flex items-center gap-3">
+                                <button id="btn-delete-selected" disabled class="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-xl text-sm font-bold flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-red-600 hover:text-white transition-all shadow-sm">
+                                    <i data-lucide="trash" class="w-4 h-4"></i> 選択した画像を削除 (<span id="selected-count">0</span>件)
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 画像一覧テーブル -->
+                        <div class="overflow-x-auto rounded-xl border border-gray-100">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="bg-gray-50 border-b border-gray-200 text-xs font-bold text-earth tracking-wider">
+                                        <th class="p-4 w-12 text-center">
+                                            <input type="checkbox" id="select-all-images" class="w-4 h-4 rounded border-gray-300 text-forest focus:ring-forest cursor-pointer">
+                                        </th>
+                                        <th class="p-4">プレビュー</th>
+                                        <th class="p-4">画像ID</th>
+                                        <th class="p-4">復元度 (タイル数)</th>
+                                        <th class="p-4">パケット数</th>
+                                        <th class="p-4">参加ユーザー</th>
+                                        <th class="p-4">最終受信日時</th>
+                                        <th class="p-4 text-center">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-100" id="images-tbody">
+                                    {% for img in images %}
+                                    <tr class="hover:bg-gray-50/80 transition-colors" data-id="{{ img.image_id_hex }}">
+                                        <td class="p-4 text-center">
+                                            <input type="checkbox" value="{{ img.image_id_hex }}" class="image-checkbox w-4 h-4 rounded border-gray-300 text-forest focus:ring-forest cursor-pointer">
+                                        </td>
+                                        <td class="p-4">
+                                            {% if img.thumbnail_url %}
+                                            <img src="{{ img.thumbnail_url }}" alt="Preview" class="w-12 h-12 rounded-lg object-cover bg-black border border-gray-200 shadow-sm hover:scale-110 transition-transform cursor-pointer" onclick="openPreviewModal('{{ img.thumbnail_url }}', '0x{{ img.image_id_hex }}')">
+                                            {% else %}
+                                            <div class="w-12 h-12 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center text-earth/50 text-[10px] font-mono">
+                                                No Img
+                                            </div>
+                                            {% endif %}
+                                        </td>
+                                        <td class="p-4 font-mono font-bold text-forest text-base">
+                                            0x{{ img.image_id_hex }}
+                                        </td>
+                                        <td class="p-4">
+                                            <div class="flex items-center gap-2">
+                                                <div class="w-24 bg-gray-200 rounded-full h-2 overflow-hidden">
+                                                    <div class="bg-forest h-2 rounded-full" style="width: {{ img.restoration_score }}%"></div>
+                                                </div>
+                                                <span class="text-xs font-bold text-ink">{{ img.restoration_score }}%</span>
+                                            </div>
+                                            <div class="text-[11px] text-earth mt-0.5">{{ img.tile_count }} / {{ img.total_required }} タイル</div>
+                                        </td>
+                                        <td class="p-4 font-mono text-sm text-ink font-bold">
+                                            {{ img.packet_count }}
+                                        </td>
+                                        <td class="p-4 text-sm text-earth">
+                                            <span class="inline-flex items-center gap-1 font-bold text-ink">
+                                                <i data-lucide="user" class="w-3.5 h-3.5 text-forest"></i> {{ img.user_count }} 名
+                                            </span>
+                                        </td>
+                                        <td class="p-4 text-xs text-earth">
+                                            {{ img.last_received }}
+                                        </td>
+                                        <td class="p-4 text-center">
+                                            <div class="flex items-center justify-center gap-2">
+                                                <a href="/result?image_id={{ img.image_id_hex }}" target="_blank" class="p-1.5 text-gray-500 hover:text-forest hover:bg-forestLight rounded-lg transition-colors" title="結果画面で確認">
+                                                    <i data-lucide="external-link" class="w-4 h-4"></i>
+                                                </a>
+                                                <button onclick="confirmSingleDelete('{{ img.image_id_hex }}')" class="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="この画像を削除">
+                                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% else %}
+                                    <tr id="no-images-row">
+                                        <td colspan="8" class="p-12 text-center text-earth">
+                                            <i data-lucide="inbox" class="w-10 h-10 mx-auto text-gray-300 mb-2"></i>
+                                            受信画像データは存在しません
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- TAB 2: ユーザー管理 -->
+                    <div id="tab-content-users" class="p-6 hidden">
+                        <div class="mb-6 flex items-center justify-between">
+                            <div>
+                                <h2 class="text-lg font-bold text-ink tracking-wider flex items-center gap-2">
+                                    <i data-lucide="users" class="w-5 h-5 text-forest"></i> 登録アカウント一覧
+                                </h2>
+                                <p class="text-earth text-xs mt-1">システムに登録されているすべてのアカウント情報です。</p>
+                            </div>
+                        </div>
+
+                        <div class="overflow-x-auto rounded-xl border border-gray-100">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="bg-gray-50 border-b border-gray-200 text-xs font-bold text-earth tracking-wider">
+                                        <th class="p-4">ID</th>
+                                        <th class="p-4">メールアドレス / ユーザー名</th>
+                                        <th class="p-4">登録日時</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-100">
+                                    {% for user in users %}
+                                    <tr class="hover:bg-gray-50/80 transition-colors">
+                                        <td class="p-4 text-ink font-mono text-sm">#{{ user.id }}</td>
+                                        <td class="p-4 text-ink font-bold">{{ user.email }}</td>
+                                        <td class="p-4 text-earth text-xs">{{ user.created_at }}</td>
+                                    </tr>
+                                    {% else %}
+                                    <tr>
+                                        <td colspan="3" class="p-12 text-center text-earth">ユーザーはまだ登録されていません</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
                 </div>
+
             </div>
         </div>
     </main>
 
+    <!-- 画像拡大プレビューモーダル -->
+    <div id="preview-modal" class="fixed inset-0 bg-black/60 z-50 hidden items-center justify-center backdrop-blur-sm p-4" onclick="closePreviewModal()">
+        <div class="bg-white rounded-2xl p-4 max-w-lg w-full shadow-2xl relative" onclick="event.stopPropagation()">
+            <div class="flex items-center justify-between mb-3">
+                <span id="preview-title" class="font-mono font-bold text-forest text-lg">0x----</span>
+                <button onclick="closePreviewModal()" class="text-gray-400 hover:text-gray-600 p-1">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <img id="preview-img" src="" alt="Full Preview" class="w-full h-auto rounded-xl bg-black border border-gray-200 object-contain max-h-[70vh]">
+        </div>
+    </div>
+
+    <!-- 削除確認モーダル -->
+    <div id="delete-modal" class="fixed inset-0 bg-black/50 z-50 hidden items-center justify-center backdrop-blur-sm p-4">
+        <div class="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div class="flex items-center gap-3 text-red-600">
+                <div class="bg-red-100 p-3 rounded-full">
+                    <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+                </div>
+                <div>
+                    <h3 class="text-lg font-bold text-ink">画像のクリーンアップ</h3>
+                    <p class="text-xs text-earth">この操作は取り消せません</p>
+                </div>
+            </div>
+            
+            <p class="text-sm text-ink" id="delete-modal-msg">
+                選択した画像を削除しますか？
+            </p>
+
+            <div class="flex justify-end gap-3 pt-2">
+                <button onclick="closeDeleteModal()" class="px-4 py-2 rounded-xl text-sm font-bold text-earth hover:bg-gray-100 transition-colors">
+                    キャンセル
+                </button>
+                <button id="confirm-delete-btn" class="px-5 py-2 rounded-xl text-sm font-bold bg-red-600 text-white hover:bg-red-700 transition-colors shadow-sm">
+                    削除を実行する
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script>
         lucide.createIcons();
+
+        // タブ切り替え
+        const tabBtnImages = document.getElementById('tab-btn-images');
+        const tabBtnUsers = document.getElementById('tab-btn-users');
+        const tabContentImages = document.getElementById('tab-content-images');
+        const tabContentUsers = document.getElementById('tab-content-users');
+
+        tabBtnImages.addEventListener('click', () => {
+            tabBtnImages.classList.add('active');
+            tabBtnUsers.classList.remove('active');
+            tabContentImages.classList.remove('hidden');
+            tabContentUsers.classList.add('hidden');
+        });
+
+        tabBtnUsers.addEventListener('click', () => {
+            tabBtnUsers.classList.add('active');
+            tabBtnImages.classList.remove('active');
+            tabContentUsers.classList.remove('hidden');
+            tabContentImages.classList.add('hidden');
+        });
+
+        // チェックボックス管理
+        const selectAllCheckbox = document.getElementById('select-all-images');
+        const imageCheckboxes = document.querySelectorAll('.image-checkbox');
+        const deleteSelectedBtn = document.getElementById('btn-delete-selected');
+        const selectedCountSpan = document.getElementById('selected-count');
+
+        function updateSelectionState() {
+            const checkedBoxes = document.querySelectorAll('.image-checkbox:checked');
+            const count = checkedBoxes.length;
+            selectedCountSpan.textContent = count;
+            deleteSelectedBtn.disabled = count === 0;
+
+            if (imageCheckboxes.length > 0) {
+                selectAllCheckbox.checked = count === imageCheckboxes.length;
+                selectAllCheckbox.indeterminate = count > 0 && count < imageCheckboxes.length;
+            }
+        }
+
+        if (selectAllCheckbox) {
+            selectAllCheckbox.addEventListener('change', () => {
+                imageCheckboxes.forEach(cb => cb.checked = selectAllCheckbox.checked);
+                updateSelectionState();
+            });
+        }
+
+        imageCheckboxes.forEach(cb => {
+            cb.addEventListener('change', updateSelectionState);
+        });
+
+        // プレビューモーダル
+        const previewModal = document.getElementById('preview-modal');
+        const previewImg = document.getElementById('preview-img');
+        const previewTitle = document.getElementById('preview-title');
+
+        function openPreviewModal(url, title) {
+            previewImg.src = url;
+            previewTitle.textContent = title;
+            previewModal.classList.remove('hidden');
+            previewModal.classList.add('flex');
+        }
+
+        function closePreviewModal() {
+            previewModal.classList.add('hidden');
+            previewModal.classList.remove('flex');
+        }
+
+        // 削除モーダル
+        let targetDeleteIds = [];
+        const deleteModal = document.getElementById('delete-modal');
+        const deleteModalMsg = document.getElementById('delete-modal-msg');
+        const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
+
+        function confirmSingleDelete(imageId) {
+            targetDeleteIds = [imageId];
+            deleteModalMsg.innerHTML = `画像ID: <strong>0x${imageId}</strong> のパケットデータおよび関連ファイルを完全に削除しますか？`;
+            deleteModal.classList.remove('hidden');
+            deleteModal.classList.add('flex');
+        }
+
+        deleteSelectedBtn.addEventListener('click', () => {
+            const checkedBoxes = document.querySelectorAll('.image-checkbox:checked');
+            targetDeleteIds = Array.from(checkedBoxes).map(cb => cb.value);
+            if (targetDeleteIds.length === 0) return;
+
+            deleteModalMsg.innerHTML = `選択された <strong>${targetDeleteIds.length} 件</strong> の画像（パケットデータおよび復元ファイル）を完全に削除しますか？`;
+            deleteModal.classList.remove('hidden');
+            deleteModal.classList.add('flex');
+        });
+
+        function closeDeleteModal() {
+            deleteModal.classList.add('hidden');
+            deleteModal.classList.remove('flex');
+            targetDeleteIds = [];
+        }
+
+        confirmDeleteBtn.addEventListener('click', async () => {
+            if (targetDeleteIds.length === 0) return;
+
+            confirmDeleteBtn.disabled = true;
+            confirmDeleteBtn.textContent = '削除中...';
+
+            try {
+                const res = await fetch('/admin/delete_images', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ image_ids: targetDeleteIds })
+                });
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    // テーブル行をアニメーション削除
+                    targetDeleteIds.forEach(id => {
+                        const row = document.querySelector(`tr[data-id="${id}"]`);
+                        if (row) row.remove();
+                    });
+
+                    // 選択状態のリセット
+                    updateSelectionState();
+
+                    // 総数の更新
+                    const remainingRows = document.querySelectorAll('#images-tbody tr[data-id]');
+                    document.getElementById('stat-total-images').textContent = remainingRows.length;
+
+                    if (remainingRows.length === 0) {
+                        const tbody = document.getElementById('images-tbody');
+                        tbody.innerHTML = `
+                            <tr id="no-images-row">
+                                <td colspan="8" class="p-12 text-center text-earth">
+                                    <i data-lucide="inbox" class="w-10 h-10 mx-auto text-gray-300 mb-2"></i>
+                                    受信画像データは存在しません
+                                </td>
+                            </tr>
+                        `;
+                        lucide.createIcons();
+                    }
+
+                    closeDeleteModal();
+                    alert(data.message);
+                } else {
+                    alert('エラー: ' + (data.message || '削除に失敗しました'));
+                }
+            } catch (err) {
+                console.error(err);
+                alert('通信エラーが発生しました');
+            } finally {
+                confirmDeleteBtn.disabled = false;
+                confirmDeleteBtn.textContent = '削除を実行する';
+            }
+        });
     </script>
 </body>
 </html>
