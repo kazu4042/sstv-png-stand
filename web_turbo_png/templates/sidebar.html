@@ -148,24 +148,20 @@
         imageItems.forEach(item => {
             item.addEventListener('click', function(e) {
                 const imageId = this.dataset.id;
-                const currentPath = window.location.pathname;
+                if (!imageId) return;
                 
                 // サイドバーを閉じる (モバイル時)
                 if (window.innerWidth <= 768) {
                     document.getElementById('sidebar').classList.add('collapsed');
                 }
                 
-                // アナリティクス画面の場合も、ページ内でAJAX的に処理するため遷移しない
-                if (currentPath === '/analytics') {
-                    // 何もしない (analytics.html 内のイベントリスナーで処理される)
-                } 
-                // result 画面の場合は、result.html の JS が動的に処理するので
-                // ここではページ遷移は行わない (result.html 側に任せる)
-                else if (currentPath === '/result') {
-                    // 何もしない (result.html 内のイベントリスナーで処理される)
-                }
-                // それ以外の画面（ホーム等）からは、結果画面(result)へ遷移する
-                else {
+                const currentPath = window.location.pathname;
+                
+                if (currentPath === '/result' && typeof window.updateViewForImageId === 'function') {
+                    window.updateViewForImageId(imageId);
+                } else if (currentPath === '/analytics' && typeof window.switchToImage === 'function') {
+                    window.switchToImage(imageId);
+                } else {
                     window.location.href = `/result?image_id=${imageId}`;
                 }
             });

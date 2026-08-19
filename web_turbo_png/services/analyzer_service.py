@@ -34,10 +34,10 @@ class TurboPNGAnalyzerService:
         return {"total_merged": 0, "details": []}
 
     def get_image_status(self, target_image_id_hex, user_id=None):
-        """指定画像の全体復元状況および特定ユーザーの貢献状況を取得"""
+        """指定画像の全体復元状況および特定ユーザーの貢献状況を高速取得"""
         try:
             target_id_int = int(target_image_id_hex, 16)
-        except ValueError:
+        except (ValueError, TypeError):
             return {
                 "image_id": target_image_id_hex,
                 "user_has_data": False,
@@ -53,74 +53,38 @@ class TurboPNGAnalyzerService:
         tile_count_y = config.TILE_COUNT_Y
         total_required = tile_count_x * tile_count_y
 
-        # 全体のタイルデータ
-        tiles_data = self._get_tiles_data(target_id_int)
-        
-        network_received = 0
+        cursor = self.aggregator.db.conn.cursor()
+
+        # 1. ネットワーク全体のユニークタイル数 (高速SQL集計)
+        cursor.execute("""
+            SELECT COUNT(DISTINCT tile_y || '_' || tile_x)
+            FROM packets
+            WHERE image_id = ?
+        """, (target_id_int,))
+        row_net = cursor.fetchone()
+        network_received = row_net[0] if row_net and row_net[0] is not None else 0
+        network_score = round((network_received / total_required) * 100, 1) if total_required > 0 else 0.0
+
+        user_has_data = False
         user_packet_count = 0
         user_matched_count = 0
+        user_score = 0.0
 
-        for ty in range(tile_count_y):
-            for tx in range(tile_count_x):
-                if ty not in tiles_data or tx not in tiles_data[ty] or not tiles_data[ty][tx]:
-                    continue
-                
-                len_dict = tiles_data[ty][tx]
-                if not len_dict:
-                    continue
-
-                network_received += 1
-
-                if not user_id:
-                    continue
-
-                # ユーザーのパケットが存在するか確認
-                best_plen = max(len_dict.keys(), key=lambda k: sum(p[1] for p in len_dict[k]))
-                db_packets = len_dict[best_plen]
-                
-                # ユーザーがこのタイルに送信したパケットがあるか
-                user_pkts = [p for p in db_packets if str(p[3]) == str(user_id)]
-                if not user_pkts:
-                    # 他のpayload_lengthも確認
-                    for plen, pkts in len_dict.items():
-                        user_pkts.extend([p for p in pkts if str(p[3]) == str(user_id)])
-
-                if user_pkts:
-                    user_packet_count += len(user_pkts)
-                    # 多数決ビット列を算出
-                    payload_bit_len = best_plen * 8
-                    score_0 = np.zeros(payload_bit_len, dtype=float)
-                    score_1 = np.zeros(payload_bit_len, dtype=float)
-                    for p_bits_str, weight, _, _, _ in db_packets:
-                        if len(p_bits_str) < payload_bit_len:
-                            continue
-                        for i, bit_char in enumerate(p_bits_str[:payload_bit_len]):
-                            if bit_char == '1':
-                                score_1[i] += weight
-                            elif bit_char == '0':
-                                score_0[i] += weight
-                    voted_payload = "".join(
-                        '1' if score_1[i] >= score_0[i] else '0'
-                        for i in range(payload_bit_len)
-                    )
-
-                    # ユーザーのパケットと多数決ビット列の照合
-                    matched = False
-                    for u_bits_str, _, _, _, _ in user_pkts:
-                        if len(u_bits_str) >= payload_bit_len and len(voted_payload) > 0:
-                            bit_matches = sum(1 for u_b, v_b in zip(u_bits_str[:payload_bit_len], voted_payload) if u_b == v_b)
-                            if (bit_matches / len(voted_payload)) >= 0.9:
-                                matched = True
-                                break
-                    if matched:
-                        user_matched_count += 1
-
-        network_score = round((network_received / total_required) * 100, 1) if total_required > 0 else 0.0
-        user_score = round((user_matched_count / total_required) * 100, 1) if total_required > 0 else 0.0
-        if user_score > 100.0:
-            user_score = 100.0
-
-        user_has_data = user_packet_count > 0
+        if user_id:
+            # 2. ユーザーのパケット総数およびユニークタイル数 (高速SQL集計)
+            cursor.execute("""
+                SELECT COUNT(*), COUNT(DISTINCT tile_y || '_' || tile_x)
+                FROM packets
+                WHERE image_id = ? AND user_id = ?
+            """, (target_id_int, user_id))
+            row_user = cursor.fetchone()
+            if row_user:
+                user_packet_count = row_user[0] or 0
+                user_matched_count = row_user[1] or 0
+                user_has_data = user_packet_count > 0
+                user_score = round((user_matched_count / total_required) * 100, 1) if total_required > 0 else 0.0
+                if user_score > 100.0:
+                    user_score = 100.0
 
         # 画像ファイルの存在確認
         static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")

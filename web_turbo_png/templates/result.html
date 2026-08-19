@@ -639,17 +639,25 @@
                 });
             }
 
+            // グローバル関数として公開（sidebar.html からの呼び出し用）
+            window.updateViewForImageId = function(imageId) {
+                updateViewForImageId(imageId);
+                checkMergeStats(imageId);
+            };
+
             // サイドバーの「画像ID」アイテムのみにクリックイベントを付与
-            const imageSessionItems = document.querySelectorAll('.session-item[data-id]');
+            const imageSessionItems = document.querySelectorAll('.session-img-item, .session-item[data-id]');
             imageSessionItems.forEach(item => {
-                item.addEventListener('click', function() {
+                item.addEventListener('click', function(e) {
+                    e.stopPropagation();
                     // スマホ幅の時はクリック後に自動でサイドバーを閉じる
                     if (window.innerWidth <= 768) {
                         sidebar.classList.add('collapsed');
                     }
                     const imageId = this.dataset.id;
-                    updateViewForImageId(imageId);
-                    checkMergeStats(imageId);
+                    if (imageId) {
+                        window.updateViewForImageId(imageId);
+                    }
                 });
             });
 
@@ -667,8 +675,7 @@
             }
             
             if (initialId) {
-                updateViewForImageId(initialId);
-                checkMergeStats(initialId);
+                window.updateViewForImageId(initialId);
             }
 
 
