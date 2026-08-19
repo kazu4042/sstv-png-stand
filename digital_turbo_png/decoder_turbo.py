@@ -136,7 +136,8 @@ def fast_find_header_alignment(data, start_scan, end_scan, header_symbols, sampl
 
 class DigitalTurboPNGDecoder:
     def __init__(self, user_id=None):
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        import uuid
+        timestamp = f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{uuid.uuid4().hex[:6]}"
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
 
         # テキストログのみ出力（タイル画像はアグリゲータが生成する）

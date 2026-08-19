@@ -280,6 +280,10 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
             "timestamp": int(time.time())
         }
 
+        # アナライザーのキャッシュを破棄（新規パケットを即座にAPIや画面に反映）
+        from web_turbo_png.routes.api_routes import invalidate_analyzer_cache
+        invalidate_analyzer_cache()
+
         update_job(job_id, progress=100, status="完了", result_data=result_data)
 
     except Exception as e:
@@ -319,7 +323,9 @@ def upload_file():
 
             os.makedirs(current_app.config['UPLOAD_FOLDER'], exist_ok=True)
             from werkzeug.utils import secure_filename
-            save_path = os.path.join(current_app.config['UPLOAD_FOLDER'], secure_filename(filename))
+            # 同時アップロード時のファイル名衝突を防止するために job_id を付与
+            unique_filename = f"{job_id}_{secure_filename(filename)}"
+            save_path = os.path.join(current_app.config['UPLOAD_FOLDER'], unique_filename)
             file.save(save_path)
 
             import threading
