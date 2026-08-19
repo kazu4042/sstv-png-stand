@@ -1,18 +1,20 @@
 <!doctype html>
 <html lang="ja">
+
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SSTV Aggregator - アップロード</title>
-    
+
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
-    
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap"
+        rel="stylesheet">
+
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    
+
     <!-- Tailwind Config -->
     <script>
         tailwind.config = {
@@ -36,24 +38,36 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         /* (Removed old sidebar CSS) */
-        body { background-color: #f9f9f9; color: #231815; font-family: 'Zen Kaku Gothic New', sans-serif; }
-        
+        body {
+            background-color: #f9f9f9;
+            color: #231815;
+            font-family: 'Zen Kaku Gothic New', sans-serif;
+        }
+
         /* 🍔 トップナビゲーションバー */
-        
+
 
         /* 📱 左サイドバー */
-        
-        
-        @media (min-width: 1024px) {
-            
-            
-        }
+
+
+        @media (min-width: 1024px) {}
+
         /* (Removed old session-item CSS) */
         .btn-submit {
             transition: transform 0.1s, box-shadow 0.2s;
         }
-        .btn-submit:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,141,84, 0.4); }
-        .btn-submit:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+        .btn-submit:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 141, 84, 0.4);
+        }
+
+        .btn-submit:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
 
         /* 🌊 ウォーターフォール用キャンバス */
         .waterfall-wrapper {
@@ -62,23 +76,27 @@
             overflow: hidden;
             transition: max-height 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s ease, margin-top 0.4s ease, margin-bottom 0.4s ease;
         }
+
         .waterfall-wrapper.active {
             max-height: 300px;
             opacity: 1;
             margin-top: 1rem;
             margin-bottom: 1rem;
         }
-        
+
         /* 観測地情報などの入力 */
-        input[type="text"], input[type="number"] {
+        input[type="text"],
+        input[type="number"] {
             transition: all 0.2s;
         }
-        input[type="text"]:focus, input[type="number"]:focus {
+
+        input[type="text"]:focus,
+        input[type="number"]:focus {
             border-color: #008d54;
-            box-shadow: 0 0 0 2px rgba(0,141,84, 0.2);
+            box-shadow: 0 0 0 2px rgba(0, 141, 84, 0.2);
             outline: none;
         }
-        
+
         /* プログレスバーUI */
         .progress-wrapper {
             max-height: 0;
@@ -86,23 +104,27 @@
             overflow: hidden;
             transition: max-height 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s ease, margin-top 0.4s ease;
         }
+
         .progress-wrapper.active {
             max-height: 100px;
             opacity: 1;
             margin-top: 1.5rem;
         }
+
         .progress-fill {
             transition: width 0.3s ease;
         }
-        
+
         /* カスタムトグルスイッチ */
         .toggle-checkbox:checked {
             right: 0;
             border-color: #008d54;
         }
-        .toggle-checkbox:checked + .toggle-label {
+
+        .toggle-checkbox:checked+.toggle-label {
             background-color: #008d54;
         }
+
         .toggle-checkbox {
             right: 0;
             z-index: 1;
@@ -110,6 +132,7 @@
         }
     </style>
 </head>
+
 <body class="flex h-screen overflow-hidden">
     <!-- Sidebar -->
     {% include 'sidebar.html' %}
@@ -117,9 +140,11 @@
 
     <!-- Main Content -->
     <main class="flex-1 flex flex-col overflow-hidden bg-paper relative">
-        
-        <header class="top-nav h-16 px-4 flex items-center shrink-0 bg-white border-b border-gray-100 shadow-sm" style="z-index: 30;">
-            <button class="p-2 rounded-full hover:bg-gray-100 text-ink/70 transition-colors" id="toggle-btn" style="background:transparent; border:none; cursor:pointer;">
+
+        <header class="top-nav h-16 px-4 flex items-center shrink-0 bg-white border-b border-gray-100 shadow-sm"
+            style="z-index: 30;">
+            <button class="p-2 rounded-full hover:bg-gray-100 text-ink/70 transition-colors" id="toggle-btn"
+                style="background:transparent; border:none; cursor:pointer;">
                 <i data-lucide="menu" class="w-6 h-6"></i>
             </button>
             <span class="ml-4 font-bold text-ink tracking-widest" style="font-size: 1.1rem;">SSTV Aggregator</span>
@@ -127,9 +152,11 @@
 
 
         <div class="flex-1 overflow-y-auto p-4 md:p-8 flex justify-center items-start">
-            <div class="bg-white p-6 md:p-10 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.04)] w-full max-w-2xl border border-gray-100">
+            <div
+                class="bg-white p-6 md:p-10 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.04)] w-full max-w-2xl border border-gray-100">
                 <div class="text-center mb-8">
-                    <h1 class="text-2xl md:text-3xl font-bold text-ink tracking-widest flex items-center justify-center gap-3 mb-2">
+                    <h1
+                        class="text-2xl md:text-3xl font-bold text-ink tracking-widest flex items-center justify-center gap-3 mb-2">
                         <i data-lucide="radio" class="text-forest w-8 h-8"></i> SSTV 協調復元エンジン
                     </h1>
                     <div class="text-sm text-earth font-medium tracking-wider">4-FSK Audio Signal Aggregator v1.2</div>
@@ -139,44 +166,58 @@
                     <!-- File Upload -->
                     <div class="flex flex-col md:flex-row gap-4 mb-4">
                         <div class="relative flex-1">
-                            <div class="flex items-center justify-center w-full p-4 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 hover:bg-forestLight hover:border-forest text-ink/70 hover:text-forest transition-all cursor-pointer font-bold tracking-widest h-full" id="upload-btn-text">
-                                <i data-lucide="folder-up" class="w-5 h-5 mr-2"></i> 音声 (.wav) または 画像 (.png, .jpg) を選択
+                            <div class="flex items-center justify-center w-full p-4 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 hover:bg-forestLight hover:border-forest text-ink/70 hover:text-forest transition-all cursor-pointer font-bold tracking-widest h-full"
+                                id="upload-btn-text">
+                                <i data-lucide="folder-up" class="w-5 h-5 mr-2"></i> 音声ファイル (.wav) を選択
                             </div>
-                            <input type="file" name="file" id="audio-file" accept=".wav,.png,.jpg,.jpeg" required class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+                            <input type="file" name="file" id="audio-file" accept=".wav" required
+                                class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
                         </div>
-                        <button type="button" id="btn-preview" class="bg-forestLight text-forest px-6 py-4 rounded-xl font-bold tracking-widest flex items-center justify-center gap-2 hover:bg-forest hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                        <button type="button" id="btn-preview"
+                            class="bg-forestLight text-forest px-6 py-4 rounded-xl font-bold tracking-widest flex items-center justify-center gap-2 hover:bg-forest hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled>
                             <i data-lucide="play" class="w-5 h-5"></i> プレビュー
                         </button>
                     </div>
 
-
-                    <div id="file-name-display" class="text-center text-sm text-forest font-bold mb-6 min-h-[1.5rem] tracking-widest"></div>
+                    <div id="file-name-display"
+                        class="text-center text-sm text-forest font-bold mb-6 min-h-[1.5rem] tracking-widest"></div>
 
                     <!-- Spectrum Toggle -->
-                    <div class="flex items-center justify-between p-4 bg-gray-50 rounded-xl mb-6 border border-gray-100">
+                    <div
+                        class="flex items-center justify-between p-4 bg-gray-50 rounded-xl mb-6 border border-gray-100">
                         <div class="flex items-center gap-3">
                             <i data-lucide="activity" class="text-earth w-5 h-5"></i>
                             <span class="text-sm font-bold text-ink tracking-widest">音声スペクトルを表示する</span>
                         </div>
-                        <div class="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in">
-                            <input type="checkbox" name="toggle" id="spectrum-toggle" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all duration-300"/>
-                            <label for="spectrum-toggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer transition-all duration-300"></label>
+                        <div
+                            class="relative inline-block w-12 mr-2 align-middle select-none transition duration-200 ease-in">
+                            <input type="checkbox" name="toggle" id="spectrum-toggle"
+                                class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all duration-300" />
+                            <label for="spectrum-toggle"
+                                class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer transition-all duration-300"></label>
                         </div>
                     </div>
 
                     <!-- Waterfall Canvas -->
-                    <div class="waterfall-wrapper bg-black rounded-xl border-2 border-gray-200 overflow-hidden relative mb-6" id="waterfall-wrapper">
+                    <div class="waterfall-wrapper bg-black rounded-xl border-2 border-gray-200 overflow-hidden relative mb-6"
+                        id="waterfall-wrapper">
                         <canvas id="waterfall" class="w-full h-[200px] block"></canvas>
-                        <div class="absolute inset-0 pointer-events-none" style="background: linear-gradient(90deg, rgba(255,255,255,0) 15%, rgba(255,255,255,0.1) 15%, rgba(255,255,255,0) 16%, rgba(255,255,255,0) 45%, rgba(255,255,255,0.1) 45%, rgba(255,255,255,0) 46%);"></div>
+                        <div class="absolute inset-0 pointer-events-none"
+                            style="background: linear-gradient(90deg, rgba(255,255,255,0) 15%, rgba(255,255,255,0.1) 15%, rgba(255,255,255,0) 16%, rgba(255,255,255,0) 45%, rgba(255,255,255,0.1) 45%, rgba(255,255,255,0) 46%);">
+                        </div>
                     </div>
 
-                    <button type="submit" class="btn-submit w-full bg-forest text-white py-4 rounded-xl font-bold tracking-widest flex justify-center items-center gap-2" id="btn-submit" disabled>
+                    <button type="submit"
+                        class="btn-submit w-full bg-forest text-white py-4 rounded-xl font-bold tracking-widest flex justify-center items-center gap-2"
+                        id="btn-submit" disabled>
                         <i data-lucide="rocket" class="w-5 h-5"></i> サーバーに送信して解析を開始
                     </button>
 
                     <!-- プログレスバー -->
                     <div class="progress-wrapper" id="progress-wrapper">
-                        <div class="text-center text-sm font-bold text-earth tracking-widest mb-2" id="progress-text">処理中... 0%</div>
+                        <div class="text-center text-sm font-bold text-earth tracking-widest mb-2" id="progress-text">
+                            処理中... 0%</div>
                         <div class="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
                             <div class="progress-fill h-full bg-forest w-0" id="progress-fill"></div>
                         </div>
@@ -189,25 +230,25 @@
 
     <script>
         lucide.createIcons();
-        
+
         const fileInput = document.getElementById('audio-file');
         const fileNameDisplay = document.getElementById('file-name-display');
         const btnPreview = document.getElementById('btn-preview');
         const btnSubmit = document.getElementById('btn-submit');
-        const waterfallWrapper = document.getElementById('waterfall-wrapper'); 
+        const waterfallWrapper = document.getElementById('waterfall-wrapper');
         const spectrumToggle = document.getElementById('spectrum-toggle');
         const canvas = document.getElementById('waterfall');
-        const ctx = canvas.getContext('2d', { alpha: false }); 
+        const ctx = canvas.getContext('2d', { alpha: false });
 
         let audioContext;
         let analyser;
         let source;
         let animationId;
         let isPlaying = false;
-        
+
         // スペクトルの表示/非表示の切り替え
         if (spectrumToggle) {
-            spectrumToggle.addEventListener('change', function() {
+            spectrumToggle.addEventListener('change', function () {
                 if (this.checked && fileInput && fileInput.files.length > 0) {
                     waterfallWrapper.classList.add('active');
                 } else {
@@ -234,41 +275,24 @@
         }
 
         // ファイル選択時の処理
-        fileInput.addEventListener('change', function(e) {
+        fileInput.addEventListener('change', function (e) {
             const file = e.target.files[0];
-            
+
             if (isPlaying) {
                 btnPreview.click();
             }
 
             if (file) {
-                const ext = file.name.split('.').pop().toLowerCase();
-                const isWav = ext === 'wav';
-                const isImage = ['png', 'jpg', 'jpeg'].includes(ext);
-
-                if (isWav) {
-                    fileNameDisplay.innerHTML = `<i data-lucide="file-audio" class="w-4 h-4 inline mr-1"></i> 音声: ${file.name}`;
-                    btnPreview.disabled = false;
-                    btnPreview.style.display = 'flex';
-                } else if (isImage) {
-                    fileNameDisplay.innerHTML = `<i data-lucide="image" class="w-4 h-4 inline mr-1"></i> 画像: ${file.name} <span class="text-xs text-earth font-normal ml-2">(SSTV音響信号へ自動変調・デコード)</span>`;
-                    btnPreview.disabled = true;
-                    btnPreview.style.display = 'none';
-                    waterfallWrapper.classList.remove('active');
-                } else {
-                    fileNameDisplay.innerHTML = `<i data-lucide="file" class="w-4 h-4 inline mr-1"></i> ${file.name}`;
-                    btnPreview.disabled = true;
-                }
-
+                fileNameDisplay.innerHTML = `<i data-lucide="file-audio" class="w-4 h-4 inline mr-1"></i> ${file.name}`;
                 lucide.createIcons();
+                btnPreview.disabled = false;
                 btnSubmit.disabled = false;
-                if (isWav && spectrumToggle.checked) {
+                if (spectrumToggle.checked) {
                     waterfallWrapper.classList.add('active');
                 }
             } else {
                 fileNameDisplay.innerHTML = '';
                 btnPreview.disabled = true;
-                btnPreview.style.display = 'flex';
                 btnSubmit.disabled = true;
                 waterfallWrapper.classList.remove('active');
             }
@@ -276,9 +300,8 @@
 
 
 
-
         // プレビュー再生ボタンの処理
-        btnPreview.addEventListener('click', async function() {
+        btnPreview.addEventListener('click', async function () {
             if (isPlaying) {
                 // 停止処理
                 if (source) source.stop();
@@ -300,7 +323,7 @@
             btnPreview.classList.add('bg-red-50', 'text-red-600', 'hover:bg-red-600', 'hover:text-white');
             lucide.createIcons();
             isPlaying = true;
-            
+
             // Toggleがオフでも再生したらオンにする
             if (!spectrumToggle.checked) {
                 spectrumToggle.checked = true;
@@ -315,12 +338,12 @@
             const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
             analyser = audioContext.createAnalyser();
-            analyser.fftSize = 2048; 
-            analyser.smoothingTimeConstant = 0.2; 
+            analyser.fftSize = 2048;
+            analyser.smoothingTimeConstant = 0.2;
 
             source = audioContext.createBufferSource();
             source.buffer = audioBuffer;
-            
+
             source.connect(analyser);
             analyser.connect(audioContext.destination);
 
@@ -329,7 +352,7 @@
             const bufferLength = analyser.frequencyBinCount;
             const dataArray = new Uint8Array(bufferLength);
             const nyquist = audioContext.sampleRate / 2;
-            const maxDisplayFreq = 6000; 
+            const maxDisplayFreq = 6000;
             const maxBinIndex = Math.floor((maxDisplayFreq / nyquist) * bufferLength);
             const imgData = ctx.createImageData(canvas.width, 1);
 
@@ -344,7 +367,7 @@
                 for (let x = 0; x < canvas.width; x++) {
                     const binIndex = Math.floor((x / canvas.width) * maxBinIndex);
                     const val = dataArray[binIndex];
-                    
+
                     const [r, g, b] = getColor(val);
                     const pxOffset = x * 4;
                     imgData.data[pxOffset] = r;
@@ -373,7 +396,7 @@
         const progressFill = document.getElementById('progress-fill');
         const progressText = document.getElementById('progress-text');
 
-        uploadForm.addEventListener('submit', function(e) {
+        uploadForm.addEventListener('submit', function (e) {
             e.preventDefault();
 
             btnSubmit.disabled = true;
@@ -387,7 +410,7 @@
             const xhr = new XMLHttpRequest();
 
             // 1. アップロード送信中の進捗（0%〜100%）
-            xhr.upload.addEventListener('progress', function(event) {
+            xhr.upload.addEventListener('progress', function (event) {
                 if (event.lengthComputable) {
                     const percent = Math.round((event.loaded / event.total) * 100);
                     const loadedMB = (event.loaded / (1024 * 1024)).toFixed(1);
@@ -398,7 +421,7 @@
             });
 
             // 2. サーバー到達後の処理（SSEで解析進捗を購読）
-            xhr.addEventListener('load', function() {
+            xhr.addEventListener('load', function () {
                 if (xhr.status === 200) {
                     try {
                         const data = JSON.parse(xhr.responseText);
@@ -407,10 +430,10 @@
                             progressFill.style.width = '35%';
 
                             const evtSource = new EventSource(`/api/progress-stream?job_id=${data.job_id}`);
-                            
-                            evtSource.onmessage = function(event) {
+
+                            evtSource.onmessage = function (event) {
                                 const sseData = JSON.parse(event.data);
-                                
+
                                 if (sseData.error) {
                                     alert(sseData.error);
                                     btnSubmit.disabled = false;
@@ -420,7 +443,7 @@
                                     evtSource.close();
                                     return;
                                 }
-                                
+
                                 const serverProg = parseInt(sseData.progress);
                                 const statusMsg = sseData.status || '解析中...';
                                 if (!isNaN(serverProg)) {
@@ -428,7 +451,7 @@
                                     const totalDisplayProg = Math.min(100, Math.round(30 + (serverProg * 0.7)));
                                     progressFill.style.width = totalDisplayProg + '%';
                                     progressText.innerText = `${statusMsg} (${totalDisplayProg}%)`;
-                                    
+
                                     if (serverProg >= 100) {
                                         progressText.innerText = "✨ デコード完了！結果画面へ移動します...";
                                         progressFill.style.width = '100%';
@@ -439,8 +462,8 @@
                                     }
                                 }
                             };
-                            
-                            evtSource.onerror = function() {
+
+                            evtSource.onerror = function () {
                                 evtSource.close();
                             };
                         } else {
@@ -456,13 +479,13 @@
                     try {
                         const errData = JSON.parse(xhr.responseText);
                         if (errData.error) errMsg = errData.error;
-                    } catch (_) {}
+                    } catch (_) { }
                     alert(errMsg);
                     resetSubmitBtn();
                 }
             });
 
-            xhr.addEventListener('error', function() {
+            xhr.addEventListener('error', function () {
                 alert("通信エラーが発生しました。ネットワーク接続をご確認ください。");
                 resetSubmitBtn();
             });
@@ -480,26 +503,26 @@
 
         // サイドバーのトグル
         const sidebar = document.getElementById('sidebar');
-        
-        
+
+
     </script>
-<script>
+    <script>
 
         const _sidebar = document.getElementById('sidebar');
         const _toggleBtn = document.getElementById('toggle-btn');
         const _closeBtn = document.getElementById('close-sidebar');
-        if(_toggleBtn && _sidebar) {
-            _toggleBtn.addEventListener('click', function() {
+        if (_toggleBtn && _sidebar) {
+            _toggleBtn.addEventListener('click', function () {
                 _sidebar.classList.toggle('collapsed');
             });
         }
-        if(_closeBtn && _sidebar) {
-            _closeBtn.addEventListener('click', function() {
+        if (_closeBtn && _sidebar) {
+            _closeBtn.addEventListener('click', function () {
                 _sidebar.classList.add('collapsed');
             });
         }
-    
-</script>
-</body>
-</html>
 
+    </script>
+</body>
+
+</html>

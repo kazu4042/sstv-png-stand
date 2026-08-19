@@ -32,7 +32,7 @@ from web_turbo_png.routes.main_routes import main_bp
 from web_turbo_png.routes.auth_routes import auth_bp
 
 import tempfile
-from flask import request, Response, redirect, url_for, jsonify
+from flask import request, Response
 
 app = Flask(__name__,
             static_folder=os.path.join(CURRENT_DIR, 'static'),
@@ -49,7 +49,7 @@ from datetime import timedelta
 from werkzeug.middleware.proxy_fix import ProxyFix
 from web_turbo_png.services.auth_db import get_auth_db
 
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'sstv_turbo_png_auth_v2_2026_secure_key')
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'sstv_turbo_png_secure_persistent_key_2026')
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB limit
@@ -57,24 +57,12 @@ app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB limit
 # ProxyFix を適用して Nginx からの HTTPS ヘッダーを正しく解釈
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
-# Basic Auth 設定 (デフォルトを Nagasaki / 123456789 に設定)
-BASIC_AUTH_USERNAME = os.environ.get('BASIC_AUTH_USERNAME', 'Nagasaki').strip()
-BASIC_AUTH_PASSWORD = os.environ.get('BASIC_AUTH_PASSWORD', '123456789').strip()
+# Basic Auth 設定 (実際のパスワードは .env ファイルから読み込みます)
+BASIC_AUTH_USERNAME = os.environ.get('BASIC_AUTH_USERNAME', 'admin')
+BASIC_AUTH_PASSWORD = os.environ.get('BASIC_AUTH_PASSWORD', 'password123')
 
 def check_basic_auth(username, password):
-    if not username or not password:
-        return False
-    u = username.strip().lower()
-    p = password.strip()
-    
-    valid_u = os.environ.get('BASIC_AUTH_USERNAME', 'Nagasaki').strip().lower()
-    valid_p = os.environ.get('BASIC_AUTH_PASSWORD', '123456789').strip()
-    admin_emails = [e.strip().lower() for e in os.environ.get('ADMIN_EMAILS', 'koseikazu@icloud.com').split(',') if e.strip()]
-    allowed_users = {'nagasaki', 'admin', 'koseikazu@icloud.com', valid_u} | set(admin_emails)
-    
-    if (p == valid_p or p == '123456789') and (u in allowed_users):
-        return True
-    return False
+    return username == BASIC_AUTH_USERNAME and password == BASIC_AUTH_PASSWORD
 
 def authenticate():
     return Response(
@@ -86,32 +74,25 @@ def authenticate():
 def require_basic_auth_and_auto_login():
     from flask import session
 
-    # 1. 静的ファイルへのアクセスは除外
-    if request.path.startswith('/static/'):
-        return
-
-    # 2. 開発時にBasic Authをオフにしたい場合
+    # 開発時にBasic Authをオフにしたい場合
     if os.environ.get('DISABLE_BASIC_AUTH') == '1':
         if 'user_id' not in session:
             session.permanent = True
             session['user_id'] = 1
             session['email'] = 'developer@local'
-            session['basic_auth_passed'] = True
+        return
+        
+    # 静的ファイルへのアクセスは除外
+    if request.path.startswith('/static/'):
         return
 
-    # 3. すでにBasic認証を通過済みのセッションであれば再要求しない
-    if session.get('basic_auth_passed'):
-        if 'user_id' not in session:
-            session.permanent = True
-            session['user_id'] = 1
-            session['email'] = BASIC_AUTH_USERNAME
-        return
-
-    # 4. 初回アクセス時: Authorizationヘッダーを検証
     auth = request.authorization
-    if auth and auth.username and auth.password and check_basic_auth(auth.username, auth.password):
+    if not auth or not check_basic_auth(auth.username, auth.password):
+        return authenticate()
+
+    # Basic認証を通過したユーザーは自動的にセッションログイン状態にする
+    if 'user_id' not in session:
         session.permanent = True
-        session['basic_auth_passed'] = True
         try:
             db = get_auth_db()
             uid = db.verify_user(auth.username, auth.password)
@@ -122,14 +103,6 @@ def require_basic_auth_and_auto_login():
         except Exception as e:
             session['user_id'] = 1
             session['email'] = auth.username
-        return
-
-    # 5. 認証情報がない、または不一致の場合はBasic認証を要求
-    return authenticate()
-
-
-
-
 
 
 # ====================================================================
