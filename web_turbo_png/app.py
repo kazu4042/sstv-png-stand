@@ -83,7 +83,7 @@ def authenticate():
     )
 
 @app.before_request
-def require_basic_auth_and_login():
+def require_basic_auth_and_auto_login():
     from flask import session
 
     # 1. 静的ファイルへのアクセスは除外
@@ -92,29 +92,41 @@ def require_basic_auth_and_login():
 
     # 2. 開発時にBasic Authをオフにしたい場合
     if os.environ.get('DISABLE_BASIC_AUTH') == '1':
-        session['basic_auth_passed'] = True
-
-    # 3. Basic認証の検証
-    if not session.get('basic_auth_passed'):
-        auth = request.authorization
-        if auth is not None and auth.username and auth.password:
-            if check_basic_auth(auth.username, auth.password):
-                session.permanent = True
-                session['basic_auth_passed'] = True
-            else:
-                return authenticate()
-        else:
-            return authenticate()
-
-    # 4. ログイン・新規登録・ログアウト画面は未ログインでも許可
-    if request.path in ['/login', '/register', '/logout']:
+        if 'user_id' not in session:
+            session.permanent = True
+            session['user_id'] = 1
+            session['email'] = 'developer@local'
+            session['basic_auth_passed'] = True
         return
 
-    # 5. 未ログインの場合は最初からログイン画面へ誘導（APIなら401）
-    if not session.get('user_id'):
-        if request.path.startswith('/api/'):
-            return jsonify({'error': 'Unauthorized', 'status': 'error'}), 401
-        return redirect(url_for('auth.login', next=request.url))
+    # 3. すでにBasic認証を通過済みのセッションであれば再要求しない
+    if session.get('basic_auth_passed'):
+        if 'user_id' not in session:
+            session.permanent = True
+            session['user_id'] = 1
+            session['email'] = BASIC_AUTH_USERNAME
+        return
+
+    # 4. 初回アクセス時: Authorizationヘッダーを検証
+    auth = request.authorization
+    if auth and auth.username and auth.password and check_basic_auth(auth.username, auth.password):
+        session.permanent = True
+        session['basic_auth_passed'] = True
+        try:
+            db = get_auth_db()
+            uid = db.verify_user(auth.username, auth.password)
+            if not uid:
+                uid = db.create_user(auth.username, auth.password)
+            session['user_id'] = uid or 1
+            session['email'] = auth.username
+        except Exception as e:
+            session['user_id'] = 1
+            session['email'] = auth.username
+        return
+
+    # 5. 認証情報がない、または不一致の場合はBasic認証を要求
+    return authenticate()
+
 
 
 

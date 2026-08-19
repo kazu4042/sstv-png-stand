@@ -140,14 +140,15 @@
                     <div class="flex flex-col md:flex-row gap-4 mb-4">
                         <div class="relative flex-1">
                             <div class="flex items-center justify-center w-full p-4 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 hover:bg-forestLight hover:border-forest text-ink/70 hover:text-forest transition-all cursor-pointer font-bold tracking-widest h-full" id="upload-btn-text">
-                                <i data-lucide="folder-up" class="w-5 h-5 mr-2"></i> 音声ファイル (.wav) を選択
+                                <i data-lucide="folder-up" class="w-5 h-5 mr-2"></i> 音声 (.wav) または 画像 (.png, .jpg) を選択
                             </div>
-                            <input type="file" name="file" id="audio-file" accept=".wav" required class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+                            <input type="file" name="file" id="audio-file" accept=".wav,.png,.jpg,.jpeg" required class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
                         </div>
                         <button type="button" id="btn-preview" class="bg-forestLight text-forest px-6 py-4 rounded-xl font-bold tracking-widest flex items-center justify-center gap-2 hover:bg-forest hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                             <i data-lucide="play" class="w-5 h-5"></i> プレビュー
                         </button>
                     </div>
+
 
                     <div id="file-name-display" class="text-center text-sm text-forest font-bold mb-6 min-h-[1.5rem] tracking-widest"></div>
 
@@ -241,20 +242,38 @@
             }
 
             if (file) {
-                fileNameDisplay.innerHTML = `<i data-lucide="file-audio" class="w-4 h-4 inline mr-1"></i> ${file.name}`;
+                const ext = file.name.split('.').pop().toLowerCase();
+                const isWav = ext === 'wav';
+                const isImage = ['png', 'jpg', 'jpeg'].includes(ext);
+
+                if (isWav) {
+                    fileNameDisplay.innerHTML = `<i data-lucide="file-audio" class="w-4 h-4 inline mr-1"></i> 音声: ${file.name}`;
+                    btnPreview.disabled = false;
+                    btnPreview.style.display = 'flex';
+                } else if (isImage) {
+                    fileNameDisplay.innerHTML = `<i data-lucide="image" class="w-4 h-4 inline mr-1"></i> 画像: ${file.name} <span class="text-xs text-earth font-normal ml-2">(SSTV音響信号へ自動変調・デコード)</span>`;
+                    btnPreview.disabled = true;
+                    btnPreview.style.display = 'none';
+                    waterfallWrapper.classList.remove('active');
+                } else {
+                    fileNameDisplay.innerHTML = `<i data-lucide="file" class="w-4 h-4 inline mr-1"></i> ${file.name}`;
+                    btnPreview.disabled = true;
+                }
+
                 lucide.createIcons();
-                btnPreview.disabled = false;
                 btnSubmit.disabled = false;
-                if (spectrumToggle.checked) {
+                if (isWav && spectrumToggle.checked) {
                     waterfallWrapper.classList.add('active');
                 }
             } else {
                 fileNameDisplay.innerHTML = '';
                 btnPreview.disabled = true;
+                btnPreview.style.display = 'flex';
                 btnSubmit.disabled = true;
                 waterfallWrapper.classList.remove('active');
             }
         });
+
 
 
 
