@@ -204,34 +204,16 @@
         let animationId;
         let isPlaying = false;
         
-        // 国・地域選択時に緯度・経度を自動入力
-        const countrySelect = document.getElementById('country');
-        const latitudeInput = document.getElementById('latitude');
-        const longitudeInput = document.getElementById('longitude');
-
-        countrySelect.addEventListener('change', function() {
-            const selectedOption = this.options[this.selectedIndex];
-            if (selectedOption.value) {
-                const lat = selectedOption.getAttribute('data-lat');
-                const lon = selectedOption.getAttribute('data-lon');
-                if (lat && lon) {
-                    latitudeInput.value = lat;
-                    longitudeInput.value = lon;
-                }
-            } else {
-                latitudeInput.value = '';
-                longitudeInput.value = '';
-            }
-        });
-        
         // スペクトルの表示/非表示の切り替え
-        spectrumToggle.addEventListener('change', function() {
-            if (this.checked && fileInput.files.length > 0) {
-                waterfallWrapper.classList.add('active');
-            } else {
-                waterfallWrapper.classList.remove('active');
-            }
-        });
+        if (spectrumToggle) {
+            spectrumToggle.addEventListener('change', function() {
+                if (this.checked && fileInput && fileInput.files.length > 0) {
+                    waterfallWrapper.classList.add('active');
+                } else {
+                    waterfallWrapper.classList.remove('active');
+                }
+            });
+        }
 
         // キャンバスのサイズ設定
         canvas.width = 600;

@@ -9,22 +9,7 @@ def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
-            # Basic認証を通過している場合は自動的に有効なuser_idを補完
-            if session.get('basic_auth_passed'):
-                db = get_auth_db()
-                users = db.get_all_users()
-                if users:
-                    session['user_id'] = users[0]['id']
-                    session['email'] = users[0]['email']
-                else:
-                    basic_user = os.environ.get('BASIC_AUTH_USERNAME', 'Nagasaki').strip()
-                    basic_pass = os.environ.get('BASIC_AUTH_PASSWORD', '123456789').strip()
-                    uid = db.create_user(basic_user, basic_pass)
-                    session['user_id'] = uid or 1
-                    session['email'] = basic_user
-                return f(*args, **kwargs)
-
-            # 未認証の場合
+            # 未ログインの場合
             if request.path.startswith('/api/'):
                 return jsonify({'error': 'Unauthorized', 'status': 'error'}), 401
             return redirect(url_for('auth.login', next=request.url))
@@ -102,7 +87,9 @@ def register():
 
 @auth_bp.route('/logout')
 def logout():
+    basic_passed = session.get('basic_auth_passed', True)
     session.clear()
+    session['basic_auth_passed'] = basic_passed
     return redirect(url_for('auth.login'))
 
 

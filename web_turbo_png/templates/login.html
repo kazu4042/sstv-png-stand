@@ -164,7 +164,7 @@
             
             <div class="input-group">
                 <label for="email">メールアドレス または ユーザー名</label>
-                <input type="text" id="email" name="email" required autocomplete="username" placeholder="例: Nagasaki または you@example.com">
+                <input type="text" id="email" name="email" required autocomplete="username" placeholder="例: you@example.com">
             </div>
             
             <div class="input-group">
@@ -181,9 +181,7 @@
         </form>
 
         <div class="auth-links">
-            アカウントをお持ちでないですか？ <a href="{{ url_for('auth.register') }}">新規登録</a><br>
-            <br>
-            <a href="{{ url_for('main.landing') }}">トップページに戻る</a>
+            アカウントをお持ちでないですか？ <a href="{{ url_for('auth.register') }}">新規登録</a>
         </div>
     </div>
 </body>
