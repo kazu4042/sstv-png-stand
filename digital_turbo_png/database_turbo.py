@@ -45,6 +45,9 @@ class PacketDatabaseTurboPNG:
                 pass # Already exists
             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_turbo_png_packets_image_tile ON packets (image_id, tile_x, tile_y, payload_length)")
             self.conn.execute("CREATE INDEX IF NOT EXISTS idx_turbo_png_packets_image_id ON packets (image_id)")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_turbo_png_packets_user_id ON packets (user_id)")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_turbo_png_packets_image_user ON packets (image_id, user_id)")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_turbo_png_packets_tile_group ON packets (image_id, tile_y, tile_x)")
 
     def is_file_imported(self, file_name):
         cursor = self.conn.cursor()

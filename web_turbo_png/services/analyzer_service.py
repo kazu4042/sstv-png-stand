@@ -110,43 +110,34 @@ class TurboPNGAnalyzerService:
         """指定画像IDのタイルデータを DB から取得"""
         return self.aggregator.db.get_packets_for_image(target_id_int)
 
-    def find_missing_packets(self, target_image_id_hex, max_limit=100):
-        """不足・低品質なタイルを検出して返す"""
+    def find_missing_packets(self, target_image_id_hex, max_limit=2048):
+        """不足・低品質なタイルをSQLで超高速に検出して返す"""
         missing_list = []
         try:
             target_id_int = int(target_image_id_hex, 16)
-        except ValueError:
+        except (ValueError, TypeError):
             return missing_list
 
-        tiles_data = self._get_tiles_data(target_id_int)
         tile_count_x = config.TILE_COUNT_X
         tile_count_y = config.TILE_COUNT_Y
         poor_threshold = getattr(config, 'POOR_BLOCK_SNR_THRESHOLD', 5.0)
 
+        cursor = self.aggregator.db.conn.cursor()
+        cursor.execute("""
+            SELECT tile_y, tile_x, AVG(snr)
+            FROM packets
+            WHERE image_id = ?
+            GROUP BY tile_y, tile_x
+        """, (target_id_int,))
+
+        present_tiles = {(row[0], row[1]): (row[2] or 0.0) for row in cursor.fetchall()}
+
         for ty in range(tile_count_y):
             for tx in range(tile_count_x):
-                if ty not in tiles_data or tx not in tiles_data[ty] or not tiles_data[ty][tx]:
+                if (ty, tx) not in present_tiles:
                     missing_list.append({"ty": ty, "tx": tx, "status": "MISSING"})
                 else:
-                    len_dict = tiles_data[ty][tx]
-
-                    best_plen = None
-                    max_weight_sum = -1
-                    for plen, pkts in len_dict.items():
-                        w_sum = sum(p[1] for p in pkts)
-                        if w_sum > max_weight_sum:
-                            max_weight_sum = w_sum
-                            best_plen = plen
-
-                    if not best_plen:
-                        missing_list.append({"ty": ty, "tx": tx, "status": "MISSING"})
-                        continue
-
-                    packets = len_dict[best_plen]
-                    total_files = len(packets)
-                    total_weight = sum(weight for _, weight, _, _, _ in packets)
-                    avg_snr = (total_weight / total_files) - 1.0 if total_files > 0 else 0
-
+                    avg_snr = present_tiles[(ty, tx)]
                     if avg_snr <= poor_threshold:
                         missing_list.append({
                             "ty": ty,
