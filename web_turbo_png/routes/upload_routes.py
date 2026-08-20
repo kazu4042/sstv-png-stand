@@ -134,10 +134,24 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
         
         update_job(job_id, progress=70, status="統合処理中 (Aggregator)...")
         
+        # ユーザーの今回ログをパースして画像IDを抽出
+        user_packets_by_id = {}  # {img_id_hex: [(img_id, tx, ty, plen, pbits, snr), ...]}
+        for bits in decoded_bits_list:
+            parsed = parse_turbo_log_line(bits)
+            if parsed is None:
+                continue
+            img_id, tile_x, tile_y, plen, pbits, snr_val = parsed
+            img_id_hex = f"{img_id:04X}"
+            if img_id_hex not in user_packets_by_id:
+                user_packets_by_id[img_id_hex] = []
+            user_packets_by_id[img_id_hex].append(parsed)
+
+        target_img_id_hexs = set(user_packets_by_id.keys())
+
         aggregator = TurboPNGAggregator(log_dir=log_dir_path)
         aggregator.load_all_logs()
-        # 全員のパケットで多数決画像を生成（user_idフィルタなし）
-        aggregator.process_and_save_images(min_tile_ratio=0.0, user_id=None)
+        # 全員のパケットで今回の画像IDに限定して多数決画像を高速生成（差分最適化）
+        aggregator.process_and_save_images(min_tile_ratio=0.0, user_id=None, target_image_ids=target_img_id_hexs if target_img_id_hexs else None)
             
         update_job(job_id, progress=85, status="復元画像を生成中...")
 
@@ -148,20 +162,6 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
         # DB から全画像ID を取得（全ユーザー横断）
         image_counts = aggregator.db.get_all_image_ids_with_counts(user_id=None)
         available_image_ids = sorted([f"{img_id:04X}" for img_id in image_counts.keys()])
-
-        # ===== Step3: ユーザーの今回ログをパースして自分の受信画像を生成 =====
-        user_packets_by_id = {}  # {img_id_hex: [(img_id, tx, ty, plen, pbits, snr), ...]}
-
-        # デコード結果からログデータを取得
-        for bits in decoded_bits_list:
-            parsed = parse_turbo_log_line(bits)
-            if parsed is None:
-                continue
-            img_id, tile_x, tile_y, plen, pbits, snr_val = parsed
-            img_id_hex = f"{img_id:04X}"
-            if img_id_hex not in user_packets_by_id:
-                user_packets_by_id[img_id_hex] = []
-            user_packets_by_id[img_id_hex].append(parsed)
 
         tile_count_x = config.TILE_COUNT_X
         tile_count_y = config.TILE_COUNT_Y
@@ -205,7 +205,7 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                                 continue
                             for i, bit_char in enumerate(p_bits_str[:payload_bit_len]):
                                 if bit_char == '1':
-                                    score_1[i] += weight
+                                     score_1[i] += weight
                                 elif bit_char == '0':
                                     score_0[i] += weight
                         voted_payload = "".join(
@@ -246,11 +246,10 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                     main_score = 100.0
                 main_matched = matched_packets
 
-        # 2. このユーザーが過去に送信したすべての画像IDについて累積画像をDBから完全合成して保存
-        if user_id:
-            user_counts = aggregator.db.get_all_image_ids_with_counts(user_id=user_id)
-            for u_img_id_int in user_counts.keys():
-                u_img_id_hex = f"{u_img_id_int:04X}"
+        # 2. 今回送信された画像ID（更新があったもの）について累積画像をDBから完全合成して保存（高速化）
+        if user_id and target_img_id_hexs:
+            for u_img_id_hex in target_img_id_hexs:
+                u_img_id_int = int(u_img_id_hex, 16)
                 user_all_tiles = aggregator.db.get_packets_for_image(u_img_id_int, user_id=user_id)
                 
                 cum_buffer = Image.new("RGB", (config.WIDTH, config.HEIGHT), color="black")

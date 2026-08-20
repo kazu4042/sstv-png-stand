@@ -124,7 +124,7 @@ class TurboPNGAggregator:
             print(f"[Reset] 旧データベースを削除しました: {db_path}")
         self.db = PacketDatabaseTurboPNG(self.log_dir)
 
-    def process_and_save_images(self, min_tile_ratio=0.0, user_id=None):
+    def process_and_save_images(self, min_tile_ratio=0.0, user_id=None, target_image_ids=None):
         """
         テキストログをDBに蓄積し、多数決投票で最終画像を復元する。
 
@@ -132,6 +132,7 @@ class TurboPNGAggregator:
             min_tile_ratio: 復元対象の最低タイル充填率 (0.0~1.0)
                             デフォルト 0.0 = 全ての画像IDを復元対象とする
             user_id: フィルタリングするユーザーID
+            target_image_ids: 復元対象とする画像IDのコレクション（Noneの場合は全画像ID）
         """
         if not self.load_all_logs():
             return []
@@ -150,7 +151,25 @@ class TurboPNGAggregator:
         output_dir = os.path.join(root_dir, config.IMAGE_OUT_DIR)
         os.makedirs(output_dir, exist_ok=True)
         
+        # target_image_ids が指定されている場合は整数セットに正規化
+        normalized_targets = None
+        if target_image_ids is not None:
+            normalized_targets = set()
+            for tid in target_image_ids:
+                if isinstance(tid, str):
+                    try:
+                        normalized_targets.add(int(tid, 16))
+                    except ValueError:
+                        try:
+                            normalized_targets.add(int(tid))
+                        except ValueError:
+                            pass
+                elif isinstance(tid, int):
+                    normalized_targets.add(tid)
+
         for img_id, count in image_counts.items():
+            if normalized_targets is not None and img_id not in normalized_targets:
+                continue
             if count < total_required_packets * min_tile_ratio:
                 continue
                 

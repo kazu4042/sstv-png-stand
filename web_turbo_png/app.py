@@ -168,6 +168,17 @@ def application(environ, start_response):
 
 app.wsgi_app = application
 
+# Numba JIT のバックグラウンド事前ウォームアップ
+def _start_jit_warmup():
+    try:
+        from digital_turbo_png.decoder_turbo import DigitalTurboPNGDecoder
+        DigitalTurboPNGDecoder.warmup_jit()
+    except Exception as e:
+        pass
+
+import threading
+threading.Thread(target=_start_jit_warmup, daemon=True).start()
+
 if __name__ == '__main__':
     print("✨ SSTV TurboPNG-Aggregator Web System is starting...")
     app.run(debug=True, host='0.0.0.0', port=5001)

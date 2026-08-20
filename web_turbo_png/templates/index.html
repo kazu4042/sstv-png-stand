@@ -390,23 +390,105 @@
             };
         });
 
+        // クライアント側でのWAV軽量化・モノラル化処理 (Web Audio API)
+        async function optimizeAudioFile(file, onProgress) {
+            try {
+                if (onProgress) onProgress('音声ファイルを高速最適化中...');
+                
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const arrayBuffer = await file.arrayBuffer();
+                const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                
+                const numChannels = audioBuffer.numberOfChannels;
+                const sampleRate = audioBuffer.sampleRate; // 通常44100Hz
+                const length = audioBuffer.length;
+                
+                // モノラルチャンネルの生成（ステレオなら左右の平均）
+                const monoData = new Float32Array(length);
+                if (numChannels === 1) {
+                    monoData.set(audioBuffer.getChannelData(0));
+                } else {
+                    const ch0 = audioBuffer.getChannelData(0);
+                    const ch1 = audioBuffer.getChannelData(1);
+                    for (let i = 0; i < length; i++) {
+                        monoData[i] = (ch0[i] + ch1[i]) * 0.5;
+                    }
+                }
+
+                // 16-bit PCM WAV バッファの構築
+                const wavBuffer = new ArrayBuffer(44 + length * 2);
+                const view = new DataView(wavBuffer);
+
+                // RIFF ヘッダー
+                function writeString(view, offset, string) {
+                    for (let i = 0; i < string.length; i++) {
+                        view.setUint8(offset + i, string.charCodeAt(i));
+                    }
+                }
+                writeString(view, 0, 'RIFF');
+                view.setUint32(4, 36 + length * 2, true);
+                writeString(view, 8, 'WAVE');
+                writeString(view, 12, 'fmt ');
+                view.setUint32(16, 16, true);          // SubChunk1Size (16 for PCM)
+                view.setUint16(20, 1, true);           // AudioFormat (1 for PCM)
+                view.setUint16(22, 1, true);           // NumChannels (1 = Mono)
+                view.setUint32(24, sampleRate, true);  // SampleRate
+                view.setUint32(28, sampleRate * 2, true); // ByteRate (SampleRate * NumChannels * BitsPerSample/8)
+                view.setUint16(32, 2, true);           // BlockAlign (NumChannels * BitsPerSample/8)
+                view.setUint16(34, 16, true);          // BitsPerSample (16-bit)
+                writeString(view, 36, 'data');
+                view.setUint32(40, length * 2, true);  // SubChunk2Size
+
+                // 16-bit PCM サンプル書き込み
+                let offset = 44;
+                for (let i = 0; i < length; i++, offset += 2) {
+                    let s = Math.max(-1, Math.min(1, monoData[i]));
+                    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+                }
+
+                const optimizedBlob = new Blob([view], { type: 'audio/wav' });
+                console.log(`[Optimize] 元ファイル: ${(file.size / (1024 * 1024)).toFixed(2)}MB -> 最適化後: ${(optimizedBlob.size / (1024 * 1024)).toFixed(2)}MB`);
+                return new File([optimizedBlob], file.name, { type: 'audio/wav' });
+            } catch (err) {
+                console.warn('[Optimize] クライアント側最適化をスキップして元ファイルを送信します:', err);
+                return file; // エラー時は安全に元ファイルをそのまま送信
+            }
+        }
+
         // フォーム送信時のプログレス処理（アップロード進捗 ＋ サーバー解析進捗）
         const uploadForm = document.getElementById('upload-form');
         const progressWrapper = document.getElementById('progress-wrapper');
         const progressFill = document.getElementById('progress-fill');
         const progressText = document.getElementById('progress-text');
 
-        uploadForm.addEventListener('submit', function (e) {
+        uploadForm.addEventListener('submit', async function (e) {
             e.preventDefault();
 
             btnSubmit.disabled = true;
-            btnSubmit.innerHTML = '<i data-lucide="hourglass" class="w-5 h-5"></i> 処理中...';
+            btnSubmit.innerHTML = '<i data-lucide="hourglass" class="w-5 h-5"></i> 最適化中...';
             lucide.createIcons();
             progressWrapper.classList.add('active');
-            progressFill.style.width = '0%';
+            progressFill.style.width = '5%';
+            progressText.innerText = '音声ファイルを解析・最適化中...';
+
+            const rawFile = fileInput.files[0];
+            if (!rawFile) {
+                alert("ファイルを選択してください");
+                resetSubmitBtn();
+                return;
+            }
+
+            // クライアント側で高速モノラル16bit化（サイズを50%〜75%削減）
+            const fileToSend = await optimizeAudioFile(rawFile, (msg) => {
+                progressText.innerText = msg;
+            });
+
+            btnSubmit.innerHTML = '<i data-lucide="hourglass" class="w-5 h-5"></i> 送信中...';
+            lucide.createIcons();
             progressText.innerText = 'ファイルをサーバーに送信中... 0%';
 
-            const formData = new FormData(uploadForm);
+            const formData = new FormData();
+            formData.append('file', fileToSend, fileToSend.name);
             const xhr = new XMLHttpRequest();
 
             // 1. アップロード送信中の進捗（0%〜100%）
@@ -436,10 +518,7 @@
 
                                 if (sseData.error) {
                                     alert(sseData.error);
-                                    btnSubmit.disabled = false;
-                                    btnSubmit.innerHTML = '<i data-lucide="rocket" class="w-5 h-5"></i> サーバーに送信して解析を開始';
-                                    lucide.createIcons();
-                                    progressWrapper.classList.remove('active');
+                                    resetSubmitBtn();
                                     evtSource.close();
                                     return;
                                 }

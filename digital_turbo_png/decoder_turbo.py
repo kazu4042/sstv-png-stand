@@ -168,6 +168,29 @@ class DigitalTurboPNGDecoder:
         self.sync_phase_long_sin = np.sin(sync_phase_long)
         self.sync_win = np.hamming(self.sync_long_samples)
 
+    @classmethod
+    def warmup_jit(cls):
+        """Numba JIT関数をダミーデータで事前コンパイルし、初回デコード遅延を防ぐ"""
+        try:
+            dummy_samples = 441
+            dummy_audio = np.zeros(dummy_samples, dtype=np.float32)
+            dummy_win = np.hamming(dummy_samples)
+            dummy_target_phases = np.zeros((4, dummy_samples), dtype=np.float64)
+            dummy_cos = np.cos(dummy_target_phases)
+            dummy_sin = np.sin(dummy_target_phases)
+            dummy_sync_cos = np.cos(np.zeros(dummy_samples))
+            dummy_sync_sin = np.sin(np.zeros(dummy_samples))
+            dummy_bits = np.array([0, 1, 0, 1], dtype=np.int32)
+
+            fast_detect_sync_long_dft(dummy_audio, dummy_samples, dummy_win, dummy_sync_cos, dummy_sync_sin)
+            fast_detect_symbol_dft(dummy_audio, dummy_samples, dummy_win, dummy_cos, dummy_sin)
+            fast_decode_symbols_exact(dummy_audio, 0, 2, dummy_samples // 2, np.hamming(dummy_samples // 2), np.cos(np.zeros((4, dummy_samples // 2))), np.sin(np.zeros((4, dummy_samples // 2))))
+            fast_calculate_crc16_bits(dummy_bits)
+            fast_bits_to_int(dummy_bits)
+            fast_find_header_alignment(dummy_audio, 0, 2, 2, dummy_samples // 2, np.hamming(dummy_samples // 2), np.cos(np.zeros((4, dummy_samples // 2))), np.sin(np.zeros((4, dummy_samples // 2))), 4, 16)
+        except Exception:
+            pass
+
     def detect_sync_long_dft(self, audio_segment):
         return fast_detect_sync_long_dft(audio_segment, self.sync_long_samples, self.sync_win, self.sync_phase_long_cos, self.sync_phase_long_sin)
 
