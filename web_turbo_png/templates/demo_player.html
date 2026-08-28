@@ -122,6 +122,28 @@
             animation: pulse-ring 2s ease-in-out infinite;
         }
 
+        /* ====== Stop button ====== */
+        .stop-btn {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #8b7d6b;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .stop-btn:hover {
+            background: rgba(239, 68, 68, 0.15);
+            border-color: rgba(239, 68, 68, 0.3);
+            color: #ef4444;
+            transform: scale(1.08);
+        }
+        .stop-btn:active { transform: scale(0.95); }
+
         @keyframes pulse-ring {
             0%, 100% { box-shadow: 0 0 0 0 rgba(0, 141, 84, 0.4), 0 8px 30px rgba(0, 141, 84, 0.35); }
             50% { box-shadow: 0 0 0 14px rgba(0, 141, 84, 0), 0 8px 30px rgba(0, 141, 84, 0.35); }
@@ -296,6 +318,10 @@
                     <i data-lucide="volume-2" class="w-4 h-4 text-earth"></i>
                     <input type="range" id="volumeSlider" min="0" max="100" value="80" class="w-20">
                 </div>
+
+                <button class="stop-btn" id="stopBtn" title="停止">
+                    <i data-lucide="square" class="w-5 h-5"></i>
+                </button>
 
                 <button class="play-btn" id="playBtn" title="再生 / 一時停止">
                     <i data-lucide="play" class="w-8 h-8" id="playIcon" style="margin-left: 3px;"></i>
@@ -601,6 +627,17 @@
         randomBtn.addEventListener('click', async () => {
             await initAudio();
             playRandom();
+        });
+
+        document.getElementById('stopBtn').addEventListener('click', () => {
+            if (!audioBuffer) return;
+            stopCurrent();
+            setPlayingUI(false);
+            pausedAt = 0;
+            progressFill.style.width = '0%';
+            currentTimeEl.textContent = '0:00';
+            startPosEl.textContent = '--:--';
+            drawWaveform();
         });
 
         volumeSlider.addEventListener('input', () => {
