@@ -244,6 +244,18 @@ class DigitalTurboPNGDecoder:
         if len(data.shape) > 1:
             data = np.mean(data, axis=1)
 
+        # --- スマホ録音等の異なるサンプリングレート（48kHz, 16kHz等）を自動リサンプリング ---
+        if rate != config.SAMPLE_RATE:
+            print(f"[Decode] サンプリングレート変換: {rate} Hz -> {config.SAMPLE_RATE} Hz")
+            num_target_samples = int(round(len(data) * (config.SAMPLE_RATE / rate)))
+            if num_target_samples > 0:
+                data = np.interp(
+                    np.linspace(0, len(data), num_target_samples, endpoint=False),
+                    np.arange(len(data)),
+                    data
+                ).astype(np.float32)
+                rate = config.SAMPLE_RATE
+
         max_val = np.max(np.abs(data))
         if max_val > 0:
             data = data.astype(np.float32) / max_val
@@ -296,16 +308,16 @@ class DigitalTurboPNGDecoder:
                     sync_power = self.detect_sync_long_dft(data[i : i + self.sync_long_samples])
 
                     # 同期検出の固定閾値を下げ、微弱な信号も拾いやすくする（ノイズ判定は後続のCRCで弾く）
-                    if sync_power > 1.5:
+                    if sync_power > 0.4:
                         search_ptr = i + int(samples_sync_full * 0.5)
                         fine_step = max(1, int(config.SAMPLE_RATE * 0.0005))
                         while search_ptr < len(data) - self.sync_long_samples:
                             p = self.detect_sync_long_dft(data[search_ptr : search_ptr + self.sync_long_samples])
-                            if p < sync_power * 0.3:
+                            if p < sync_power * 0.25:
                                 break
                             search_ptr += fine_step
 
-                        align_range = max(5, int(config.SAMPLE_RATE * 0.003))
+                        align_range = max(5, int(config.SAMPLE_RATE * 0.006))
                         start_scan = max(0, search_ptr - align_range)
                         end_scan = min(len(data) - header_samples, search_ptr + align_range)
 
@@ -336,7 +348,7 @@ class DigitalTurboPNGDecoder:
                                 # --- 堅牢性（Robustness）の向上 ---
                                 # CRC16を偶然通過したノイズ（約1/65536の確率）を確実に排除するため、
                                 # ペイロード全体のSNRを評価し、基準値未満ならノイズとみなして破棄する
-                                if p_snr < 1.5:
+                                if p_snr < 1.0:
                                     continue
 
                                 payload_bits_str = "".join(str(b) for b in p_bits[:payload_length*8])
