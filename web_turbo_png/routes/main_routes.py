@@ -139,3 +139,10 @@ def heatmap():
         from flask import redirect, url_for
         return redirect(url_for('main.result'))
     return render_template('heatmap.html')
+
+
+@main_bp.route('/demo')
+@login_required
+def demo_player():
+    """音声再生ページ（ランダム位置から音声再生）"""
+    return render_template('demo_player.html')

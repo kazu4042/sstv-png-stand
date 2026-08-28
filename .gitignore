@@ -35,3 +35,4 @@ Thumbs.db
 # Web Uploads
 web_turbo_png/static/uploads/
 web_turbo_png/static/output/
+web_turbo_png/static/audio/

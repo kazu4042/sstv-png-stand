@@ -19,7 +19,7 @@ PNG_COMPRESS = 6  # PNG圧縮レベル (0=無圧縮, 9=最高圧縮, 6=バラン
 # --- 音響速度・最速設定 ---
 SAMPLE_RATE = 44100
 MS_SYNC = 20        # 同期信号時間を 100ms → 20ms へ劇的短縮
-MS_SYMBOL = 2       # 1シンボル＝2ミリ秒 (2000 bps)
+MS_SYMBOL = 3      # 1シンボル＝2ミリ秒 (2000 bps)
 
 # ========================================================
 # 📡 変調・ヘッダ仕様
@@ -45,11 +45,11 @@ TEXT_LOG_DIR = "data/logs"
 TEXT_LOG_PREFIX = "turbo_png_bitstream"
 IMAGE_OUT_DIR = "data/images"
 IMAGE_OUT_NAME = "decoded_result_turbo.png"
-INPUT_IMAGE = "data/input/test3.jpg"
+INPUT_IMAGE = "data/input/test.jpg"
 OUTPUT_WAV = "data/audio/turbo_png_256_256.wav"
 
 # --- テスト用ノイズ設定 ---
-NOISE_LEVEL = 0.5
+NOISE_LEVEL = 0
 
 def update_tile_size(new_size):
     global TILE_SIZE, TILE_COUNT_X, TILE_COUNT_Y

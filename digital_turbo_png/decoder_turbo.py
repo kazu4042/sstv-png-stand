@@ -13,7 +13,33 @@ import io
 from PIL import Image
 from datetime import datetime
 import numba
-from scipy.signal import butter, lfilter
+
+def apply_bandpass_filter_np(data, sample_rate, low_freq, high_freq, transition_width=100.0):
+    """
+    scipy.signal（DLL依存）を回避し、NumPyのみで動作するゼロ位相バンドパスフィルタ
+    """
+    n = len(data)
+    if n == 0:
+        return data
+    freqs = np.fft.rfftfreq(n, d=1.0 / sample_rate)
+    fft_data = np.fft.rfft(data)
+
+    weight = np.zeros_like(freqs, dtype=np.float32)
+    # 通過帯域
+    pass_band = (freqs >= low_freq) & (freqs <= high_freq)
+    weight[pass_band] = 1.0
+
+    # スムーズな遷移帯域（コサインロールオフ）
+    if transition_width > 0:
+        low_trans = (freqs >= low_freq - transition_width) & (freqs < low_freq)
+        weight[low_trans] = 0.5 * (1.0 + np.cos(np.pi * (low_freq - freqs[low_trans]) / transition_width))
+
+        high_trans = (freqs > high_freq) & (freqs <= high_freq + transition_width)
+        weight[high_trans] = 0.5 * (1.0 + np.cos(np.pi * (freqs[high_trans] - high_freq) / transition_width))
+
+    filtered_fft = fft_data * weight
+    filtered_data = np.fft.irfft(filtered_fft, n=n)
+    return filtered_data.astype(np.float32)
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
 if ROOT_DIR not in sys.path:
@@ -225,11 +251,7 @@ class DigitalTurboPNGDecoder:
         # --- ノイズ耐性向上: バンドパスフィルタ ---
         if getattr(config, "BANDPASS_ENABLE", False):
             print(f"[Decode] バンドパスフィルタ適用 ({config.VALID_BAND_MIN}Hz - {config.VALID_BAND_MAX}Hz)")
-            nyq = 0.5 * rate
-            low = config.VALID_BAND_MIN / nyq
-            high = config.VALID_BAND_MAX / nyq
-            b, a = butter(4, [low, high], btype='band')
-            data = lfilter(b, a, data)
+            data = apply_bandpass_filter_np(data, rate, config.VALID_BAND_MIN, config.VALID_BAND_MAX)
             # フィルタ後の再正規化
             max_val = np.max(np.abs(data))
             if max_val > 0:
