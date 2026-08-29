@@ -37,10 +37,10 @@
 
     <style>
         body {
-            background-color: #0a0e17;
-            color: #e0e6ed;
+            background-color: #f9f9f9;
+            color: #231815;
             font-family: 'Zen Kaku Gothic New', sans-serif;
-            overflow: hidden;
+            overflow-x: hidden;
             min-height: 100vh;
         }
 
@@ -61,28 +61,28 @@
             width: 600px;
             height: 600px;
             border-radius: 50%;
-            filter: blur(120px);
-            opacity: 0.15;
+            filter: blur(140px);
+            opacity: 0.12;
             pointer-events: none;
             z-index: 0;
             transition: opacity 0.8s ease;
         }
         .bg-glow.glow-1 { background: #008d54; top: -200px; left: -150px; }
         .bg-glow.glow-2 { background: #38bdf8; bottom: -250px; right: -200px; }
-        .bg-glow.playing { opacity: 0.35; }
+        .bg-glow.playing { opacity: 0.22; }
 
         /* ====== Card ====== */
         .player-card {
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: #ffffff;
+            border: 1px solid #e6f3ec;
             backdrop-filter: blur(24px);
             border-radius: 24px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
-            transition: box-shadow 0.5s ease, border-color 0.5s ease;
+            box-shadow: 0 10px 40px -10px rgba(0, 141, 84, 0.08), 0 2px 10px rgba(0, 0, 0, 0.03);
+            transition: box-shadow 0.4s ease, border-color 0.4s ease, transform 0.3s ease;
         }
         .player-card.playing {
-            border-color: rgba(0, 141, 84, 0.3);
-            box-shadow: 0 20px 80px rgba(0, 141, 84, 0.15), 0 0 0 1px rgba(0, 141, 84, 0.1);
+            border-color: #008d54;
+            box-shadow: 0 20px 50px -10px rgba(0, 141, 84, 0.18), 0 0 0 2px rgba(0, 141, 84, 0.12);
         }
 
         /* ====== Waveform visualizer ====== */
@@ -91,7 +91,8 @@
             height: 120px;
             border-radius: 12px;
             overflow: hidden;
-            background: rgba(0, 0, 0, 0.25);
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
         }
         #waveform-canvas {
             width: 100%;
@@ -111,13 +112,13 @@
             justify-content: center;
             cursor: pointer;
             transition: transform 0.2s, box-shadow 0.3s;
-            box-shadow: 0 8px 30px rgba(0, 141, 84, 0.35);
+            box-shadow: 0 8px 24px rgba(0, 141, 84, 0.35);
         }
         .play-btn:hover {
-            transform: scale(1.08);
-            box-shadow: 0 12px 40px rgba(0, 141, 84, 0.5);
+            transform: scale(1.06);
+            box-shadow: 0 12px 32px rgba(0, 141, 84, 0.45);
         }
-        .play-btn:active { transform: scale(0.95); }
+        .play-btn:active { transform: scale(0.96); }
         .play-btn.playing {
             animation: pulse-ring 2s ease-in-out infinite;
         }
@@ -127,8 +128,8 @@
             width: 44px;
             height: 44px;
             border-radius: 50%;
-            background: rgba(255, 255, 255, 0.06);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: #f1f5f9;
+            border: 1px solid #e2e8f0;
             color: #8b7d6b;
             display: flex;
             align-items: center;
@@ -137,22 +138,22 @@
             transition: all 0.2s;
         }
         .stop-btn:hover {
-            background: rgba(239, 68, 68, 0.15);
-            border-color: rgba(239, 68, 68, 0.3);
+            background: #fee2e2;
+            border-color: #fca5a5;
             color: #ef4444;
             transform: scale(1.08);
         }
         .stop-btn:active { transform: scale(0.95); }
 
         @keyframes pulse-ring {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(0, 141, 84, 0.4), 0 8px 30px rgba(0, 141, 84, 0.35); }
-            50% { box-shadow: 0 0 0 14px rgba(0, 141, 84, 0), 0 8px 30px rgba(0, 141, 84, 0.35); }
+            0%, 100% { box-shadow: 0 0 0 0 rgba(0, 141, 84, 0.4), 0 8px 24px rgba(0, 141, 84, 0.35); }
+            50% { box-shadow: 0 0 0 14px rgba(0, 141, 84, 0), 0 8px 24px rgba(0, 141, 84, 0.35); }
         }
 
         /* ====== Progress bar ====== */
         .progress-track {
             height: 6px;
-            background: rgba(255, 255, 255, 0.08);
+            background: #e2e8f0;
             border-radius: 3px;
             overflow: hidden;
             cursor: pointer;
@@ -160,7 +161,7 @@
         }
         .progress-fill {
             height: 100%;
-            background: linear-gradient(90deg, #008d54, #38bdf8);
+            background: linear-gradient(90deg, #008d54, #00b96b);
             border-radius: 3px;
             width: 0%;
             transition: width 0.1s linear;
@@ -174,45 +175,46 @@
             padding: 6px 14px;
             border-radius: 100px;
             font-size: 12px;
-            font-weight: 600;
+            font-weight: 700;
             letter-spacing: 0.05em;
         }
         .status-badge.ready {
-            background: rgba(0, 141, 84, 0.12);
-            color: #00b96b;
+            background: #e6f3ec;
+            color: #008d54;
             border: 1px solid rgba(0, 141, 84, 0.2);
         }
         .status-badge.playing-badge {
-            background: rgba(56, 189, 248, 0.12);
-            color: #38bdf8;
-            border: 1px solid rgba(56, 189, 248, 0.2);
+            background: #e0f2fe;
+            color: #0284c7;
+            border: 1px solid rgba(2, 132, 199, 0.25);
             animation: badge-blink 1.5s ease-in-out infinite;
         }
 
         @keyframes badge-blink {
             0%, 100% { opacity: 1; }
-            50% { opacity: 0.6; }
+            50% { opacity: 0.65; }
         }
 
         /* ====== Info grid ====== */
         .info-cell {
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid rgba(255, 255, 255, 0.06);
+            background: #f8fafc;
+            border: 1px solid #e6f3ec;
             border-radius: 12px;
             padding: 16px;
             text-align: center;
         }
         .info-cell .label {
-            font-size: 10px;
+            font-size: 11px;
             text-transform: uppercase;
-            letter-spacing: 0.12em;
+            letter-spacing: 0.08em;
             color: #8b7d6b;
+            font-weight: 600;
             margin-bottom: 6px;
         }
         .info-cell .value {
             font-size: 18px;
             font-weight: 700;
-            color: #e0e6ed;
+            color: #231815;
             font-variant-numeric: tabular-nums;
         }
 
@@ -224,17 +226,17 @@
             align-items: center;
             gap: 6px;
             font-size: 13px;
-            font-weight: 500;
+            font-weight: 600;
             transition: color 0.2s;
         }
-        .back-link:hover { color: #00b96b; }
+        .back-link:hover { color: #008d54; }
 
         /* ====== Volume slider ====== */
         input[type="range"] {
             -webkit-appearance: none;
             appearance: none;
             height: 4px;
-            background: rgba(255, 255, 255, 0.1);
+            background: #e2e8f0;
             border-radius: 2px;
             outline: none;
         }
@@ -245,7 +247,8 @@
             border-radius: 50%;
             background: #008d54;
             cursor: pointer;
-            border: 2px solid #0a0e17;
+            border: 2px solid #ffffff;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
         }
 
         /* ====== Instructions ====== */
@@ -259,8 +262,8 @@
             width: 28px;
             height: 28px;
             border-radius: 50%;
-            background: rgba(0, 141, 84, 0.15);
-            color: #00b96b;
+            background: #e6f3ec;
+            color: #008d54;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -289,8 +292,8 @@
             <!-- Header -->
             <div class="flex items-center justify-between mb-6">
                 <div>
-                    <h1 class="text-xl font-bold text-white mb-1">TurboPNG 音声再生</h1>
-                    <p class="text-xs text-earth tracking-widest uppercase">SSTV Audio Broadcast</p>
+                    <h1 class="text-xl font-bold text-ink mb-1">TurboPNG 音声再生</h1>
+                    <p class="text-xs text-earth tracking-widest uppercase font-medium">SSTV Audio Broadcast</p>
                 </div>
                 <div id="statusBadge" class="status-badge ready">
                     <span class="w-2 h-2 rounded-full bg-current"></span>
@@ -307,7 +310,7 @@
             <div class="progress-track mb-2" id="progressTrack">
                 <div class="progress-fill" id="progressFill"></div>
             </div>
-            <div class="flex justify-between text-xs text-earth mb-6 font-mono">
+            <div class="flex justify-between text-xs text-earth mb-6 font-mono font-medium">
                 <span id="currentTime">0:00</span>
                 <span id="totalTime">--:--</span>
             </div>
@@ -327,7 +330,7 @@
                     <i data-lucide="play" class="w-8 h-8" id="playIcon" style="margin-left: 3px;"></i>
                 </button>
 
-                <button class="text-earth hover:text-white transition-colors" id="randomBtn" title="ランダム位置から再生">
+                <button class="text-earth hover:text-forest transition-colors p-2 rounded-full hover:bg-forestLight/50" id="randomBtn" title="ランダム位置から再生">
                     <i data-lucide="shuffle" class="w-5 h-5"></i>
                 </button>
             </div>
@@ -349,36 +352,36 @@
             </div>
 
             <!-- Instructions -->
-            <div class="border-t border-white/5 pt-5">
+            <div class="border-t border-forestLight pt-5">
                 <h3 class="text-xs font-bold text-earth tracking-widest uppercase mb-4">
-                    <i data-lucide="info" class="w-3 h-3 inline mr-1"></i>
+                    <i data-lucide="info" class="w-3.5 h-3.5 inline mr-1"></i>
                     使い方
                 </h3>
                 <div class="instruction-step">
                     <div class="step-number">1</div>
                     <div>
-                        <p class="text-sm text-white/80">このページの <strong class="text-white">再生ボタン</strong> を押して音声を流す</p>
+                        <p class="text-sm text-ink font-medium">このページの <strong class="text-forest font-bold">再生ボタン</strong> を押して音声を流す</p>
                         <p class="text-xs text-earth mt-1">ランダムな位置から自動再生されます</p>
                     </div>
                 </div>
                 <div class="instruction-step">
                     <div class="step-number">2</div>
                     <div>
-                        <p class="text-sm text-white/80">スマホの <strong class="text-white">録音アプリ</strong> で音声を録音する</p>
+                        <p class="text-sm text-ink font-medium">スマホの <strong class="text-forest font-bold">録音アプリ</strong> で音声を録音する</p>
                     </div>
                 </div>
                 <div class="instruction-step">
                     <div class="step-number">3</div>
                     <div>
-                        <p class="text-sm text-white/80">録音したファイルを <strong class="text-white">Webサイトからアップロード</strong> する</p>
-                        <p class="text-xs text-earth mt-1"><a href="/app" class="text-forest hover:underline">アップロードページへ →</a></p>
+                        <p class="text-sm text-ink font-medium">録音したファイルを <strong class="text-forest font-bold">Webサイトからアップロード</strong> する</p>
+                        <p class="text-xs text-earth mt-1"><a href="/app" class="text-forest font-semibold hover:underline">アップロードページへ →</a></p>
                     </div>
                 </div>
             </div>
         </div>
 
         <!-- Footer note -->
-        <div class="mt-6 text-center text-xs text-earth/60">
+        <div class="mt-6 text-center text-xs text-earth font-medium">
             <p>💡 再生ボタンを押すとランダムな位置から音声が再生されます</p>
         </div>
     </div>
@@ -460,8 +463,8 @@
                 const val = dataArray[i * step] / 255;
                 const barH = Math.max(val * h * 0.85, 2);
                 const gradient = ctx.createLinearGradient(0, (h - barH) / 2, 0, (h + barH) / 2);
-                gradient.addColorStop(0, `rgba(0, 141, 84, ${0.4 + val * 0.6})`);
-                gradient.addColorStop(1, `rgba(56, 189, 248, ${0.2 + val * 0.4})`);
+                gradient.addColorStop(0, `rgba(0, 141, 84, ${0.5 + val * 0.5})`);
+                gradient.addColorStop(1, `rgba(0, 185, 107, ${0.3 + val * 0.4})`);
                 ctx.fillStyle = gradient;
                 ctx.fillRect(i * barW + 1, (h - barH) / 2, barW - 2, barH);
             }
@@ -485,6 +488,7 @@
             isPlaying = playing;
             if (playing) {
                 playIcon.setAttribute('data-lucide', 'pause');
+                playIcon.style.marginLeft = '0px';
                 playBtn.classList.add('playing');
                 playerCard.classList.add('playing');
                 glow1.classList.add('playing');
