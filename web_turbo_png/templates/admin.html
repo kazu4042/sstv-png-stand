@@ -9,6 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -34,6 +35,13 @@
             border-color: #008d54;
             color: #008d54;
             background-color: #e6f3ec;
+        }
+        .pulse-dot {
+            animation: pulse-animation 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
+        }
+        @keyframes pulse-animation {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(1.2); }
         }
     </style>
 </head>
@@ -64,36 +72,83 @@
         <div class="flex-1 overflow-y-auto p-4 md:p-8">
             <div class="max-w-6xl mx-auto space-y-6">
 
-                <!-- Header Stats Cards -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-4">
-                        <div class="bg-forestLight p-3.5 rounded-xl text-forest">
-                            <i data-lucide="images" class="w-7 h-7"></i>
+                <!-- Header Stats Cards (6枚グリッド) -->
+                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5">
+                    <!-- 1. リアルタイムアクティブ数 -->
+                    <div class="bg-white p-4 rounded-2xl border border-emerald-100 shadow-sm relative overflow-hidden">
+                        <div class="flex items-center justify-between mb-1.5">
+                            <span class="text-[11px] font-bold text-earth tracking-wider">現在アクティブ</span>
+                            <span class="relative flex h-2.5 w-2.5">
+                                <span class="pulse-dot absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                            </span>
                         </div>
-                        <div>
-                            <div class="text-xs font-bold text-earth tracking-wider">総受信画像数</div>
-                            <div class="text-2xl font-bold text-ink leading-tight" id="stat-total-images">{{ images|length }}</div>
+                        <div class="text-2xl font-bold text-emerald-600 leading-tight" id="stat-active-now">
+                            {{ overview_stats.active_now }} <span class="text-xs text-earth font-normal">名</span>
                         </div>
-                    </div>
-                    <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-4">
-                        <div class="bg-sky-50 p-3.5 rounded-xl text-sky-600">
-                            <i data-lucide="layers" class="w-7 h-7"></i>
-                        </div>
-                        <div>
-                            <div class="text-xs font-bold text-earth tracking-wider">総蓄積パケット数</div>
-                            <div class="text-2xl font-bold text-ink leading-tight">
-                                {{ images|sum(attribute='packet_count') }}
-                            </div>
+                        <div class="text-[10px] text-earth mt-1 flex items-center gap-1">
+                            <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 直近5分以内
                         </div>
                     </div>
-                    <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-4">
-                        <div class="bg-amber-50 p-3.5 rounded-xl text-amber-600">
-                            <i data-lucide="users" class="w-7 h-7"></i>
+
+                    <!-- 2. 本日ユニーク訪問者 (UU) -->
+                    <div class="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+                        <div class="flex items-center justify-between mb-1.5">
+                            <span class="text-[11px] font-bold text-earth tracking-wider">本日 訪問者(UU)</span>
+                            <i data-lucide="users" class="w-4 h-4 text-forest"></i>
                         </div>
-                        <div>
-                            <div class="text-xs font-bold text-earth tracking-wider">登録アカウント数</div>
-                            <div class="text-2xl font-bold text-ink leading-tight">{{ users|length }}</div>
+                        <div class="text-2xl font-bold text-ink leading-tight" id="stat-today-uu">
+                            {{ overview_stats.today_uu }} <span class="text-xs text-earth font-normal">人</span>
                         </div>
+                        <div class="text-[10px] text-earth mt-1">ログイン: <span id="stat-today-logged" class="font-bold text-ink">{{ overview_stats.today_logged_in_users }}</span>名</div>
+                    </div>
+
+                    <!-- 3. 本日ページビュー (PV) -->
+                    <div class="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+                        <div class="flex items-center justify-between mb-1.5">
+                            <span class="text-[11px] font-bold text-earth tracking-wider">本日 閲覧数(PV)</span>
+                            <i data-lucide="eye" class="w-4 h-4 text-sky-500"></i>
+                        </div>
+                        <div class="text-2xl font-bold text-ink leading-tight" id="stat-today-pv">
+                            {{ overview_stats.today_pv }} <span class="text-xs text-earth font-normal">view</span>
+                        </div>
+                        <div class="text-[10px] text-earth mt-1">総アクセス数</div>
+                    </div>
+
+                    <!-- 4. 総受信画像数 -->
+                    <div class="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+                        <div class="flex items-center justify-between mb-1.5">
+                            <span class="text-[11px] font-bold text-earth tracking-wider">総受信画像数</span>
+                            <i data-lucide="images" class="w-4 h-4 text-forest"></i>
+                        </div>
+                        <div class="text-2xl font-bold text-ink leading-tight" id="stat-total-images">
+                            {{ images|length }} <span class="text-xs text-earth font-normal">枚</span>
+                        </div>
+                        <div class="text-[10px] text-earth mt-1">DB内保存済み</div>
+                    </div>
+
+                    <!-- 5. 総蓄積パケット数 -->
+                    <div class="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+                        <div class="flex items-center justify-between mb-1.5">
+                            <span class="text-[11px] font-bold text-earth tracking-wider">蓄積パケット</span>
+                            <i data-lucide="layers" class="w-4 h-4 text-sky-600"></i>
+                        </div>
+                        <div class="text-2xl font-bold text-ink leading-tight">
+                            {{ images|sum(attribute='packet_count') }}
+                        </div>
+                        <div class="text-[10px] text-earth mt-1">パケット受信総数</div>
+                    </div>
+
+                    <!-- 6. 登録アカウント数 -->
+                    <div class="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+                        <div class="flex items-center justify-between mb-1.5">
+                            <span class="text-[11px] font-bold text-earth tracking-wider">登録アカウント</span>
+                            <i data-lucide="user-check" class="w-4 h-4 text-amber-500"></i>
+                        </div>
+                        <div class="text-2xl font-bold text-ink leading-tight">
+                            {{ users|length }} <span class="text-xs text-earth font-normal">名</span>
+                        </div>
+                        <div class="text-[10px] text-earth mt-1">ユーザー登録数</div>
                     </div>
                 </div>
 
@@ -101,17 +156,124 @@
                 <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
                     
                     <!-- Tab Header -->
-                    <div class="flex border-b border-gray-100 px-6 pt-4 gap-2 bg-gray-50/50">
-                        <button id="tab-btn-images" class="tab-btn active px-5 py-3 text-sm font-bold rounded-t-xl border-b-2 flex items-center gap-2 transition-all">
+                    <div class="flex border-b border-gray-100 px-6 pt-4 gap-2 bg-gray-50/50 overflow-x-auto">
+                        <button id="tab-btn-analytics" class="tab-btn active px-5 py-3 text-sm font-bold rounded-t-xl border-b-2 flex items-center gap-2 transition-all whitespace-nowrap">
+                            <i data-lucide="activity" class="w-4 h-4"></i> アクセス状況・アクティブ推移グラフ
+                        </button>
+                        <button id="tab-btn-images" class="tab-btn px-5 py-3 text-sm font-bold text-earth rounded-t-xl border-b-2 border-transparent hover:text-ink flex items-center gap-2 transition-all whitespace-nowrap">
                             <i data-lucide="trash-2" class="w-4 h-4"></i> 受信画像管理 (選択クリーン)
                         </button>
-                        <button id="tab-btn-users" class="tab-btn px-5 py-3 text-sm font-bold text-earth rounded-t-xl border-b-2 border-transparent hover:text-ink flex items-center gap-2 transition-all">
+                        <button id="tab-btn-users" class="tab-btn px-5 py-3 text-sm font-bold text-earth rounded-t-xl border-b-2 border-transparent hover:text-ink flex items-center gap-2 transition-all whitespace-nowrap">
                             <i data-lucide="users" class="w-4 h-4"></i> ユーザーアカウント管理
+                        </button>
+                        <button id="tab-btn-logs" class="tab-btn px-5 py-3 text-sm font-bold text-earth rounded-t-xl border-b-2 border-transparent hover:text-ink flex items-center gap-2 transition-all whitespace-nowrap">
+                            <i data-lucide="list" class="w-4 h-4"></i> 直近アクセス履歴
                         </button>
                     </div>
 
-                    <!-- TAB 1: 画像管理 (選択クリーン) -->
-                    <div id="tab-content-images" class="p-6">
+                    <!-- TAB 1: アクティブ・アクセス推移グラフ (メイン機能) -->
+                    <div id="tab-content-analytics" class="p-6 space-y-6">
+                        
+                        <!-- グラフヘッダー & 期間切り替え -->
+                        <div class="flex flex-wrap items-center justify-between gap-4 pb-2 border-b border-gray-100">
+                            <div>
+                                <h2 class="text-lg font-bold text-ink tracking-wider flex items-center gap-2">
+                                    <i data-lucide="trending-up" class="w-5 h-5 text-forest"></i> 時間帯別アクティブ・閲覧者数推移
+                                </h2>
+                                <p class="text-earth text-xs mt-1">「何時にどのぐらいの人が見ているか」をユニーク訪問者数（UU）および総ページビュー（PV）で可視化しています。</p>
+                            </div>
+
+                            <div class="flex items-center gap-2">
+                                <!-- 期間切り替えピルボタン -->
+                                <div class="bg-gray-100 p-1 rounded-xl flex items-center text-xs font-bold" id="period-buttons">
+                                    <button class="period-btn px-3 py-1.5 rounded-lg transition-all bg-white text-forest shadow-sm" data-period="today">今日 (時間別)</button>
+                                    <button class="period-btn px-3 py-1.5 rounded-lg text-earth hover:text-ink transition-all" data-period="24h">過去24時間</button>
+                                    <button class="period-btn px-3 py-1.5 rounded-lg text-earth hover:text-ink transition-all" data-period="7d">過去7日間</button>
+                                    <button class="period-btn px-3 py-1.5 rounded-lg text-earth hover:text-ink transition-all" data-period="30d">過去30日間</button>
+                                </div>
+
+                                <!-- 更新ボタン -->
+                                <button id="btn-refresh-stats" class="p-2 bg-gray-50 hover:bg-forestLight text-earth hover:text-forest rounded-xl border border-gray-200 transition-colors" title="最新データを再取得">
+                                    <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- メイン時系列グラフエリア -->
+                        <div class="bg-gradient-to-b from-white to-gray-50/50 p-5 rounded-2xl border border-gray-100 shadow-sm relative">
+                            <div class="h-72 md:h-80 w-full relative">
+                                <canvas id="activityChart"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- サブグリッド: 人気ページ割合 & ピーク時間帯インサイト -->
+                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-2">
+                            <!-- 人気ページ分布 (Doughnut Chart + リスト) -->
+                            <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm lg:col-span-2 space-y-4">
+                                <div class="flex items-center justify-between">
+                                    <h3 class="text-sm font-bold text-ink flex items-center gap-2">
+                                        <i data-lucide="pie-chart" class="w-4 h-4 text-forest"></i> 閲覧されているページ分布
+                                    </h3>
+                                    <span class="text-[11px] text-earth">過去7日間の集計</span>
+                                </div>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 items-center gap-4">
+                                    <div class="h-44 flex items-center justify-center relative">
+                                        <canvas id="pagesPieChart"></canvas>
+                                    </div>
+                                    <div class="space-y-2.5">
+                                        {% for page in top_pages %}
+                                        <div class="flex items-center justify-between text-xs">
+                                            <div class="flex items-center gap-2 truncate">
+                                                <span class="w-2 h-2 rounded-full {% if loop.index == 1 %}bg-forest{% elif loop.index == 2 %}bg-sky-500{% elif loop.index == 3 %}bg-amber-500{% elif loop.index == 4 %}bg-purple-500{% else %}bg-gray-400{% endif %}"></span>
+                                                <span class="font-mono font-bold text-ink truncate">{{ page.endpoint }}</span>
+                                            </div>
+                                            <div class="text-right shrink-0">
+                                                <span class="font-bold text-ink">{{ page.pv }} PV</span>
+                                                <span class="text-earth text-[11px]">({{ page.uu }} UU)</span>
+                                            </div>
+                                        </div>
+                                        {% else %}
+                                        <div class="text-xs text-earth text-center py-4">アクセスデータはまだありません</div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- インサイト・サマリーカード -->
+                            <div class="bg-forestLight/40 p-5 rounded-2xl border border-forest/10 shadow-sm space-y-4 flex flex-col justify-between">
+                                <div>
+                                    <h3 class="text-sm font-bold text-forest flex items-center gap-2 mb-3">
+                                        <i data-lucide="sparkles" class="w-4 h-4 text-forest"></i> アクセス傾向インサイト
+                                    </h3>
+                                    <ul class="text-xs text-ink space-y-3">
+                                        <li class="flex items-start gap-2">
+                                            <i data-lucide="clock" class="w-4 h-4 text-forest shrink-0 mt-0.5"></i>
+                                            <div>
+                                                <div class="font-bold text-ink">時間帯別の訪問状況</div>
+                                                <div class="text-earth text-[11px] mt-0.5">グラフの山（ピーク）に合わせて画像受信や通信をモニタリングできます。</div>
+                                            </div>
+                                        </li>
+                                        <li class="flex items-start gap-2">
+                                            <i data-lucide="shield-check" class="w-4 h-4 text-forest shrink-0 mt-0.5"></i>
+                                            <div>
+                                                <div class="font-bold text-ink">認証・セキュリティ</div>
+                                                <div class="text-earth text-[11px] mt-0.5">全アクセスログは安全に匿名化・ローカル暗号化管理されています。</div>
+                                            </div>
+                                        </li>
+                                    </ul>
+                                </div>
+
+                                <div class="bg-white/80 p-3 rounded-xl border border-forest/20 text-center">
+                                    <span class="text-[11px] text-earth">自動更新間隔</span>
+                                    <div class="text-xs font-bold text-forest mt-0.5">30秒ごとに自動リフレッシュ</div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <!-- TAB 2: 画像管理 (選択クリーン) -->
+                    <div id="tab-content-images" class="p-6 hidden">
                         <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
                             <div>
                                 <h2 class="text-lg font-bold text-ink tracking-wider flex items-center gap-2">
@@ -207,7 +369,7 @@
                         </div>
                     </div>
 
-                    <!-- TAB 2: ユーザー管理 -->
+                    <!-- TAB 3: ユーザー管理 -->
                     <div id="tab-content-users" class="p-6 hidden">
                         <div class="mb-6 flex items-center justify-between">
                             <div>
@@ -237,6 +399,55 @@
                                     {% else %}
                                     <tr>
                                         <td colspan="3" class="p-12 text-center text-earth">ユーザーはまだ登録されていません</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- TAB 4: 直近アクセス履歴ログ -->
+                    <div id="tab-content-logs" class="p-6 hidden">
+                        <div class="mb-6 flex items-center justify-between">
+                            <div>
+                                <h2 class="text-lg font-bold text-ink tracking-wider flex items-center gap-2">
+                                    <i data-lucide="list" class="w-5 h-5 text-forest"></i> 直近のアクセス履歴
+                                </h2>
+                                <p class="text-earth text-xs mt-1">ユーザーやゲストがアクセスした最新のページリクエスト履歴です。</p>
+                            </div>
+                        </div>
+
+                        <div class="overflow-x-auto rounded-xl border border-gray-100">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="bg-gray-50 border-b border-gray-200 text-xs font-bold text-earth tracking-wider">
+                                        <th class="p-4">アクセス日時</th>
+                                        <th class="p-4">ユーザー / ゲスト</th>
+                                        <th class="p-4">ページ / エンドポイント</th>
+                                        <th class="p-4">Method</th>
+                                        <th class="p-4">接続元IP</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-100" id="logs-tbody">
+                                    {% for log in recent_logs %}
+                                    <tr class="hover:bg-gray-50/80 transition-colors">
+                                        <td class="p-4 text-xs font-mono text-earth">{{ log.created_at }}</td>
+                                        <td class="p-4 text-sm font-bold text-ink">
+                                            {% if log.user_id %}
+                                            <span class="text-forest flex items-center gap-1"><i data-lucide="user" class="w-3.5 h-3.5 inline"></i> {{ log.user_name }}</span>
+                                            {% else %}
+                                            <span class="text-earth/70">ゲスト (未ログイン)</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="p-4 text-xs font-mono font-bold text-ink">{{ log.endpoint }}</td>
+                                        <td class="p-4 text-xs font-mono text-earth">
+                                            <span class="px-2 py-0.5 rounded bg-gray-100 text-gray-700 font-bold">{{ log.method }}</span>
+                                        </td>
+                                        <td class="p-4 text-xs font-mono text-earth">{{ log.ip_address or '-' }}</td>
+                                    </tr>
+                                    {% else %}
+                                    <tr>
+                                        <td colspan="5" class="p-12 text-center text-earth">アクセスログはまだありません</td>
                                     </tr>
                                     {% endfor %}
                                 </tbody>
@@ -294,27 +505,257 @@
     <script>
         lucide.createIcons();
 
-        // タブ切り替え
-        const tabBtnImages = document.getElementById('tab-btn-images');
-        const tabBtnUsers = document.getElementById('tab-btn-users');
-        const tabContentImages = document.getElementById('tab-content-images');
-        const tabContentUsers = document.getElementById('tab-content-users');
+        // 1. タブ切り替え処理
+        const tabs = [
+            { btn: 'tab-btn-analytics', content: 'tab-content-analytics' },
+            { btn: 'tab-btn-images', content: 'tab-content-images' },
+            { btn: 'tab-btn-users', content: 'tab-content-users' },
+            { btn: 'tab-btn-logs', content: 'tab-content-logs' }
+        ];
 
-        tabBtnImages.addEventListener('click', () => {
-            tabBtnImages.classList.add('active');
-            tabBtnUsers.classList.remove('active');
-            tabContentImages.classList.remove('hidden');
-            tabContentUsers.classList.add('hidden');
+        tabs.forEach(t => {
+            const btnEl = document.getElementById(t.btn);
+            if (!btnEl) return;
+            btnEl.addEventListener('click', () => {
+                tabs.forEach(other => {
+                    const b = document.getElementById(other.btn);
+                    const c = document.getElementById(other.content);
+                    if (other.btn === t.btn) {
+                        b.classList.add('active');
+                        b.classList.remove('text-earth', 'border-transparent');
+                        c.classList.remove('hidden');
+                    } else {
+                        b.classList.remove('active');
+                        b.classList.add('text-earth', 'border-transparent');
+                        c.classList.add('hidden');
+                    }
+                });
+            });
         });
 
-        tabBtnUsers.addEventListener('click', () => {
-            tabBtnUsers.classList.add('active');
-            tabBtnImages.classList.remove('active');
-            tabContentUsers.classList.remove('hidden');
-            tabContentImages.classList.add('hidden');
+        // 2. Chart.js による時間帯別アクティブ・アクセス推移グラフ
+        const initialGraphData = {{ initial_graph | tojson }};
+        let currentPeriod = 'today';
+        let activityChart = null;
+
+        function initActivityChart(labels, pvData, uuData) {
+            const ctx = document.getElementById('activityChart').getContext('2d');
+            
+            // グラデーション背景
+            const gradientForest = ctx.createLinearGradient(0, 0, 0, 300);
+            gradientForest.addColorStop(0, 'rgba(0, 141, 84, 0.25)');
+            gradientForest.addColorStop(1, 'rgba(0, 141, 84, 0.0)');
+
+            const gradientSky = ctx.createLinearGradient(0, 0, 0, 300);
+            gradientSky.addColorStop(0, 'rgba(2, 132, 199, 0.15)');
+            gradientSky.addColorStop(1, 'rgba(2, 132, 199, 0.0)');
+
+            activityChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'ユニーク訪問者数 (UU)',
+                            data: uuData,
+                            borderColor: '#008d54',
+                            backgroundColor: gradientForest,
+                            borderWidth: 2.5,
+                            fill: true,
+                            tension: 0.35,
+                            pointBackgroundColor: '#008d54',
+                            pointRadius: 3,
+                            pointHoverRadius: 6
+                        },
+                        {
+                            label: '総ページビュー (PV)',
+                            data: pvData,
+                            borderColor: '#0284c7',
+                            backgroundColor: gradientSky,
+                            borderWidth: 2,
+                            borderDash: [4, 4],
+                            fill: true,
+                            tension: 0.35,
+                            pointBackgroundColor: '#0284c7',
+                            pointRadius: 2.5,
+                            pointHoverRadius: 5
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            align: 'end',
+                            labels: {
+                                boxWidth: 12,
+                                font: {
+                                    family: "'Zen Kaku Gothic New', sans-serif",
+                                    weight: 'bold',
+                                    size: 11
+                                },
+                                color: '#231815'
+                            }
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(35, 24, 21, 0.9)',
+                            titleFont: { family: "'Zen Kaku Gothic New', sans-serif", size: 12, weight: 'bold' },
+                            bodyFont: { family: "'Zen Kaku Gothic New', sans-serif", size: 12 },
+                            padding: 10,
+                            cornerRadius: 8,
+                            callbacks: {
+                                label: function(context) {
+                                    return ` ${context.dataset.label}: ${context.parsed.y} 人/回`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: {
+                                font: { family: "'Zen Kaku Gothic New', sans-serif", size: 10 },
+                                color: '#8b7d6b'
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1,
+                                font: { family: "'Zen Kaku Gothic New', sans-serif", size: 10 },
+                                color: '#8b7d6b'
+                            },
+                            grid: {
+                                color: 'rgba(0,0,0,0.04)'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 初期グラフ生成
+        if (initialGraphData) {
+            initActivityChart(initialGraphData.labels, initialGraphData.pv, initialGraphData.uu);
+        }
+
+        // 期間切り替えAPI呼び出し
+        async function fetchGraphData(period) {
+            try {
+                const res = await fetch(`/admin/api/activity_stats?period=${period}`);
+                const data = await res.json();
+                if (data.status === 'success') {
+                    if (activityChart) {
+                        activityChart.data.labels = data.graph.labels;
+                        activityChart.data.datasets[0].data = data.graph.uu;
+                        activityChart.data.datasets[1].data = data.graph.pv;
+                        activityChart.update();
+                    }
+                    // 概要数値の更新
+                    updateOverviewUI(data.overview);
+                }
+            } catch (err) {
+                console.error('Failed to fetch activity stats:', err);
+            }
+        }
+
+        // 期間ボタンのイベントリスナー
+        document.querySelectorAll('.period-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.period-btn').forEach(b => {
+                    b.classList.remove('bg-white', 'text-forest', 'shadow-sm');
+                    b.classList.add('text-earth');
+                });
+                btn.classList.add('bg-white', 'text-forest', 'shadow-sm');
+                btn.classList.remove('text-earth');
+
+                currentPeriod = btn.dataset.period;
+                fetchGraphData(currentPeriod);
+            });
         });
 
-        // チェックボックス管理
+        // 3. ドーナツチャート (ページ別割合)
+        const topPagesData = {{ top_pages | tojson }};
+        if (topPagesData && topPagesData.length > 0) {
+            const pieCtx = document.getElementById('pagesPieChart').getContext('2d');
+            const pieLabels = topPagesData.map(p => p.endpoint);
+            const pieValues = topPagesData.map(p => p.pv);
+            const colors = ['#008d54', '#0284c7', '#f59e0b', '#8b5cf6', '#9ca3af'];
+
+            new Chart(pieCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: pieLabels,
+                    datasets: [{
+                        data: pieValues,
+                        backgroundColor: colors.slice(0, pieLabels.length),
+                        borderWidth: 0,
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return ` ${context.label}: ${context.raw} PV`;
+                                }
+                            }
+                        }
+                    },
+                    cutout: '70%'
+                }
+            });
+        }
+
+        // 4. 概要カードの更新関数
+        function updateOverviewUI(overview) {
+            if (!overview) return;
+            const elActive = document.getElementById('stat-active-now');
+            const elUU = document.getElementById('stat-today-uu');
+            const elPV = document.getElementById('stat-today-pv');
+            const elLogged = document.getElementById('stat-today-logged');
+
+            if (elActive) elActive.innerHTML = `${overview.active_now} <span class="text-xs text-earth font-normal">名</span>`;
+            if (elUU) elUU.innerHTML = `${overview.today_uu} <span class="text-xs text-earth font-normal">人</span>`;
+            if (elPV) elPV.innerHTML = `${overview.today_pv} <span class="text-xs text-earth font-normal">view</span>`;
+            if (elLogged) elLogged.textContent = overview.today_logged_in_users;
+        }
+
+        // 5. リアルタイム自動更新 (30秒毎)
+        async function fetchRealtimeUpdates() {
+            try {
+                const res = await fetch('/admin/api/realtime_stats');
+                const data = await res.json();
+                if (data.status === 'success') {
+                    updateOverviewUI(data.overview);
+                    // グラフも最新に追従
+                    fetchGraphData(currentPeriod);
+                }
+            } catch (err) {
+                console.error('Realtime update error:', err);
+            }
+        }
+
+        setInterval(fetchRealtimeUpdates, 30000);
+
+        const refreshBtn = document.getElementById('btn-refresh-stats');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', () => {
+                fetchRealtimeUpdates();
+            });
+        }
+
+        // 6. 画像管理のチェックボックス & 削除機能
         const selectAllCheckbox = document.getElementById('select-all-images');
         const imageCheckboxes = document.querySelectorAll('.image-checkbox');
         const deleteSelectedBtn = document.getElementById('btn-delete-selected');
@@ -398,24 +839,19 @@
             try {
                 const res = await fetch('/admin/delete_images', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ image_ids: targetDeleteIds })
                 });
                 const data = await res.json();
 
                 if (data.status === 'success') {
-                    // テーブル行をアニメーション削除
                     targetDeleteIds.forEach(id => {
                         const row = document.querySelector(`tr[data-id="${id}"]`);
                         if (row) row.remove();
                     });
 
-                    // 選択状態のリセット
                     updateSelectionState();
 
-                    // 総数の更新
                     const remainingRows = document.querySelectorAll('#images-tbody tr[data-id]');
                     document.getElementById('stat-total-images').textContent = remainingRows.length;
 

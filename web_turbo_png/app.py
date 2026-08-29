@@ -112,6 +112,41 @@ def require_basic_auth_and_login():
         return redirect(url_for('auth.login', next=request.url))
 
 
+@app.after_request
+def record_access_log(response):
+    """静的ファイル・過剰なポーリングAPI以外のアクセスを記録"""
+    try:
+        path = request.path
+        # 静的ファイルやファビコン、管理APIポーリング等は除外
+        if path.startswith('/static/') or path.endswith(('.ico', '.png', '.jpg', '.css', '.js', '.map', '.svg')):
+            return response
+        if path.startswith('/admin/api/'):
+            return response
+
+        from flask import session
+        user_id = session.get('user_id')
+        session_id = session.get('_id', None)
+        ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if ip and ',' in ip:
+            ip = ip.split(',')[0].strip()
+        user_agent = request.headers.get('User-Agent', '')[:255]
+
+        auth_db = get_auth_db()
+        auth_db.log_access(
+            user_id=user_id,
+            session_id=session_id,
+            ip_address=ip,
+            endpoint=path,
+            method=request.method,
+            user_agent=user_agent
+        )
+    except Exception as e:
+        # ロギングのエラーでリクエスト自体が落ちないように安全にキャッチ
+        pass
+
+    return response
+
+
 # ====================================================================
 # Blueprint 登録
 # ====================================================================

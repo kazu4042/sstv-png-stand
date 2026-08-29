@@ -109,8 +109,62 @@ def admin_dashboard():
     from web_turbo_png.routes.api_routes import get_analyzer
     analyzer = get_analyzer()
     images = analyzer.get_all_images_summary()
+
+    # アクセス統計データ
+    overview_stats = db.get_today_overview_stats()
+    initial_graph = db.get_activity_graph_data(period='today')
+    top_pages = db.get_top_pages_stats(days=7, limit=5)
+    recent_logs = db.get_recent_access_logs(limit=15)
     
-    return render_template('admin.html', users=users, images=images)
+    return render_template(
+        'admin.html',
+        users=users,
+        images=images,
+        overview_stats=overview_stats,
+        initial_graph=initial_graph,
+        top_pages=top_pages,
+        recent_logs=recent_logs
+    )
+
+
+@auth_bp.route('/admin/api/activity_stats')
+@login_required
+def admin_activity_stats():
+    current_email = session.get('email')
+    if not is_admin(current_email):
+        return jsonify({'status': 'error', 'message': '権限がありません'}), 403
+
+    period = request.args.get('period', 'today')
+    if period not in ['today', '24h', '7d', '30d']:
+        period = 'today'
+
+    db = get_auth_db()
+    graph_data = db.get_activity_graph_data(period=period)
+    overview_stats = db.get_today_overview_stats()
+
+    return jsonify({
+        'status': 'success',
+        'graph': graph_data,
+        'overview': overview_stats
+    })
+
+
+@auth_bp.route('/admin/api/realtime_stats')
+@login_required
+def admin_realtime_stats():
+    current_email = session.get('email')
+    if not is_admin(current_email):
+        return jsonify({'status': 'error', 'message': '権限がありません'}), 403
+
+    db = get_auth_db()
+    overview_stats = db.get_today_overview_stats()
+    recent_logs = db.get_recent_access_logs(limit=15)
+
+    return jsonify({
+        'status': 'success',
+        'overview': overview_stats,
+        'recent_logs': recent_logs
+    })
 
 
 @auth_bp.route('/admin/delete_images', methods=['POST'])
