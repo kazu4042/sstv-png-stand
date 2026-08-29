@@ -13,7 +13,7 @@ class PacketDatabaseTurboPNG:
     def __init__(self, log_dir):
         os.makedirs(log_dir, exist_ok=True)
         self.db_path = os.path.join(log_dir, "sstv_packets_turbo_png.db")
-        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30.0)
         self.conn.execute("PRAGMA journal_mode=WAL")  # 高速アクセス
         self._init_db()
 
@@ -177,6 +177,203 @@ class PacketDatabaseTurboPNG:
             cursor.execute(f"DELETE FROM packets WHERE image_id IN ({placeholders})", image_ids_int_list)
             deleted_count = cursor.rowcount
         return deleted_count
+
+    def get_snr_analytics(self):
+        """電波品質（SNR: Signal to Noise Ratio）の統計と分布を取得"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    COUNT(*) as total_packets,
+                    AVG(snr) as avg_snr,
+                    MAX(snr) as max_snr,
+                    MIN(snr) as min_snr,
+                    COALESCE(SUM(CASE WHEN snr >= 15.0 THEN 1 ELSE 0 END), 0) as count_high,
+                    COALESCE(SUM(CASE WHEN snr >= 8.0 AND snr < 15.0 THEN 1 ELSE 0 END), 0) as count_mid,
+                    COALESCE(SUM(CASE WHEN snr < 8.0 THEN 1 ELSE 0 END), 0) as count_low
+                FROM packets
+            """)
+            row = cursor.fetchone()
+            if not row or row[0] == 0:
+                return {
+                    "total_packets": 0,
+                    "avg_snr": 0.0,
+                    "max_snr": 0.0,
+                    "min_snr": 0.0,
+                    "count_high": 0,
+                    "count_mid": 0,
+                    "count_low": 0,
+                    "condition": "NO_DATA",
+                    "condition_label": "データ待機中"
+                }
+
+            total, avg_s, max_s, min_s, c_high, c_mid, c_low = row
+            avg_s = avg_s or 0.0
+            max_s = max_s or 0.0
+            min_s = min_s or 0.0
+
+            # 電波コンディション判定
+            if avg_s >= 14.0:
+                condition = "EXCELLENT"
+                condition_label = "極めて良好 (High SNR)"
+            elif avg_s >= 9.0:
+                condition = "GOOD"
+                condition_label = "良好・安定 (Clear)"
+            elif avg_s >= 5.0:
+                condition = "MODERATE"
+                condition_label = "普通・ややノイズあり"
+            else:
+                condition = "POOR"
+                condition_label = "混信・弱電界 (Noisy)"
+
+            return {
+                "total_packets": total or 0,
+                "avg_snr": round(avg_s, 1),
+                "max_snr": round(max_s, 1),
+                "min_snr": round(min_s, 1),
+                "count_high": c_high or 0,
+                "count_mid": c_mid or 0,
+                "count_low": c_low or 0,
+                "condition": condition,
+                "condition_label": condition_label
+            }
+        except Exception as e:
+            print(f"[PacketDB] get_snr_analytics error: {e}")
+            return {
+                "total_packets": 0,
+                "avg_snr": 0.0,
+                "max_snr": 0.0,
+                "min_snr": 0.0,
+                "count_high": 0,
+                "count_mid": 0,
+                "count_low": 0,
+                "condition": "NO_DATA",
+                "condition_label": "データ待機中"
+            }
+
+    def get_top_contributors(self, limit=5):
+        """パケット提供数の多いユーザーランキング"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT 
+                user_id,
+                COUNT(*) as packet_count,
+                COUNT(DISTINCT image_id) as image_count,
+                COUNT(DISTINCT tile_y || '_' || tile_x) as tile_count,
+                AVG(snr) as avg_snr,
+                MAX(imported_at) as last_seen
+            FROM packets
+            WHERE user_id IS NOT NULL
+            GROUP BY user_id
+            ORDER BY packet_count DESC
+            LIMIT ?
+        """, (limit,))
+        results = []
+        for row in cursor.fetchall():
+            u_id, p_count, img_count, t_count, a_snr, l_seen = row
+            results.append({
+                "user_id": u_id,
+                "packet_count": p_count,
+                "image_count": img_count,
+                "tile_count": t_count,
+                "avg_snr": round(a_snr or 0.0, 1),
+                "last_seen": l_seen
+            })
+        return results
+
+    def get_hourly_packet_traffic(self, period='today'):
+        """パケット受信量の時系列推移（Chart.js用）"""
+        cursor = self.conn.cursor()
+        labels = []
+        traffic_data = []
+
+        try:
+            if period == 'today':
+                cursor.execute("""
+                    SELECT strftime('%H', imported_at) as hour,
+                           COUNT(*) as packet_count
+                    FROM packets
+                    WHERE date(imported_at) = date('now', 'localtime')
+                    GROUP BY hour
+                """)
+                hour_map = {row[0]: row[1] for row in cursor.fetchall()}
+                for h in range(24):
+                    h_str = f"{h:02d}"
+                    labels.append(f"{h_str}:00")
+                    traffic_data.append(hour_map.get(h_str, 0))
+
+            elif period == '24h':
+                cursor.execute("""
+                    SELECT strftime('%Y-%m-%d %H:00', imported_at) as hour_slot,
+                           COUNT(*) as packet_count
+                    FROM packets
+                    WHERE imported_at >= datetime('now', 'localtime', '-23 hours')
+                    GROUP BY hour_slot
+                """)
+                slot_map = {row[0]: row[1] for row in cursor.fetchall()}
+                from datetime import datetime, timedelta
+                now = datetime.now()
+                for i in range(23, -1, -1):
+                    t = now - timedelta(hours=i)
+                    slot_key = t.strftime('%Y-%m-%d %H:00')
+                    labels.append(t.strftime('%H:00'))
+                    traffic_data.append(slot_map.get(slot_key, 0))
+
+            elif period in ['7d', '30d']:
+                days = 7 if period == '7d' else 30
+                cursor.execute(f"""
+                    SELECT date(imported_at) as day,
+                           COUNT(*) as packet_count
+                    FROM packets
+                    WHERE imported_at >= datetime('now', 'localtime', '-{days-1} days')
+                    GROUP BY day
+                """)
+                day_map = {row[0]: row[1] for row in cursor.fetchall()}
+                from datetime import datetime, timedelta
+                now = datetime.now()
+                for i in range(days - 1, -1, -1):
+                    d = now - timedelta(days=i)
+                    day_key = d.strftime('%Y-%m-%d')
+                    labels.append(d.strftime('%m/%d'))
+                    traffic_data.append(day_map.get(day_key, 0))
+
+        except Exception as e:
+            print(f"[PacketDB] get_hourly_packet_traffic error: {e}")
+
+        return {
+            "period": period,
+            "labels": labels,
+            "packets": traffic_data
+        }
+
+    def get_system_storage_metrics(self):
+        """ストレージ使用量およびシステム統計"""
+        db_size_bytes = os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0
+        db_size_mb = round(db_size_bytes / (1024 * 1024), 2)
+
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM imported_files")
+        row_files = cursor.fetchone()
+        imported_files_count = row_files[0] if row_files else 0
+
+        cursor.execute("SELECT COUNT(*) FROM packets")
+        row_pkts = cursor.fetchone()
+        total_packets = row_pkts[0] if row_pkts else 0
+
+        return {
+            "db_size_mb": db_size_mb,
+            "imported_files_count": imported_files_count,
+            "total_packets": total_packets
+        }
+
+    def optimize_database(self):
+        """DB の VACUUM 最適化を実行"""
+        try:
+            self.conn.execute("VACUUM")
+            return True
+        except Exception as e:
+            print(f"[PacketDB] Optimize error: {e}")
+            return False
 
     def close(self):
         self.conn.close()

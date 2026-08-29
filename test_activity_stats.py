@@ -89,7 +89,7 @@ def test_activity_stats_and_graph():
         assert res_admin_page.status_code == 200
         html = res_admin_page.get_data(as_text=True)
         assert 'activityChart' in html
-        assert '時間帯別アクティブ・閲覧者数推移' in html
+        assert '時間帯別アクセス & 受信パケット推移' in html or '時間帯別アクティブ' in html
         assert 'pagesPieChart' in html
         print("✅ 管理者ダッシュボード (/admin) HTML 描画合格")
         

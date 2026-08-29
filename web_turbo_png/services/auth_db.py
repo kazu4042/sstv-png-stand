@@ -14,7 +14,7 @@ class AuthDB:
             self.db_path = db_path
             
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30.0)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self._init_db()
 
@@ -173,7 +173,8 @@ class AuthDB:
                 SELECT COUNT(*) FROM access_logs 
                 WHERE date(created_at) = date('now', 'localtime')
             """)
-            today_pv = cursor.fetchone()[0]
+            row_pv = cursor.fetchone()
+            today_pv = row_pv[0] if row_pv and row_pv[0] is not None else 0
 
             # 本日のユニーク訪問者数
             cursor.execute("""
@@ -181,7 +182,8 @@ class AuthDB:
                 FROM access_logs 
                 WHERE date(created_at) = date('now', 'localtime')
             """)
-            today_uu = cursor.fetchone()[0]
+            row_uu = cursor.fetchone()
+            today_uu = row_uu[0] if row_uu and row_uu[0] is not None else 0
 
             # 本日のログインユーザー数
             cursor.execute("""
@@ -189,7 +191,8 @@ class AuthDB:
                 FROM access_logs 
                 WHERE date(created_at) = date('now', 'localtime') AND user_id IS NOT NULL
             """)
-            today_logged_in_users = cursor.fetchone()[0]
+            row_logged = cursor.fetchone()
+            today_logged_in_users = row_logged[0] if row_logged and row_logged[0] is not None else 0
 
             return {
                 "today_pv": today_pv,

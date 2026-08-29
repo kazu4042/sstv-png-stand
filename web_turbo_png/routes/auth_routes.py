@@ -115,6 +115,21 @@ def admin_dashboard():
     initial_graph = db.get_activity_graph_data(period='today')
     top_pages = db.get_top_pages_stats(days=7, limit=5)
     recent_logs = db.get_recent_access_logs(limit=15)
+
+    # 電波品質・SNR統計
+    snr_stats = analyzer.get_snr_analytics()
+
+    # トップ貢献者ランキング
+    top_contributors = analyzer.get_top_contributors(limit=8)
+
+    # パケットトラフィック推移 (今日)
+    packet_traffic = analyzer.get_hourly_packet_traffic(period='today')
+
+    # システム健全度・ストレージメトリクス
+    system_health = analyzer.get_system_health_metrics()
+
+    # 復元達成サマリー
+    restoration_overview = analyzer.get_restoration_overview()
     
     return render_template(
         'admin.html',
@@ -123,7 +138,12 @@ def admin_dashboard():
         overview_stats=overview_stats,
         initial_graph=initial_graph,
         top_pages=top_pages,
-        recent_logs=recent_logs
+        recent_logs=recent_logs,
+        snr_stats=snr_stats,
+        top_contributors=top_contributors,
+        packet_traffic=packet_traffic,
+        system_health=system_health,
+        restoration_overview=restoration_overview
     )
 
 
@@ -142,9 +162,14 @@ def admin_activity_stats():
     graph_data = db.get_activity_graph_data(period=period)
     overview_stats = db.get_today_overview_stats()
 
+    from web_turbo_png.routes.api_routes import get_analyzer
+    analyzer = get_analyzer()
+    packet_traffic = analyzer.get_hourly_packet_traffic(period=period)
+
     return jsonify({
         'status': 'success',
         'graph': graph_data,
+        'packet_traffic': packet_traffic,
         'overview': overview_stats
     })
 
@@ -160,11 +185,48 @@ def admin_realtime_stats():
     overview_stats = db.get_today_overview_stats()
     recent_logs = db.get_recent_access_logs(limit=15)
 
+    from web_turbo_png.routes.api_routes import get_analyzer
+    analyzer = get_analyzer()
+    snr_stats = analyzer.get_snr_analytics()
+    system_health = analyzer.get_system_health_metrics()
+
     return jsonify({
         'status': 'success',
         'overview': overview_stats,
-        'recent_logs': recent_logs
+        'recent_logs': recent_logs,
+        'snr_stats': snr_stats,
+        'system_health': system_health
     })
+
+
+@auth_bp.route('/admin/api/optimize_db', methods=['POST'])
+@login_required
+def admin_optimize_db():
+    current_email = session.get('email')
+    if not is_admin(current_email):
+        return jsonify({'status': 'error', 'message': '権限がありません'}), 403
+
+    from web_turbo_png.routes.api_routes import get_analyzer
+    analyzer = get_analyzer()
+    success = analyzer.optimize_db()
+
+    if success:
+        return jsonify({'status': 'success', 'message': 'データベースの VACUUM 最適化が完了しました'})
+    else:
+        return jsonify({'status': 'error', 'message': '最適化処理中にエラーが発生しました'}), 500
+
+
+@auth_bp.route('/admin/api/clear_cache', methods=['POST'])
+@login_required
+def admin_clear_cache():
+    current_email = session.get('email')
+    if not is_admin(current_email):
+        return jsonify({'status': 'error', 'message': '権限がありません'}), 403
+
+    from web_turbo_png.routes.api_routes import invalidate_analyzer_cache
+    invalidate_analyzer_cache()
+    return jsonify({'status': 'success', 'message': 'アナライザーキャッシュをクリアしました'})
+
 
 
 @auth_bp.route('/admin/delete_images', methods=['POST'])

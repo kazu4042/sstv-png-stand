@@ -325,3 +325,68 @@ class TurboPNGAnalyzerService:
                 })
 
         return reliability_map
+
+    def get_snr_analytics(self):
+        """電波受信品質とSNR統計を取得"""
+        return self.aggregator.db.get_snr_analytics()
+
+    def get_top_contributors(self, limit=5):
+        """ユーザー別のパケット貢献ランキング（メールアドレス解決付き）"""
+        contributors = self.aggregator.db.get_top_contributors(limit=limit)
+        from web_turbo_png.services.auth_db import get_auth_db
+        try:
+            db = get_auth_db()
+            users = db.get_all_users()
+            user_dict = {u['id']: u['email'] for u in users}
+        except Exception:
+            user_dict = {}
+
+        for c in contributors:
+            u_id = c["user_id"]
+            c["email"] = user_dict.get(u_id, f"ユーザー #{u_id}" if u_id else "ゲスト")
+
+        return contributors
+
+    def get_hourly_packet_traffic(self, period='today'):
+        """パケット受信量の時系列推移"""
+        return self.aggregator.db.get_hourly_packet_traffic(period=period)
+
+    def get_system_health_metrics(self):
+        """DBサイズや画像ストレージ容量などのシステムメトリクス"""
+        storage = self.aggregator.db.get_system_storage_metrics()
+        
+        # 出力画像ストレージサイズの計算
+        static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
+        img_storage_bytes = 0
+        img_file_count = 0
+        if os.path.exists(static_out):
+            for f in os.listdir(static_out):
+                fp = os.path.join(static_out, f)
+                if os.path.isfile(fp):
+                    img_storage_bytes += os.path.getsize(fp)
+                    img_file_count += 1
+        img_storage_mb = round(img_storage_bytes / (1024 * 1024), 2)
+
+        storage["image_storage_mb"] = img_storage_mb
+        storage["restored_files_count"] = img_file_count
+        return storage
+
+    def get_restoration_overview(self):
+        """全受信画像の復元ステータス概要"""
+        summaries = self.get_all_images_summary()
+        total_images = len(summaries)
+        completed_count = sum(1 for img in summaries if img.get("restoration_score", 0) >= 100.0)
+        in_progress_count = total_images - completed_count
+        avg_score = round(sum(img.get("restoration_score", 0) for img in summaries) / total_images, 1) if total_images > 0 else 0.0
+
+        return {
+            "total_images": total_images,
+            "completed_count": completed_count,
+            "in_progress_count": in_progress_count,
+            "avg_restoration_score": avg_score
+        }
+
+    def optimize_db(self):
+        """DB VACUUM 最適化の実行"""
+        return self.aggregator.db.optimize_database()
+
