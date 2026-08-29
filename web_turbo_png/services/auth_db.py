@@ -135,31 +135,38 @@ class AuthDB:
             print(f"[AuthDB] Delete user error: {e}")
             return False
 
-    def log_access(self, user_id=None, session_id=None, ip_address=None, endpoint=None, method='GET', user_agent=None):
+    def log_access(self, user_id=None, session_id=None, ip_address=None, endpoint=None, method='GET', user_agent=None, created_at=None):
         """アクセスログを記録"""
         try:
+            from datetime import datetime
+            if not created_at:
+                created_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                
             with self.conn:
                 self.conn.execute("""
-                    INSERT INTO access_logs (user_id, session_id, ip_address, endpoint, method, user_agent)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (user_id, session_id, ip_address, endpoint, method, user_agent))
+                    INSERT INTO access_logs (user_id, session_id, ip_address, endpoint, method, user_agent, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (user_id, session_id, ip_address, endpoint, method, user_agent, created_at))
             return True
         except Exception as e:
             print(f"[AuthDB] Log access error: {e}")
             return False
 
     def get_realtime_active_count(self, window_minutes=5):
-        """直近N分以内のアクティブユーザー数（ユニーク）を取得"""
+        """直近N分以内のアクティブユーザー数（ユニーク訪問者）を取得"""
         try:
+            from datetime import datetime, timedelta
+            since_time = (datetime.now() - timedelta(minutes=window_minutes)).strftime('%Y-%m-%d %H:%M:%S')
+
             cursor = self.conn.cursor()
             # ログインユーザーまたはIP/Sessionでユニーク訪問者数をカウント
             cursor.execute("""
                 SELECT COUNT(DISTINCT COALESCE(CAST(user_id AS TEXT), session_id, ip_address))
                 FROM access_logs
-                WHERE created_at >= datetime('now', 'localtime', '-' || ? || ' minutes')
-            """, (window_minutes,))
+                WHERE created_at >= ?
+            """, (since_time,))
             row = cursor.fetchone()
-            return row[0] if row else 0
+            return row[0] if row and row[0] is not None else 0
         except Exception as e:
             print(f"[AuthDB] get_realtime_active_count error: {e}")
             return 0
@@ -167,21 +174,24 @@ class AuthDB:
     def get_today_overview_stats(self):
         """本日のアクセス概要（PV数、ユニーク訪問者数、ログインユーザー数）を取得"""
         try:
+            from datetime import datetime
+            today_str = datetime.now().strftime('%Y-%m-%d')
+
             cursor = self.conn.cursor()
             # 本日の総PV
             cursor.execute("""
                 SELECT COUNT(*) FROM access_logs 
-                WHERE date(created_at) = date('now', 'localtime')
-            """)
+                WHERE date(created_at) = ?
+            """, (today_str,))
             row_pv = cursor.fetchone()
             today_pv = row_pv[0] if row_pv and row_pv[0] is not None else 0
 
-            # 本日のユニーク訪問者数
+            # 本日のユニーク訪問者数 (UU)
             cursor.execute("""
                 SELECT COUNT(DISTINCT COALESCE(CAST(user_id AS TEXT), session_id, ip_address)) 
                 FROM access_logs 
-                WHERE date(created_at) = date('now', 'localtime')
-            """)
+                WHERE date(created_at) = ?
+            """, (today_str,))
             row_uu = cursor.fetchone()
             today_uu = row_uu[0] if row_uu and row_uu[0] is not None else 0
 
@@ -189,8 +199,8 @@ class AuthDB:
             cursor.execute("""
                 SELECT COUNT(DISTINCT user_id) 
                 FROM access_logs 
-                WHERE date(created_at) = date('now', 'localtime') AND user_id IS NOT NULL
-            """)
+                WHERE date(created_at) = ? AND user_id IS NOT NULL
+            """, (today_str,))
             row_logged = cursor.fetchone()
             today_logged_in_users = row_logged[0] if row_logged and row_logged[0] is not None else 0
 
@@ -209,6 +219,7 @@ class AuthDB:
         Chart.js 描画用の集計データを生成
         period: 'today' (今日の0~23時), '24h' (過去24時間), '7d' (過去7日間), '30d' (過去30日間)
         """
+        from datetime import datetime, timedelta
         cursor = self.conn.cursor()
         labels = []
         pv_data = []
@@ -216,15 +227,15 @@ class AuthDB:
 
         try:
             if period == 'today':
-                # 今日の00:00 〜 23:00（各時間帯の集計）
+                today_str = datetime.now().strftime('%Y-%m-%d')
                 cursor.execute("""
                     SELECT strftime('%H', created_at) as hour,
                            COUNT(*) as pv,
                            COUNT(DISTINCT COALESCE(CAST(user_id AS TEXT), session_id, ip_address)) as uu
                     FROM access_logs
-                    WHERE date(created_at) = date('now', 'localtime')
+                    WHERE date(created_at) = ?
                     GROUP BY hour
-                """)
+                """, (today_str,))
                 hour_map = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
 
                 for h in range(24):
@@ -235,41 +246,39 @@ class AuthDB:
                     uu_data.append(uu)
 
             elif period == '24h':
-                # 過去24時間（1時間刻み）
+                since_time = (datetime.now() - timedelta(hours=23)).strftime('%Y-%m-%d %H:00:00')
                 cursor.execute("""
                     SELECT strftime('%Y-%m-%d %H:00', created_at) as hour_slot,
                            COUNT(*) as pv,
                            COUNT(DISTINCT COALESCE(CAST(user_id AS TEXT), session_id, ip_address)) as uu
                     FROM access_logs
-                    WHERE created_at >= datetime('now', 'localtime', '-23 hours')
+                    WHERE created_at >= ?
                     GROUP BY hour_slot
-                """)
+                """, (since_time,))
                 slot_map = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
 
-                from datetime import datetime, timedelta
                 now = datetime.now()
                 for i in range(23, -1, -1):
                     t = now - timedelta(hours=i)
                     slot_key = t.strftime('%Y-%m-%d %H:00')
-                    label_str = t.strftime('%H:00')
-                    labels.append(label_str)
+                    labels.append(t.strftime('%H:00'))
                     pv, uu = slot_map.get(slot_key, (0, 0))
                     pv_data.append(pv)
                     uu_data.append(uu)
 
             elif period in ['7d', '30d']:
                 days = 7 if period == '7d' else 30
-                cursor.execute(f"""
+                since_date = (datetime.now() - timedelta(days=days-1)).strftime('%Y-%m-%d 00:00:00')
+                cursor.execute("""
                     SELECT date(created_at) as day,
                            COUNT(*) as pv,
                            COUNT(DISTINCT COALESCE(CAST(user_id AS TEXT), session_id, ip_address)) as uu
                     FROM access_logs
-                    WHERE created_at >= datetime('now', 'localtime', '-{days-1} days')
+                    WHERE created_at >= ?
                     GROUP BY day
-                """)
+                """, (since_date,))
                 day_map = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
 
-                from datetime import datetime, timedelta
                 now = datetime.now()
                 for i in range(days - 1, -1, -1):
                     d = now - timedelta(days=i)

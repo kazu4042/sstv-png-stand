@@ -95,11 +95,13 @@ class PacketDatabaseTurboPNG:
         """
         packets_list: [(image_id, tile_x, tile_y, payload_length, payload_bits, snr), ...]
         """
+        from datetime import datetime
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         with self.conn:
             self.conn.executemany("""
-                INSERT INTO packets (image_id, tile_x, tile_y, payload_length, payload_bits, snr, file_name, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, [(p[0], p[1], p[2], p[3], p[4], p[5], file_name, user_id) for p in packets_list])
+                INSERT INTO packets (image_id, tile_x, tile_y, payload_length, payload_bits, snr, file_name, user_id, imported_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [(p[0], p[1], p[2], p[3], p[4], p[5], file_name, user_id, now_str) for p in packets_list])
             self.mark_file_imported(file_name)
 
     def get_all_image_ids_with_counts(self, user_id=None):
@@ -283,19 +285,21 @@ class PacketDatabaseTurboPNG:
 
     def get_hourly_packet_traffic(self, period='today'):
         """パケット受信量の時系列推移（Chart.js用）"""
+        from datetime import datetime, timedelta
         cursor = self.conn.cursor()
         labels = []
         traffic_data = []
 
         try:
             if period == 'today':
+                today_str = datetime.now().strftime('%Y-%m-%d')
                 cursor.execute("""
                     SELECT strftime('%H', imported_at) as hour,
                            COUNT(*) as packet_count
                     FROM packets
-                    WHERE date(imported_at) = date('now', 'localtime')
+                    WHERE date(imported_at) = ?
                     GROUP BY hour
-                """)
+                """, (today_str,))
                 hour_map = {row[0]: row[1] for row in cursor.fetchall()}
                 for h in range(24):
                     h_str = f"{h:02d}"
@@ -303,15 +307,15 @@ class PacketDatabaseTurboPNG:
                     traffic_data.append(hour_map.get(h_str, 0))
 
             elif period == '24h':
+                since_time = (datetime.now() - timedelta(hours=23)).strftime('%Y-%m-%d %H:00:00')
                 cursor.execute("""
                     SELECT strftime('%Y-%m-%d %H:00', imported_at) as hour_slot,
                            COUNT(*) as packet_count
                     FROM packets
-                    WHERE imported_at >= datetime('now', 'localtime', '-23 hours')
+                    WHERE imported_at >= ?
                     GROUP BY hour_slot
-                """)
+                """, (since_time,))
                 slot_map = {row[0]: row[1] for row in cursor.fetchall()}
-                from datetime import datetime, timedelta
                 now = datetime.now()
                 for i in range(23, -1, -1):
                     t = now - timedelta(hours=i)
@@ -321,15 +325,15 @@ class PacketDatabaseTurboPNG:
 
             elif period in ['7d', '30d']:
                 days = 7 if period == '7d' else 30
-                cursor.execute(f"""
+                since_date = (datetime.now() - timedelta(days=days-1)).strftime('%Y-%m-%d 00:00:00')
+                cursor.execute("""
                     SELECT date(imported_at) as day,
                            COUNT(*) as packet_count
                     FROM packets
-                    WHERE imported_at >= datetime('now', 'localtime', '-{days-1} days')
+                    WHERE imported_at >= ?
                     GROUP BY day
-                """)
+                """, (since_date,))
                 day_map = {row[0]: row[1] for row in cursor.fetchall()}
-                from datetime import datetime, timedelta
                 now = datetime.now()
                 for i in range(days - 1, -1, -1):
                     d = now - timedelta(days=i)

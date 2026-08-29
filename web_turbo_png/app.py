@@ -112,33 +112,46 @@ def require_basic_auth_and_login():
         return redirect(url_for('auth.login', next=request.url))
 
 
+@app.before_request
+def ensure_visitor_id():
+    """訪問者ごとの一意なvisitor_idをセッションに確保"""
+    from flask import session
+    import uuid
+    if 'visitor_id' not in session:
+        session['visitor_id'] = uuid.uuid4().hex[:16]
+
+
 @app.after_request
 def record_access_log(response):
-    """静的ファイル・過剰なポーリングAPI以外のアクセスを記録"""
+    """静的ファイル・APIポーリング以外の通常アクセスを正確に記録"""
     try:
         path = request.path
         # 静的ファイルやファビコン、管理APIポーリング等は除外
-        if path.startswith('/static/') or path.endswith(('.ico', '.png', '.jpg', '.css', '.js', '.map', '.svg')):
+        if path.startswith('/static/') or path.endswith(('.ico', '.png', '.jpg', '.jpeg', '.gif', '.css', '.js', '.map', '.svg', '.woff', '.woff2', '.ttf')):
             return response
-        if path.startswith('/admin/api/'):
+        if path.startswith('/admin/api/') or path in ['/favicon.ico', '/robots.txt']:
             return response
 
         from flask import session
+        from datetime import datetime
+        
         user_id = session.get('user_id')
-        session_id = session.get('_id', None)
+        visitor_id = session.get('visitor_id')
         ip = request.headers.get('X-Forwarded-For', request.remote_addr)
         if ip and ',' in ip:
             ip = ip.split(',')[0].strip()
         user_agent = request.headers.get('User-Agent', '')[:255]
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
         auth_db = get_auth_db()
         auth_db.log_access(
             user_id=user_id,
-            session_id=session_id,
+            session_id=visitor_id,
             ip_address=ip,
             endpoint=path,
             method=request.method,
-            user_agent=user_agent
+            user_agent=user_agent,
+            created_at=now_str
         )
     except Exception as e:
         # ロギングのエラーでリクエスト自体が落ちないように安全にキャッチ
