@@ -157,6 +157,9 @@ def fast_find_header_alignment(data, start_scan, end_scan, header_symbols, sampl
                 best_pos = pos
                 best_bits = h_bits.copy()
                 
+    return best_pos, best_snr, best_bits
+
+
 from core.base_interfaces import BaseDecoder
 
 

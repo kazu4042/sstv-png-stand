@@ -226,6 +226,12 @@ class TurboJPEGAggregator(BaseAggregator):
             canvas.save(out_path, format="JPEG", quality=95)
             saved_files.append(out_path)
 
+            # Webシステム用に static/output にも保存
+            static_out = os.path.join(root_dir, "web_turbo_png", "static", "output")
+            os.makedirs(static_out, exist_ok=True)
+            static_path = os.path.join(static_out, out_filename)
+            canvas.save(static_path, format="JPEG", quality=95)
+
         return saved_files
 
     def close(self):

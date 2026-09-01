@@ -145,7 +145,7 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
             
         update_job(job_id, progress=85, status="復元画像を生成中...")
 
-        output_dir = os.path.join(app.static_folder, "output")
+        output_dir = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
         os.makedirs(output_dir, exist_ok=True)
 
         image_counts = aggregator.db.get_all_image_ids_with_counts(user_id=None)
@@ -203,9 +203,9 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                                 continue
                             for i, bit_char in enumerate(p_bits_str[:payload_bit_len]):
                                 if bit_char == '1':
-                                    score_1[i] += p_weight
+                                     score_1[i] += p_weight
                                 elif bit_char == '0':
-                                    score_0[i] += p_weight
+                                     score_0[i] += p_weight
                         voted_payload = "".join(
                             '1' if score_1[i] >= score_0[i] else '0'
                             for i in range(payload_bit_len)
@@ -281,6 +281,8 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
             all_ids = list(user_packets_by_id.keys())
             current_image_id = all_ids[0] if all_ids else "UNKNOWN"
 
+        net_img_filename = f"restored_ID_{current_image_id}.jpg" if (mode_name == "JPEG" or os.path.exists(os.path.join(output_dir, f"restored_ID_{current_image_id}.jpg"))) else f"restored_ID_{current_image_id}.png"
+
         result_data = {
             "image_id": current_image_id,
             "user_score": main_score,
@@ -288,7 +290,7 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
             "packets_received": max_packets,
             "total_required": total_required_packets,
             "user_image_url": user_output_url,
-            "network_image_url": f"/static/output/restored_ID_{current_image_id}.png" if mode_name == "PNG" else f"/data/digital_turbo_jpeg/images/restored_ID_{current_image_id}.jpg",
+            "network_image_url": f"/static/output/{net_img_filename}",
             "available_image_ids": available_image_ids,
             "engine_mode": mode_name
         }
