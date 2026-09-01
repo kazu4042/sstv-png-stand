@@ -157,11 +157,12 @@ def fast_find_header_alignment(data, start_scan, end_scan, header_symbols, sampl
                 best_pos = pos
                 best_bits = h_bits.copy()
                 
-    return best_pos, best_snr, best_bits
+from core.base_interfaces import BaseDecoder
 
 
-class DigitalTurboPNGDecoder:
+class DigitalTurboPNGDecoder(BaseDecoder):
     def __init__(self, user_id=None):
+        super().__init__(user_id=user_id)
         import uuid
         timestamp = f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{uuid.uuid4().hex[:6]}"
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))

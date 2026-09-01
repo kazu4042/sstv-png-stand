@@ -7,34 +7,35 @@ ROOT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, "../../"))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-import digital_turbo_png.config_turbo as config
-from digital_turbo_png.aggregator_turbo import TurboPNGAggregator
+from core.system_factory import SystemFactory
 
 
 class TurboPNGAnalyzerService:
-    """TurboPNG 専用アナライザーサービス（SQLite DB を利用）"""
+    """SSTV Turbo 統合アナライザーサービス（PNG/JPEG プラガブル対応）"""
 
     def __init__(self):
-        log_dir = getattr(config, "TEXT_LOG_DIR", "data/digital_turbo_png/logs")
+        config = SystemFactory.get_config()
+        mode_name = SystemFactory.get_mode()
+        log_dir = getattr(config, "TEXT_LOG_DIR", f"data/digital_turbo_{mode_name.lower()}/logs")
         if not os.path.isabs(log_dir):
             self.log_directory = os.path.join(ROOT_DIR, log_dir)
         else:
             self.log_directory = log_dir
 
-        self.aggregator = TurboPNGAggregator(log_dir=self.log_directory)
+        self.aggregator = SystemFactory.get_aggregator(log_dir=self.log_directory)
         self.aggregator.load_all_logs()
 
     def get_available_image_ids(self, user_id=None):
-        """DB に存在する画像IDを16進数文字列のリストで返す（user_id指定時はそのユーザーのもののみ）"""
+        """DB に存在する画像IDを16進数文字列のリストで返す"""
         image_counts = self.aggregator.db.get_all_image_ids_with_counts(user_id=user_id)
         return sorted([f"{img_id:04X}" for img_id in image_counts.keys()])
 
     def get_merge_stats(self, target_image_id_hex):
-        """TurboPNG ではクラスタリングを行わないため空を返す"""
         return {"total_merged": 0, "details": []}
 
     def get_all_images_summary(self):
         """管理画面用: すべての画像IDの詳細一覧を取得"""
+        config = SystemFactory.get_config()
         summaries = self.aggregator.db.get_images_summary()
         total_required = config.TILE_COUNT_X * config.TILE_COUNT_Y
         static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
@@ -42,12 +43,18 @@ class TurboPNGAnalyzerService:
         for item in summaries:
             img_hex = item["image_id_hex"]
             item["total_required"] = total_required
-            item["restoration_score"] = round((item["tile_count"] / total_required) * 100, 1) if total_required > 0 else 0.0
+            t_count = int(item["tile_count"]) if item.get("tile_count") is not None else 0
+            item["restoration_score"] = round((t_count / total_required) * 100, 1) if total_required > 0 else 0.0
             
-            # 画像プレビューパス
-            img_filename = f"restored_ID_{img_hex}.png"
-            if os.path.exists(os.path.join(static_out, img_filename)):
-                item["thumbnail_url"] = f"/static/output/{img_filename}"
+            # 画像プレビューパス (PNG または JPG)
+            img_png = f"restored_ID_{img_hex}.png"
+            img_jpg = f"restored_ID_{img_hex}.jpg"
+            if os.path.exists(os.path.join(static_out, img_png)):
+                item["thumbnail_url"] = f"/static/output/{img_png}"
+            elif os.path.exists(os.path.join(static_out, img_jpg)):
+                item["thumbnail_url"] = f"/static/output/{img_jpg}"
+            elif os.path.exists(os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images", img_jpg)):
+                item["thumbnail_url"] = f"/data/digital_turbo_jpeg/images/{img_jpg}"
             else:
                 item["thumbnail_url"] = None
 
@@ -68,14 +75,13 @@ class TurboPNGAnalyzerService:
         if not int_ids:
             return {"deleted_packets": 0, "deleted_images": 0, "deleted_files": 0}
 
-        # 1. DBからパケットを削除
         deleted_packets = self.aggregator.db.delete_images_by_ids(int_ids)
 
-        # 2. 関連する画像ファイルを削除
         import glob
         deleted_files_count = 0
         directories_to_clean = [
             os.path.join(ROOT_DIR, "data", "images"),
+            os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images"),
             os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
         ]
 
@@ -84,7 +90,8 @@ class TurboPNGAnalyzerService:
             patterns = [
                 f"*ID_{clean_hex}*.png",
                 f"*ID_{clean_hex}*.jpg",
-                f"*ID_{str(hex_id).strip().upper()}*.png"
+                f"*ID_{str(hex_id).strip().upper()}*.png",
+                f"*ID_{str(hex_id).strip().upper()}*.jpg"
             ]
             for dir_path in directories_to_clean:
                 if not os.path.exists(dir_path):
@@ -97,7 +104,6 @@ class TurboPNGAnalyzerService:
                         except Exception as e:
                             print(f"Error removing {f}: {e}")
 
-        # 3. キャッシュ破棄
         from web_turbo_png.routes.api_routes import invalidate_analyzer_cache
         invalidate_analyzer_cache()
 
@@ -109,6 +115,7 @@ class TurboPNGAnalyzerService:
 
     def get_image_status(self, target_image_id_hex, user_id=None):
         """指定画像の全体復元状況および特定ユーザーの貢献状況を高速取得"""
+        config = SystemFactory.get_config()
         try:
             target_id_int = int(target_image_id_hex, 16)
         except (ValueError, TypeError):
@@ -129,7 +136,6 @@ class TurboPNGAnalyzerService:
 
         cursor = self.aggregator.db.conn.cursor()
 
-        # 1. ネットワーク全体のユニークタイル数 (高速SQL集計)
         cursor.execute("""
             SELECT COUNT(DISTINCT tile_y || '_' || tile_x)
             FROM packets
@@ -145,7 +151,6 @@ class TurboPNGAnalyzerService:
         user_score = 0.0
 
         if user_id:
-            # 2. ユーザーのパケット総数およびユニークタイル数 (高速SQL集計)
             cursor.execute("""
                 SELECT COUNT(*), COUNT(DISTINCT tile_y || '_' || tile_x)
                 FROM packets
@@ -160,7 +165,6 @@ class TurboPNGAnalyzerService:
                 if user_score > 100.0:
                     user_score = 100.0
 
-        # 画像ファイルの存在確認（ユーザーデータが存在する場合のみURLを返す）
         static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
         user_img_url = f"/static/output/user_{user_id}_ID_{target_image_id_hex}.png" if (user_id and user_has_data and os.path.exists(os.path.join(static_out, f"user_{user_id}_ID_{target_image_id_hex}.png"))) else None
         user_cumulative_url = f"/static/output/user_cumulative_{user_id}_ID_{target_image_id_hex}.png" if (user_id and user_has_data and os.path.exists(os.path.join(static_out, f"user_cumulative_{user_id}_ID_{target_image_id_hex}.png"))) else None
@@ -181,212 +185,122 @@ class TurboPNGAnalyzerService:
         }
 
     def _get_tiles_data(self, target_id_int):
-        """指定画像IDのタイルデータを DB から取得"""
         return self.aggregator.db.get_packets_for_image(target_id_int)
 
     def find_missing_packets(self, target_image_id_hex, max_limit=2048):
-        """不足・低品質なタイルをSQLで超高速に検出して返す"""
         missing_list = []
         try:
             target_id_int = int(target_image_id_hex, 16)
         except (ValueError, TypeError):
             return missing_list
 
+        config = SystemFactory.get_config()
         tile_count_x = config.TILE_COUNT_X
         tile_count_y = config.TILE_COUNT_Y
         poor_threshold = getattr(config, 'POOR_BLOCK_SNR_THRESHOLD', 5.0)
 
         cursor = self.aggregator.db.conn.cursor()
         cursor.execute("""
-            SELECT tile_y, tile_x, AVG(snr)
+            SELECT tile_y, tile_x, COUNT(*), MAX(snr)
             FROM packets
             WHERE image_id = ?
             GROUP BY tile_y, tile_x
         """, (target_id_int,))
 
-        present_tiles = {(row[0], row[1]): (row[2] or 0.0) for row in cursor.fetchall()}
+        tile_map = {}
+        for row in cursor.fetchall():
+            ty, tx, count, max_s = row
+            tile_map[(ty, tx)] = {"count": count, "max_snr": max_s or 0.0}
 
         for ty in range(tile_count_y):
             for tx in range(tile_count_x):
-                if (ty, tx) not in present_tiles:
-                    missing_list.append({"ty": ty, "tx": tx, "status": "MISSING"})
-                else:
-                    avg_snr = present_tiles[(ty, tx)]
-                    if avg_snr <= poor_threshold:
-                        missing_list.append({
-                            "ty": ty,
-                            "tx": tx,
-                            "status": "POOR",
-                            "avg_snr": round(avg_snr, 1)
-                        })
+                block_id = ty * tile_count_x + tx
+                data = tile_map.get((ty, tx))
+                if data is None:
+                    missing_list.append({
+                        "block_id": block_id,
+                        "tile_x": tx,
+                        "tile_y": ty,
+                        "status": "MISSING",
+                        "copies": 0,
+                        "max_snr": 0.0
+                    })
+                elif data["max_snr"] < poor_threshold:
+                    missing_list.append({
+                        "block_id": block_id,
+                        "tile_x": tx,
+                        "tile_y": ty,
+                        "status": "POOR_QUALITY",
+                        "copies": data["count"],
+                        "max_snr": round(data["max_snr"], 1)
+                    })
 
                 if len(missing_list) >= max_limit:
                     return missing_list
 
         return missing_list
 
-    def calculate_reliability_scores(self, target_image_id_hex, current_user_id=None):
-        """指定画像のタイルごとの信頼度（0-100%）を算出し、配列で返す"""
-        reliability_map = []
-        try:
-            target_id_int = int(target_image_id_hex, 16)
-        except ValueError:
-            return reliability_map
-
-        tiles_data = self._get_tiles_data(target_id_int)
-        if not tiles_data:
-            return reliability_map
-
-        # ユーザー情報を取得してIDからメールアドレスに変換する辞書を作成
-        from web_turbo_png.services.auth_db import get_auth_db
-        try:
-            db = get_auth_db()
-            users = db.get_all_users()
-            user_dict = {u['id']: u['email'] for u in users}
-        except Exception:
-            user_dict = {}
-
-        tile_count_x = config.TILE_COUNT_X
-        tile_count_y = config.TILE_COUNT_Y
-
-        for ty in range(tile_count_y):
-            for tx in range(tile_count_x):
-                if ty not in tiles_data or tx not in tiles_data[ty]:
-                    continue
-
-                len_dict = tiles_data[ty][tx]
-                if not len_dict:
-                    continue
-
-                best_plen = None
-                max_weight_sum = -1
-                for plen, pkts in len_dict.items():
-                    w_sum = sum(p[1] for p in pkts)
-                    if w_sum > max_weight_sum:
-                        max_weight_sum = w_sum
-                        best_plen = plen
-
-                if not best_plen:
-                    continue
-
-                packets = len_dict[best_plen]
-                payload_len = best_plen * 8
-
-                total_files = len(packets)
-                total_weight_sum = sum(weight for _, weight, _, _, _ in packets)
-
-                score_0 = np.zeros(payload_len, dtype=float)
-                score_1 = np.zeros(payload_len, dtype=float)
-                
-                is_contributed = False
-
-                for payload_bits_str, weight, file_name, p_user_id, imported_at in packets:
-                    if current_user_id and str(p_user_id) == str(current_user_id):
-                        is_contributed = True
-                        
-                    if len(payload_bits_str) < payload_len:
-                        continue
-                    for i, bit_char in enumerate(payload_bits_str[:payload_len]):
-                        if bit_char == '1':
-                            score_1[i] += weight
-                        elif bit_char == '0':
-                            score_0[i] += weight
-
-                confidences = []
-                for i in range(payload_len):
-                    diff = abs(score_1[i] - score_0[i])
-                    confidence = min(100.0, (diff / max(1.0, total_weight_sum)) * 100)
-                    confidences.append(confidence)
-
-                avg_confidence = sum(confidences) / len(confidences) if confidences else 0
-                avg_snr = (total_weight_sum / total_files) - 1.0 if total_files > 0 else 0
-
-                sources = []
-                for idx_pkt, pkt_info in enumerate(packets):
-                    payload_bits_str, weight, file_name, p_user_id, imported_at = pkt_info
-                    sender_name = user_dict.get(p_user_id, f"ユーザー #{p_user_id}" if p_user_id else "匿名")
-                    
-                    sources.append({
-                        "sender": sender_name,
-                        "location": "未設定",
-                        "received_at": imported_at,
-                        "file_name": file_name
-                    })
-
-                reliability_map.append({
-                    "line": ty,
-                    "block": tx,
-                    "score": round(avg_confidence, 1),
-                    "avg_snr": round(avg_snr, 1),
-                    "samples": total_files,
-                    "total_weight": total_weight_sum,
-                    "sources": sources,
-                    "is_contributed": is_contributed
-                })
-
-        return reliability_map
-
     def get_snr_analytics(self):
-        """電波受信品質とSNR統計を取得"""
         return self.aggregator.db.get_snr_analytics()
 
     def get_top_contributors(self, limit=5):
-        """ユーザー別のパケット貢献ランキング（メールアドレス解決付き）"""
-        contributors = self.aggregator.db.get_top_contributors(limit=limit)
+        raw_list = self.aggregator.db.get_top_contributors(limit=limit)
         from web_turbo_png.services.auth_db import get_auth_db
-        try:
-            db = get_auth_db()
-            users = db.get_all_users()
-            user_dict = {u['id']: u['email'] for u in users}
-        except Exception:
-            user_dict = {}
+        auth_db = get_auth_db()
 
-        for c in contributors:
-            u_id = c["user_id"]
-            c["email"] = user_dict.get(u_id, f"ユーザー #{u_id}" if u_id else "ゲスト")
-
-        return contributors
+        for item in raw_list:
+            u_id = item.get("user_id")
+            if u_id:
+                u_info = auth_db.get_user_by_id(u_id)
+                if u_info:
+                    item["email"] = u_info.get("email", f"user_{u_id}@example.com")
+                    item["display_name"] = u_info.get("display_name") or str(item["email"]).split("@")[0]
+                else:
+                    item["email"] = f"user_{u_id}@example.com"
+                    item["display_name"] = f"局 #{u_id}"
+            else:
+                item["email"] = "ゲスト"
+                item["display_name"] = "ゲスト"
+        return raw_list
 
     def get_hourly_packet_traffic(self, period='today'):
-        """パケット受信量の時系列推移"""
         return self.aggregator.db.get_hourly_packet_traffic(period=period)
 
     def get_system_health_metrics(self):
-        """DBサイズや画像ストレージ容量などのシステムメトリクス"""
         storage = self.aggregator.db.get_system_storage_metrics()
-        
-        # 出力画像ストレージサイズの計算
-        static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
-        img_storage_bytes = 0
-        img_file_count = 0
-        if os.path.exists(static_out):
-            for f in os.listdir(static_out):
-                fp = os.path.join(static_out, f)
+        out_dir = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
+        img_bytes = 0
+        img_count = 0
+        if os.path.exists(out_dir):
+            for f in os.listdir(out_dir):
+                fp = os.path.join(out_dir, f)
                 if os.path.isfile(fp):
-                    img_storage_bytes += os.path.getsize(fp)
-                    img_file_count += 1
-        img_storage_mb = round(img_storage_bytes / (1024 * 1024), 2)
-
-        storage["image_storage_mb"] = img_storage_mb
-        storage["restored_files_count"] = img_file_count
+                    img_bytes += os.path.getsize(fp)
+                    img_count += 1
+        storage["image_storage_mb"] = round(img_bytes / (1024 * 1024), 2)
+        storage["restored_files_count"] = img_count
         return storage
 
     def get_restoration_overview(self):
-        """全受信画像の復元ステータス概要"""
-        summaries = self.get_all_images_summary()
-        total_images = len(summaries)
-        completed_count = sum(1 for img in summaries if img.get("restoration_score", 0) >= 100.0)
-        in_progress_count = total_images - completed_count
-        avg_score = round(sum(img.get("restoration_score", 0) for img in summaries) / total_images, 1) if total_images > 0 else 0.0
-
+        config = SystemFactory.get_config()
+        summaries = self.aggregator.db.get_images_summary()
+        total_req = config.TILE_COUNT_X * config.TILE_COUNT_Y
+        complete = 0
+        in_progress = 0
+        for s in summaries:
+            s_tcount = int(s["tile_count"]) if s.get("tile_count") is not None else 0
+            if s_tcount >= total_req:
+                complete += 1
+            else:
+                in_progress += 1
         return {
-            "total_images": total_images,
-            "completed_count": completed_count,
-            "in_progress_count": in_progress_count,
-            "avg_restoration_score": avg_score
+            "total_images": len(summaries),
+            "complete_images": complete,
+            "in_progress_images": in_progress
         }
 
-    def optimize_db(self):
-        """DB VACUUM 最適化の実行"""
+    def optimize_database(self):
         return self.aggregator.db.optimize_database()
 
+    def optimize_db(self):
+        return self.optimize_database()

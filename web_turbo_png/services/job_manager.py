@@ -9,8 +9,11 @@ os.makedirs(JOB_DIR, exist_ok=True)
 def _get_job_file(job_id):
     return os.path.join(JOB_DIR, f"{job_id}.json")
 
-def create_job(job_id):
+def create_job(job_id=None):
     """新しいジョブを初期化"""
+    import uuid
+    if not job_id:
+        job_id = uuid.uuid4().hex
     data = {
         "progress": 0,
         "status": "初期化中...",
@@ -19,8 +22,9 @@ def create_job(job_id):
         "updated_at": time.time()
     }
     _write_job(job_id, data)
+    return job_id
 
-def update_job(job_id, progress=None, status=None, error=None, result_data=None):
+def update_job(job_id, progress=None, status=None, error=None, result_data=None, result=None):
     """ジョブの状態を更新"""
     data = get_job(job_id)
     if not data:
@@ -40,6 +44,8 @@ def update_job(job_id, progress=None, status=None, error=None, result_data=None)
         data["error"] = error
     if result_data is not None:
         data["result_data"] = result_data
+    elif result is not None:
+        data["result_data"] = result
         
     data["updated_at"] = time.time()
     _write_job(job_id, data)

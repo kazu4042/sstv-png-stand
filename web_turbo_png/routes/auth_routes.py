@@ -131,6 +131,9 @@ def admin_dashboard():
     # 復元達成サマリー
     restoration_overview = analyzer.get_restoration_overview()
     
+    from core.system_factory import SystemFactory
+    current_engine_mode = SystemFactory.get_mode()
+
     return render_template(
         'admin.html',
         users=users,
@@ -143,8 +146,39 @@ def admin_dashboard():
         top_contributors=top_contributors,
         packet_traffic=packet_traffic,
         system_health=system_health,
-        restoration_overview=restoration_overview
+        restoration_overview=restoration_overview,
+        current_engine_mode=current_engine_mode
     )
+
+
+@auth_bp.route('/admin/api/engine_mode', methods=['GET', 'POST'])
+@login_required
+def admin_engine_mode():
+    current_email = session.get('email')
+    if not is_admin(current_email):
+        return jsonify({'status': 'error', 'message': '権限がありません'}), 403
+
+    from core.system_factory import SystemFactory
+    from web_turbo_png.routes.api_routes import invalidate_analyzer_cache
+
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        mode = data.get('mode') or request.form.get('mode')
+        if not mode or mode.upper() not in ('PNG', 'JPEG'):
+            return jsonify({'status': 'error', 'message': 'モードは PNG または JPEG を指定してください'}), 400
+
+        SystemFactory.set_mode(mode.upper())
+        invalidate_analyzer_cache()
+        return jsonify({
+            'status': 'success',
+            'mode': SystemFactory.get_mode(),
+            'message': f'デコードエンジンを {SystemFactory.get_mode()} モードに変更しました'
+        })
+
+    return jsonify({
+        'status': 'success',
+        'mode': SystemFactory.get_mode()
+    })
 
 
 @auth_bp.route('/admin/api/activity_stats')

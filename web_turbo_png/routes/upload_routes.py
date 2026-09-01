@@ -2,24 +2,24 @@ import os
 import time
 import sys
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFile
 from flask import Blueprint, request, jsonify, current_app, Response, session
 from werkzeug.utils import secure_filename
 import io
+import uuid
+
+# 破損・途切れJPEG/PNGでも例外を出さずに読み込む
+setattr(ImageFile, 'LOAD_TRUNCATED_IMAGES', True)
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-import digital_turbo_png.config_turbo as config
-from digital_turbo_png.decoder_turbo import DigitalTurboPNGDecoder
-from digital_turbo_png.aggregator_turbo import TurboPNGAggregator
-
-upload_bp = Blueprint('upload', __name__)
-
-import uuid
+from core.system_factory import SystemFactory
 from web_turbo_png.routes.auth_routes import login_required
 from web_turbo_png.services.job_manager import create_job, update_job, get_job, cleanup_old_jobs
+
+upload_bp = Blueprint('upload', __name__)
 
 ALLOWED_EXTENSIONS = {'wav'}
 
@@ -28,8 +28,9 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def parse_turbo_log_line(line):
+def parse_turbo_log_line(line, config_module=None):
     """バイナリビットストリームログ行をパース（0と1のみの形式）"""
+    config = config_module or SystemFactory.get_config()
     line = line.strip()
     if not line or not all(c in '01' for c in line):
         return None
@@ -76,6 +77,7 @@ def upload_progress():
     else:
         return jsonify({"error": "Job not found"}), 404
 
+
 @upload_bp.route('/progress-stream')
 def progress_stream():
     job_id = request.args.get('job_id')
@@ -99,18 +101,20 @@ def progress_stream():
     response.headers['X-Accel-Buffering'] = 'no'
     return response
 
+
 def process_upload(filepath, original_filename, job_id, app, user_id):
     """アップロードされた音声ファイルの処理（バックグラウンド）"""
     try:
-        update_job(job_id, progress=5, status="音声のデコード中...")
+        config = SystemFactory.get_config()
+        mode_name = SystemFactory.get_mode()
+        update_job(job_id, progress=5, status=f"音声のデコード中 ({mode_name} モード)...")
 
-        # ===== Step1: デコード =====
-        decoder = DigitalTurboPNGDecoder(user_id=user_id)
+        # ===== Step1: ファクトリからデコーダを取得してデコード =====
+        decoder = SystemFactory.get_decoder(user_id=user_id)
         
         def decode_progress_callback(prog):
-            # progは0.0〜100.0のパーセンテージ
             calc_prog = 5 + int(prog * 0.55)
-            update_job(job_id, progress=calc_prog, status=f"音声信号の高速デコード中... {int(prog)}%")
+            update_job(job_id, progress=calc_prog, status=f"音声信号の高速デコード中 ({mode_name})... {int(prog)}%")
                 
         success_count, log_path = decoder.run(filepath, progress_callback=decode_progress_callback)
 
@@ -120,41 +124,38 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                 decoded_bits_list = [line.strip() for line in f if line.strip()]
         
         if not decoded_bits_list:
-            update_job(job_id, progress=100, status="エラー", error="SSTV TurboPNGの信号が検出できませんでした。")
+            update_job(job_id, progress=100, status="エラー", error=f"SSTV Turbo ({mode_name}) の信号が検出できませんでした。")
             return
             
         update_job(job_id, progress=60, status="データベースへの登録中...")
 
-        # ===== Step2: アグリゲータでDBに蓄積 =====
-        log_dir = getattr(config, "TEXT_LOG_DIR", "data/digital_turbo_png/logs")
+        # ===== Step2: ファクトリからアグリゲータを取得してDB蓄積 =====
+        log_dir = getattr(config, "TEXT_LOG_DIR", f"data/digital_turbo_{mode_name.lower()}/logs")
         if not os.path.isabs(log_dir):
             log_dir_path = os.path.join(ROOT_DIR, log_dir)
         else:
             log_dir_path = log_dir
         
-        update_job(job_id, progress=70, status="統合処理中 (Aggregator)...")
+        update_job(job_id, progress=70, status="統合処理中 (多数決アグリゲータ)...")
         
-        aggregator = TurboPNGAggregator(log_dir=log_dir_path)
+        aggregator = SystemFactory.get_aggregator(log_dir=log_dir_path)
         aggregator.load_all_logs()
-        # 全員のパケットで多数決画像を生成（user_idフィルタなし）
+        # 全員のパケットで多数決画像を生成
         aggregator.process_and_save_images(min_tile_ratio=0.0, user_id=None)
             
         update_job(job_id, progress=85, status="復元画像を生成中...")
 
-        # 復元画像を output ディレクトリに保存
         output_dir = os.path.join(app.static_folder, "output")
         os.makedirs(output_dir, exist_ok=True)
 
-        # DB から全画像ID を取得（全ユーザー横断）
         image_counts = aggregator.db.get_all_image_ids_with_counts(user_id=None)
         available_image_ids = sorted([f"{img_id:04X}" for img_id in image_counts.keys()])
 
         # ===== Step3: ユーザーの今回ログをパースして自分の受信画像を生成 =====
-        user_packets_by_id = {}  # {img_id_hex: [(img_id, tx, ty, plen, pbits, snr), ...]}
+        user_packets_by_id = {}
 
-        # デコード結果からログデータを取得
         for bits in decoded_bits_list:
-            parsed = parse_turbo_log_line(bits)
+            parsed = parse_turbo_log_line(bits, config_module=config)
             if parsed is None:
                 continue
             img_id, tile_x, tile_y, plen, pbits, snr_val = parsed
@@ -165,7 +166,6 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
 
         tile_count_x = config.TILE_COUNT_X
         tile_count_y = config.TILE_COUNT_Y
-        tile_size    = config.TILE_SIZE
         total_required_packets = tile_count_x * tile_count_y
 
         current_image_id = None
@@ -174,40 +174,38 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
         main_matched = 0
         user_output_url = ""
 
-        # 1. 今回送信された画像IDごとのセッション単体画像を生成
         for img_id_hex, packets in user_packets_by_id.items():
             if len(packets) > max_packets:
                 max_packets = len(packets)
                 current_image_id = img_id_hex
 
-            # 今回受信分の画像を描画
             user_image_buffer = Image.new("RGB", (config.WIDTH, config.HEIGHT), color="black")
             matched_packets = 0
 
-            # DB から投票済みペイロードを取得してユーザー一致率を計算
             db_tiles = aggregator.db.get_packets_for_image(int(img_id_hex, 16))
 
             for parsed in packets:
                 img_id_int, tile_x, tile_y, plen, user_payload, snr_val = parsed
 
-                # 投票済みペイロードと比較
                 voted_payload = ""
                 if tile_y in db_tiles and tile_x in db_tiles[tile_y]:
                     len_dict = db_tiles[tile_y][tile_x]
                     if len_dict:
-                        best_plen = max(len_dict.keys(), key=lambda k: sum(p[1] for p in len_dict[k]))
+                        best_plen = max(len_dict.keys(), key=lambda k: sum((p[1] + 1.0) for p in len_dict[k]))
                         db_packets = len_dict[best_plen]
                         payload_bit_len = best_plen * 8
                         score_0 = np.zeros(payload_bit_len, dtype=float)
                         score_1 = np.zeros(payload_bit_len, dtype=float)
-                        for p_bits_str, weight, _, _, _ in db_packets:
+                        for row in db_packets:
+                            p_bits_str = row[0]
+                            p_weight = row[1] + 1.0
                             if len(p_bits_str) < payload_bit_len:
                                 continue
                             for i, bit_char in enumerate(p_bits_str[:payload_bit_len]):
                                 if bit_char == '1':
-                                    score_1[i] += weight
+                                    score_1[i] += p_weight
                                 elif bit_char == '0':
-                                    score_0[i] += weight
+                                    score_0[i] += p_weight
                         voted_payload = "".join(
                             '1' if score_1[i] >= score_0[i] else '0'
                             for i in range(payload_bit_len)
@@ -222,6 +220,7 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                 try:
                     p_bytes = bits_to_bytearray(user_payload)
                     tile_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
+                    tile_img.load()
                     tw, th = tile_img.size
                     paste_x = tile_x * tw
                     paste_y = tile_y * th
@@ -248,145 +247,101 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
 
         # 2. このユーザーが過去に送信したすべての画像IDについて累積画像をDBから完全合成して保存
         if user_id:
-            user_counts = aggregator.db.get_all_image_ids_with_counts(user_id=user_id)
-            for u_img_id_int in user_counts.keys():
+            user_all_counts = aggregator.db.get_all_image_ids_with_counts(user_id=user_id)
+            for u_img_id_int in user_all_counts.keys():
                 u_img_id_hex = f"{u_img_id_int:04X}"
-                user_all_tiles = aggregator.db.get_packets_for_image(u_img_id_int, user_id=user_id)
-                
-                cum_buffer = Image.new("RGB", (config.WIDTH, config.HEIGHT), color="black")
-                for ty in range(tile_count_y):
-                    for tx in range(tile_count_x):
-                        if ty not in user_all_tiles or tx not in user_all_tiles[ty]:
+                user_db_tiles = aggregator.db.get_packets_for_image(u_img_id_int, user_id=user_id)
+                u_canvas = Image.new("RGB", (config.WIDTH, config.HEIGHT), color="black")
+                for ty in range(config.TILE_COUNT_Y):
+                    for tx in range(config.TILE_COUNT_X):
+                        len_dict = user_db_tiles[ty][tx]
+                        if not len_dict:
                             continue
-                        len_dict = user_all_tiles[ty][tx]
-                        tile_drawn = False
-                        # 描画可能なパケットを探索
-                        for plen, pkts in len_dict.items():
-                            for p_bits, weight, _, _, _ in pkts:
-                                try:
-                                    p_b = bits_to_bytearray(p_bits)[:plen]
-                                    t_img = Image.open(io.BytesIO(p_b)).convert("RGB")
-                                    tw, th = t_img.size
-                                    paste_x = tx * tw
-                                    paste_y = ty * th
-                                    if paste_x + tw <= config.WIDTH and paste_y + th <= config.HEIGHT:
-                                        cum_buffer.paste(t_img, (paste_x, paste_y))
-                                    else:
-                                        t_img = t_img.crop((0, 0, min(tw, config.WIDTH - paste_x), min(th, config.HEIGHT - paste_y)))
-                                        cum_buffer.paste(t_img, (paste_x, paste_y))
-                                    tile_drawn = True
-                                    break
-                                except Exception:
-                                    pass
-                            if tile_drawn:
-                                break
-
-                cum_img_path = os.path.join(output_dir, f"user_cumulative_{user_id}_ID_{u_img_id_hex}.png")
-                cum_buffer.save(cum_img_path, format="PNG")
+                        best_plen = max(len_dict.keys(), key=lambda k: sum((p[1] + 1.0) for p in len_dict[k]))
+                        pkts = len_dict[best_plen]
+                        best_pkt = max(pkts, key=lambda p: p[1])
+                        try:
+                            p_bytes = bits_to_bytearray(best_pkt[0])
+                            tile_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
+                            tile_img.load()
+                            tw, th = tile_img.size
+                            paste_x = tx * tw
+                            paste_y = ty * th
+                            if paste_x + tw <= config.WIDTH and paste_y + th <= config.HEIGHT:
+                                u_canvas.paste(tile_img, (paste_x, paste_y))
+                            else:
+                                tile_img = tile_img.crop((0, 0, min(tw, config.WIDTH - paste_x), min(th, config.HEIGHT - paste_y)))
+                                u_canvas.paste(tile_img, (paste_x, paste_y))
+                        except Exception:
+                            pass
+                u_accum_path = os.path.join(output_dir, f"user_{user_id}_ID_{u_img_id_hex}.png")
+                u_canvas.save(u_accum_path, format="PNG")
 
         if not current_image_id:
-            current_image_id = available_image_ids[0] if available_image_ids else "0000"
-
-        # ネットワーク全体の復元度を計算（全ユーザー横断）
-        network_received = 0
-        if current_image_id:
-            network_tiles = aggregator.db.get_packets_for_image(int(current_image_id, 16), user_id=None)
-            for ty in range(tile_count_y):
-                for tx in range(tile_count_x):
-                    if ty in network_tiles and tx in network_tiles[ty] and network_tiles[ty][tx]:
-                        network_received += 1
-        network_score = round((network_received / total_required_packets) * 100, 1) if total_required_packets > 0 else 0.0
-
-        aggregator.close()
+            all_ids = list(user_packets_by_id.keys())
+            current_image_id = all_ids[0] if all_ids else "UNKNOWN"
 
         result_data = {
-            "available_image_ids": available_image_ids,
-            "current_image_id": current_image_id,
-            "main_image_url": user_output_url,
-            "tile_count_x": tile_count_x,
-            "tile_count_y": tile_count_y,
-            "tile_size": tile_size,
-            "total_packets": total_required_packets,
+            "image_id": current_image_id,
+            "user_score": main_score,
+            "network_score": 0.0,
+            "packets_received": max_packets,
             "total_required": total_required_packets,
-            "received_packets": max_packets,
-            "main_score": main_score,
-            "contribution_score": main_score,
-            "main_matched": main_matched,
-            "is_perfect": main_matched >= total_required_packets,
-            "network_score": network_score,
-            "network_received": network_received,
-            "timestamp": int(time.time())
+            "user_image_url": user_output_url,
+            "network_image_url": f"/static/output/restored_ID_{current_image_id}.png" if mode_name == "PNG" else f"/data/digital_turbo_jpeg/images/restored_ID_{current_image_id}.jpg",
+            "available_image_ids": available_image_ids,
+            "engine_mode": mode_name
         }
-
-        # アナライザーのキャッシュを破棄（新規パケットを即座にAPIや画面に反映）
-        from web_turbo_png.routes.api_routes import invalidate_analyzer_cache
-        invalidate_analyzer_cache()
 
         update_job(job_id, progress=100, status="完了", result_data=result_data)
 
     except Exception as e:
         import traceback
         traceback.print_exc()
-        update_job(job_id, progress=100, status="エラー", error=str(e))
-    finally:
-        # 処理終了後、アップロードされた音声ファイルを削除する（ディスク容量対策）
-        if os.path.exists(filepath):
-            try:
-                os.remove(filepath)
-                print(f"[Cleanup] Deleted file: {filepath}")
-            except Exception as del_err:
-                print(f"[Cleanup Error] Failed to delete {filepath}: {del_err}")
+        update_job(job_id, progress=100, status="エラー", error=f"処理中にエラーが発生しました: {str(e)}")
+
 
 @upload_bp.route('/upload', methods=['POST'])
 @login_required
-def upload_file():
-    user_id = session.get('user_id') or 1
-    job_id = uuid.uuid4().hex
-    create_job(job_id)
+def upload_audio():
+    user_id = session.get('user_id')
+    
+    if 'audio' not in request.files:
+        return jsonify({"error": "No file part"}), 400
 
-    if 'file' not in request.files:
-        update_job(job_id, progress=100, status="エラー", error="ファイルが見つかりません")
-        return jsonify({'success': False, 'error': "ファイルが見つかりません"}), 400
+    file = request.files['audio']
+    raw_filename = file.filename or ""
+    if not raw_filename or raw_filename == '':
+        return jsonify({"error": "No selected file"}), 400
 
-    file = request.files['file']
-    if file.filename == '' or file.filename is None:
-        update_job(job_id, progress=100, status="エラー", error="ファイルが選択されていません")
-        return jsonify({'success': False, 'error': "ファイルが選択されていません"}), 400
+    if not allowed_file(raw_filename):
+        return jsonify({"error": "Invalid file type. Only .wav is allowed."}), 400
 
-    filename = file.filename
+    filename = secure_filename(raw_filename)
+    if not filename:
+        filename = f"upload_{int(time.time())}.wav"
+        
+    upload_folder = current_app.config['UPLOAD_FOLDER']
+    os.makedirs(upload_folder, exist_ok=True)
+    
+    unique_filename = f"{uuid.uuid4().hex}_{filename}"
+    filepath = os.path.join(upload_folder, unique_filename)
+    file.save(filepath)
 
-    if file and allowed_file(file.filename):
-        try:
-            update_job(job_id, progress=5, status="音声をアップロード中...")
+    job_id = create_job()
+    cleanup_old_jobs()
 
-            os.makedirs(current_app.config['UPLOAD_FOLDER'], exist_ok=True)
-            from werkzeug.utils import secure_filename
-            # 同時アップロード時のファイル名衝突を防止するために job_id を付与
-            unique_filename = f"{job_id}_{secure_filename(filename)}"
-            save_path = os.path.join(current_app.config['UPLOAD_FOLDER'], unique_filename)
-            file.save(save_path)
+    import threading
+    app_obj = getattr(current_app, '_get_current_object', lambda: current_app)()
+    thread = threading.Thread(
+        target=process_upload,
+        args=(filepath, filename, job_id, app_obj, user_id)
+    )
+    thread.daemon = True
+    thread.start()
 
-            import threading
-            app = current_app._get_current_object()  # pyrefly: ignore
-            
-            # 古いジョブやファイルのクリーンアップ処理
-            cleanup_old_jobs(max_age_seconds=86400)
-            
-            thread = threading.Thread(
-                target=process_upload, 
-                args=(save_path, secure_filename(filename), job_id, app, user_id)
-            )
-            thread.start()
-
-            return jsonify({'success': True, 'message': 'Processing started in background', 'job_id': job_id})
-
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            upload_error = f"エラーが発生しました: {str(e)}"
-            return jsonify({'success': False, 'error': upload_error}), 500
-
-    upload_error = "許可されていないファイル形式です（.wav のみ対応）"
-    return jsonify({'success': False, 'error': upload_error}), 400
-
-
+    return jsonify({
+        "status": "processing",
+        "job_id": job_id,
+        "message": "アップロードを受け付けました。処理を開始します。"
+    })

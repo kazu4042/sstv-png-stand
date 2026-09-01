@@ -368,6 +368,27 @@
                                             <span class="font-mono font-bold text-ink">{{ system_health.imported_files_count if system_health else 0 }} 件</span>
                                         </div>
                                     </div>
+
+                                    <!-- エンジン切り替えコントロール -->
+                                    <div class="mt-4 p-3.5 bg-gradient-to-r from-forestLight/50 to-emerald-50/50 rounded-xl border border-forest/20 flex flex-wrap items-center justify-between gap-3">
+                                        <div class="flex items-center gap-2.5">
+                                            <div class="p-2 bg-forest text-white rounded-lg">
+                                                <i data-lucide="cpu" class="w-4 h-4"></i>
+                                            </div>
+                                            <div>
+                                                <div class="text-xs font-bold text-ink">デコードエンジン (PNG / JPEG)</div>
+                                                <div class="text-[11px] text-earth">現在: <span id="current-engine-label" class="font-bold text-forest font-mono">{{ current_engine_mode if current_engine_mode else 'PNG' }} モード</span></div>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <button id="btn-set-png" onclick="setEngineMode('PNG')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all {% if current_engine_mode == 'PNG' %}bg-forest text-white shadow-sm{% else %}bg-white text-earth hover:text-ink border border-gray-200{% endif %}">
+                                                PNG (0/100)
+                                            </button>
+                                            <button id="btn-set-jpeg" onclick="setEngineMode('JPEG')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all {% if current_engine_mode == 'JPEG' %}bg-forest text-white shadow-sm{% else %}bg-white text-earth hover:text-ink border border-gray-200{% endif %}">
+                                                JPEG (ざらざら感)
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <div class="flex flex-wrap items-center gap-3 pt-4 border-t border-gray-100">
@@ -506,7 +527,7 @@
                                         <td class="p-4">
                                             <div class="flex items-center gap-2">
                                                 <div class="w-24 bg-gray-200 rounded-full h-2 overflow-hidden">
-                                                    <div class="bg-forest h-2 rounded-full" style="width: {{ img.restoration_score }}%"></div>
+                                                    <div class="bg-forest h-2 rounded-full" data-progress="{{ img.restoration_score }}" style="width: 0%;"></div>
                                                 </div>
                                                 <span class="text-xs font-bold text-ink">{{ img.restoration_score }}%</span>
                                             </div>
@@ -680,9 +701,18 @@
         </div>
     </div>
 
+    <!-- サーバー側埋め込みデータ -->
+    <script id="data-initial-graph" type="application/json">{{ (initial_graph if initial_graph else {}) | tojson | safe }}</script>
+    <script id="data-initial-packet" type="application/json">{{ (packet_traffic if packet_traffic else {}) | tojson | safe }}</script>
+    <script id="data-top-pages" type="application/json">{{ (top_pages if top_pages else []) | tojson | safe }}</script>
+    <script id="data-snr-stats" type="application/json">{{ (snr_stats if snr_stats else {}) | tojson | safe }}</script>
+
     <script>
-        // Lucide アイコン初期化
+        // Lucide アイコン初期化 & プログレスバー反映
         try { lucide.createIcons(); } catch(e) {}
+        document.querySelectorAll('[data-progress]').forEach(el => {
+            el.style.width = (el.getAttribute('data-progress') || '0') + '%';
+        });
 
         // 1. タブ切り替え処理
         const tabConfigs = [
@@ -719,8 +749,8 @@
         });
 
         // 2. Chart.js による複合推移グラフ (UU, PV, パケット数)
-        const initialGraphData = {{ (initial_graph if initial_graph else {}) | tojson }};
-        const initialPacketData = {{ (packet_traffic if packet_traffic else {}) | tojson }};
+        const initialGraphData = JSON.parse(document.getElementById('data-initial-graph')?.textContent || '{}');
+        const initialPacketData = JSON.parse(document.getElementById('data-initial-packet')?.textContent || '{}');
         let currentPeriod = 'today';
         let activityChart = null;
 
@@ -882,7 +912,7 @@
         });
 
         // 3. ドーナツチャート (ページ別割合)
-        const topPagesData = {{ (top_pages if top_pages else []) | tojson }};
+        const topPagesData = JSON.parse(document.getElementById('data-top-pages')?.textContent || '[]');
         if (topPagesData && topPagesData.length > 0 && document.getElementById('pagesPieChart')) {
             try {
                 const pieCtx = document.getElementById('pagesPieChart').getContext('2d');
@@ -919,7 +949,7 @@
         }
 
         // 4. SNR 分布チャート
-        const snrStatsData = {{ (snr_stats if snr_stats else {}) | tojson }};
+        const snrStatsData = JSON.parse(document.getElementById('data-snr-stats')?.textContent || '{}');
         if (snrStatsData && document.getElementById('snrPieChart')) {
             try {
                 const snrCtx = document.getElementById('snrPieChart').getContext('2d');
@@ -1013,6 +1043,25 @@
                 alert('キャッシュクリアに失敗しました');
             } finally {
                 if (btn) btn.disabled = false;
+            }
+        }
+
+        async function setEngineMode(mode) {
+            try {
+                const res = await fetch('/admin/api/engine_mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: mode })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    alert(`✅ デコードエンジンを ${data.mode} モードに切り替えました`);
+                    location.reload();
+                } else {
+                    alert('エラー: ' + (data.message || 'エンジンの切り替えに失敗しました'));
+                }
+            } catch (err) {
+                alert('通信エラーが発生しました');
             }
         }
 

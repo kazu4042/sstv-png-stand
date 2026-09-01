@@ -19,8 +19,9 @@ if ROOT_DIR not in sys.path:
 
 from digital_turbo_png import config_turbo as config
 from digital_turbo_png.database_turbo import PacketDatabaseTurboPNG
+from core.base_interfaces import BaseAggregator
 
-class TurboPNGAggregator:
+class TurboPNGAggregator(BaseAggregator):
     def __init__(self, log_dir=None):
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
         if log_dir is None:
