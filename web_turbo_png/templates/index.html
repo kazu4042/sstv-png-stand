@@ -154,12 +154,32 @@
         <div class="flex-1 overflow-y-auto p-4 md:p-8 flex justify-center items-start">
             <div
                 class="bg-white p-6 md:p-10 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.04)] w-full max-w-2xl border border-gray-100">
-                <div class="text-center mb-8">
+                <div class="text-center mb-6">
                     <h1
                         class="text-2xl md:text-3xl font-bold text-ink tracking-widest flex items-center justify-center gap-3 mb-2">
                         <i data-lucide="radio" class="text-forest w-8 h-8"></i> SSTV 協調復元エンジン
                     </h1>
-                    <div class="text-sm text-earth font-medium tracking-wider">4-FSK Audio Signal Aggregator v1.2</div>
+                    <div class="text-sm text-earth font-medium tracking-wider mb-4">4-FSK Audio Signal Aggregator v1.2</div>
+                    
+                    <!-- デコードエンジン状態バッジ & 切替 -->
+                    <div class="inline-flex flex-col sm:flex-row items-center gap-2 p-2 px-4 rounded-xl bg-gray-50 border border-gray-200">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs text-earth font-bold">デコードエンジン:</span>
+                            <span class="px-2.5 py-0.5 text-xs font-bold rounded-full {% if current_engine_mode == 'JPEG' %}bg-amber-100 text-amber-800 border border-amber-300{% else %}bg-emerald-100 text-emerald-800 border border-emerald-300{% endif %}">
+                                {% if current_engine_mode == 'JPEG' %}JPEG モード (ざらざら感・段階的復元){% else %}PNG モード (0/100 多数決復元){% endif %}
+                            </span>
+                        </div>
+                        {% if is_admin_user %}
+                        <div class="flex items-center gap-1 border-t sm:border-t-0 sm:border-l sm:pl-3 pt-1 sm:pt-0 border-gray-200">
+                            <button type="button" onclick="setEngineMode('PNG')" class="text-[11px] px-2 py-1 rounded font-bold transition-all {% if current_engine_mode != 'JPEG' %}bg-emerald-600 text-white{% else %}bg-gray-200 text-gray-700 hover:bg-gray-300{% endif %}">
+                                PNG
+                            </button>
+                            <button type="button" onclick="setEngineMode('JPEG')" class="text-[11px] px-2 py-1 rounded font-bold transition-all {% if current_engine_mode == 'JPEG' %}bg-amber-600 text-white{% else %}bg-gray-200 text-gray-700 hover:bg-gray-300{% endif %}">
+                                JPEG
+                            </button>
+                        </div>
+                        {% endif %}
+                    </div>
                 </div>
 
                 <form action="/api/upload" method="POST" enctype="multipart/form-data" id="upload-form">
@@ -501,10 +521,25 @@
             xhr.send(formData);
         });
 
-        // サイドバーのトグル
-        const sidebar = document.getElementById('sidebar');
-
-
+        // エンジンモード切替 (管理者用)
+        async function setEngineMode(mode) {
+            try {
+                const res = await fetch('/admin/api/engine_mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: mode })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    alert(`✅ デコードエンジンを ${data.mode} モードに切り替えました`);
+                    location.reload();
+                } else {
+                    alert('エラー: ' + (data.message || 'エンジンの切り替えに失敗しました'));
+                }
+            } catch (err) {
+                alert('通信エラーが発生しました');
+            }
+        }
     </script>
     <script>
 

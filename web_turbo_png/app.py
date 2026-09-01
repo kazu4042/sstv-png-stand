@@ -197,11 +197,18 @@ def inject_session_data():
         pass
 
     import digital_turbo_png.config_turbo as config
+    from core.system_factory import SystemFactory
+    from web_turbo_png.routes.auth_routes import is_admin
+
+    user_email = session.get('email', '')
+    is_admin_user = is_admin(user_email)
 
     return {
         'available_image_ids': available_image_ids,
         'user_contributed_ids': user_contributed_ids,
         'current_image_id': current_image_id,
+        'current_engine_mode': SystemFactory.get_mode(),
+        'is_admin_user': is_admin_user,
         'show_heatmap': getattr(config, 'ENABLE_HEATMAP', False),
         'show_ranking': getattr(config, 'ENABLE_RANKING', False)
     }

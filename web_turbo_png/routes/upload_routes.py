@@ -306,16 +306,16 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
 def upload_audio():
     user_id = session.get('user_id')
     
-    if 'audio' not in request.files:
-        return jsonify({"error": "No file part"}), 400
+    file = request.files.get('file') or request.files.get('audio')
+    if not file:
+        return jsonify({"error": "No file part", "success": False}), 400
 
-    file = request.files['audio']
     raw_filename = file.filename or ""
     if not raw_filename or raw_filename == '':
-        return jsonify({"error": "No selected file"}), 400
+        return jsonify({"error": "No selected file", "success": False}), 400
 
     if not allowed_file(raw_filename):
-        return jsonify({"error": "Invalid file type. Only .wav is allowed."}), 400
+        return jsonify({"error": "Invalid file type. Only .wav is allowed.", "success": False}), 400
 
     filename = secure_filename(raw_filename)
     if not filename:
@@ -342,6 +342,7 @@ def upload_audio():
 
     return jsonify({
         "status": "processing",
+        "success": True,
         "job_id": job_id,
         "message": "アップロードを受け付けました。処理を開始します。"
     })
