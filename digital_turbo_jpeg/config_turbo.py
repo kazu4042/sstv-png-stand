@@ -15,6 +15,8 @@ TILE_COUNT_Y = math.ceil(HEIGHT / TILE_SIZE)
 
 # --- JPEG圧縮設定 ---
 JPEG_QUALITY = 75  # 速度と画質のベストバランス (0-100で自由に変更可能)
+JPEG_RESTART_MARKER = 1  # リスタートマーカー間隔 (1 MCUごとに同期復帰マーカーを挿入し、ハフマン同期崩壊を防止)
+
 
 # --- 音響速度・最速設定 ---
 SAMPLE_RATE = 44100

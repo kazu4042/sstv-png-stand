@@ -111,22 +111,69 @@ class TurboJPEGAggregator(BaseAggregator):
                 byte_list.append(val)
         return bytearray(byte_list)
 
+    def _get_jpeg_header_template(self):
+        """16x16 タイル用の正常な JPEG ヘッダテンプレート (SOI〜SOS) をキャッシュ"""
+        if not hasattr(self, "_header_template"):
+            dummy = Image.new("RGB", (config.TILE_SIZE, config.TILE_SIZE), color=(0, 0, 0))
+            bio = io.BytesIO()
+            restart_int = getattr(config, "JPEG_RESTART_MARKER", 1)
+            dummy.save(bio, format="JPEG", quality=config.JPEG_QUALITY, restart_marker=restart_int)
+            raw = bio.getvalue()
+            sos_pos = raw.find(b'\xff\xda')
+            if sos_pos != -1:
+                # SOS マーカー長 (通常 14 バイト) を含めた位置までをヘッダとする
+                sos_len = (raw[sos_pos+2] << 8) | raw[sos_pos+3]
+                self._header_template = raw[:sos_pos + 2 + sos_len]
+                self._sos_offset = sos_pos + 2 + sos_len
+            else:
+                self._header_template = None
+                self._sos_offset = 0
+        return self._header_template, self._sos_offset
+
     def decode_tile_bytes_safely(self, p_bytes):
-        """JPEGバイト列を安全にデコード（ノイズがあっても部分描画を試みる）"""
+        """JPEGバイト列を安全にデコード（ノイズ・破損・RSTマーカー付きでも部分描画を徹底試行）"""
+        if not p_bytes or len(p_bytes) < 4:
+            return None
+
+        # 1. そのまま一度デコードを試みる
         try:
             tile_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
-            tile_img.load()  # 強制読み込みで破損部をレンダリング
+            tile_img.load()
             return tile_img
         except Exception:
-            # ヘッダ一部破損時などにSOI/EOIチェックを施して再試行
-            try:
-                if len(p_bytes) >= 4 and not (p_bytes[0] == 0xFF and p_bytes[1] == 0xD8):
-                    p_bytes = bytearray([0xFF, 0xD8]) + p_bytes[2:]
-                tile_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
+            pass
+
+        # 2. ヘッダ修復（SOI: 0xFF 0xD8 の補完）＋ 末尾修復（EOI: 0xFF 0xD9）
+        fixed_bytes = bytearray(p_bytes)
+        if not (fixed_bytes[0] == 0xFF and fixed_bytes[1] == 0xD8):
+            fixed_bytes = bytearray([0xFF, 0xD8]) + fixed_bytes[2:]
+
+        if len(fixed_bytes) >= 2 and not (fixed_bytes[-2] == 0xFF and fixed_bytes[-1] == 0xD9):
+            fixed_bytes = fixed_bytes + bytearray([0xFF, 0xD9])
+
+        try:
+            tile_img = Image.open(io.BytesIO(fixed_bytes)).convert("RGB")
+            tile_img.load()
+            return tile_img
+        except Exception:
+            pass
+
+        # 3. 高度な修復: ヘッダ全壊時、正常な JPEG 構造テンプレート (DQT/DHT/SOF/SOS) で差し替え
+        try:
+            hdr_tmpl, sos_off = self._get_jpeg_header_template()
+            if hdr_tmpl and len(p_bytes) > sos_off:
+                # 破損データのスキャンデータ部分を正常ヘッダとドッキング
+                repaired_bytes = bytearray(hdr_tmpl + p_bytes[sos_off:])
+                if not (repaired_bytes[-2] == 0xFF and repaired_bytes[-1] == 0xD9):
+                    repaired_bytes += bytearray([0xFF, 0xD9])
+                tile_img = Image.open(io.BytesIO(repaired_bytes)).convert("RGB")
                 tile_img.load()
                 return tile_img
-            except Exception:
-                return None
+        except Exception:
+            pass
+
+        return None
+
 
     def reset_database(self):
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
@@ -137,7 +184,13 @@ class TurboJPEGAggregator(BaseAggregator):
         self.db = PacketDatabaseTurboJPEG(self.log_dir)
 
     def process_and_save_images(self, min_tile_ratio=0.0, user_id=None) -> list[str]:
-        """テキストログをDBに蓄積し、多数決投票・ざらざら感フォールバックで画像を復元"""
+        """テキストログをDBに蓄積し、ピクセル領域SNR重み付き平均で画像を復元
+
+        JPEG版の多数決戦略:
+          ビット（圧縮データ）の世界で投票するとハフマン符号の構造が壊れるため、
+          各パケットをまず個別にJPEGデコードしてピクセルに戻し、
+          そのピクセル値に対してSNR重み付き平均を取る（ピクセル領域多数決）。
+        """
         self.load_all_logs()
 
         image_counts = self.db.get_all_image_ids_with_counts(user_id=user_id)
@@ -169,50 +222,66 @@ class TurboJPEGAggregator(BaseAggregator):
                     # 最も重み合計が大きい payload_length を選択
                     best_plen = max(len_dict.keys(), key=lambda k: sum((p[1] + 1.0) for p in len_dict[k]))
                     packets = len_dict[best_plen]
-                    payload_bit_len = best_plen * 8
 
-                    # 1. まずSNR重み付き多数決を実施
-                    score_0 = np.zeros(payload_bit_len, dtype=np.float64)
-                    score_1 = np.zeros(payload_bit_len, dtype=np.float64)
+                    # ===== ピクセル領域 SNR 重み付き多数決 =====
+                    # 各パケットを個別にJPEGデコードし、ピクセル値にSNR重み付き平均を取る。
+                    # ハフマン符号の構造を壊さず、複数パケットの恩恵を最大限に活かす。
+                    tile_h = min(config.TILE_SIZE, config.HEIGHT - ty * config.TILE_SIZE)
+                    tile_w = min(config.TILE_SIZE, config.WIDTH - tx * config.TILE_SIZE)
 
-                    valid_count = 0
-                    for row in packets:
+                    # 重み付きピクセル合算用の配列 (float64)
+                    pixel_sum = np.zeros((tile_h, tile_w, 3), dtype=np.float64)
+                    weight_sum = np.zeros((tile_h, tile_w, 1), dtype=np.float64)
+                    decoded_count = 0
+
+                    # SNR降順でデコード試行（高品質パケットを優先）
+                    sorted_packets = sorted(packets, key=lambda p: p[1], reverse=True)
+
+                    for row in sorted_packets:
                         payload_bits_str = row[0]
                         snr_val = row[1]
-                        weight = snr_val + 1.0
+                        payload_bit_len = best_plen * 8
+
                         if len(payload_bits_str) < payload_bit_len:
                             continue
-                        valid_count += 1
-                        for i, bit_char in enumerate(payload_bits_str[:payload_bit_len]):
-                            if bit_char == '1':
-                                score_1[i] += weight
-                            else:
-                                score_0[i] += weight
 
-                    if valid_count == 0:
-                        continue
+                        p_bytes = self.bits_to_bytearray(payload_bits_str[:payload_bit_len])
+                        tile_img = self.decode_tile_bytes_safely(p_bytes)
 
-                    voted_payload = "".join(
-                        '1' if score_1[i] >= score_0[i] else '0'
-                        for i in range(payload_bit_len)
-                    )
-                    p_bytes = self.bits_to_bytearray(voted_payload)
-                    tile_img = self.decode_tile_bytes_safely(p_bytes)
+                        if tile_img is None:
+                            continue
 
-                    # 2. 多数決バイト列でデコード失敗した場合、単体パケット（SNR最高順）でフォールバック
-                    if tile_img is None:
-                        sorted_pkts = sorted(packets, key=lambda p: p[1], reverse=True)
-                        for s_bits, _, _, _, _ in sorted_pkts:
-                            fallback_bytes = self.bits_to_bytearray(s_bits)
-                            tile_img = self.decode_tile_bytes_safely(fallback_bytes)
-                            if tile_img is not None:
-                                break
+                        # デコード成功: ピクセル配列に変換
+                        tile_arr = np.array(tile_img.resize((tile_w, tile_h)), dtype=np.float64)
+                        weight = snr_val + 1.0
 
-                    # 3. タイル描画
+                        # ノイズによる真っ黒ピクセル (0,0,0) を除外するマスク
+                        # （部分デコード時、描画されなかった領域は黒になる）
+                        if decoded_count > 0:
+                            # 2枚目以降: 全ピクセルが黒 (RGB合計 < 3) のピクセルは除外
+                            pixel_brightness = np.sum(tile_arr, axis=2, keepdims=True)  # (H, W, 1)
+                            valid_mask = (pixel_brightness > 3.0).astype(np.float64)    # (H, W, 1)
+                        else:
+                            # 1枚目（最高SNR）: すべてのピクセルを採用
+                            valid_mask = np.ones((tile_h, tile_w, 1), dtype=np.float64)
+
+                        pixel_sum += tile_arr * weight * valid_mask
+                        weight_sum += weight * valid_mask
+                        decoded_count += 1
+
+                    # --- 結果の合成 ---
+                    tile_img = None
+                    if decoded_count > 0:
+                        # 重みが0の箇所（どのパケットでも描画されなかった）は黒のまま
+                        safe_weight = np.where(weight_sum > 0, weight_sum, 1.0)
+                        averaged_pixels = (pixel_sum / safe_weight).clip(0, 255).astype(np.uint8)
+                        tile_img = Image.fromarray(averaged_pixels)
+
+                    # タイル描画
                     if tile_img is not None:
                         tw, th = tile_img.size
-                        paste_x = tx * tw
-                        paste_y = ty * th
+                        paste_x = tx * config.TILE_SIZE
+                        paste_y = ty * config.TILE_SIZE
                         if paste_x + tw <= config.WIDTH and paste_y + th <= config.HEIGHT:
                             canvas.paste(tile_img, (paste_x, paste_y))
                             success_tiles += 1
@@ -220,6 +289,7 @@ class TurboJPEGAggregator(BaseAggregator):
                             tile_img = tile_img.crop((0, 0, min(tw, config.WIDTH - paste_x), min(th, config.HEIGHT - paste_y)))
                             canvas.paste(tile_img, (paste_x, paste_y))
                             success_tiles += 1
+
 
             out_filename = f"restored_ID_{main_id:04X}.jpg" if not user_id else f"user_{user_id}_ID_{main_id:04X}.jpg"
             out_path = os.path.join(output_dir, out_filename)
