@@ -46,20 +46,17 @@ class TurboPNGAnalyzerService:
             t_count = int(item["tile_count"]) if item.get("tile_count") is not None else 0
             item["restoration_score"] = round((t_count / total_required) * 100, 1) if total_required > 0 else 0.0
             
-            # 画像プレビューパス (現在のエンジンモードを優先)
+            # 画像プレビューパス (現在のエンジンモードの画像のみを厳格に取得)
             mode_name = SystemFactory.get_mode()
-            primary_ext = ".jpg" if mode_name == "JPEG" else ".png"
-            secondary_ext = ".png" if mode_name == "JPEG" else ".jpg"
+            target_ext = ".jpg" if mode_name == "JPEG" else ".png"
+            img_filename = f"restored_ID_{img_hex}{target_ext}"
 
-            img_primary = f"restored_ID_{img_hex}{primary_ext}"
-            img_secondary = f"restored_ID_{img_hex}{secondary_ext}"
-
-            if os.path.exists(os.path.join(static_out, img_primary)):
-                item["thumbnail_url"] = f"/static/output/{img_primary}"
-            elif os.path.exists(os.path.join(static_out, img_secondary)):
-                item["thumbnail_url"] = f"/static/output/{img_secondary}"
-            elif mode_name == "JPEG" and os.path.exists(os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images", img_primary)):
-                item["thumbnail_url"] = f"/data/digital_turbo_jpeg/images/{img_primary}"
+            if os.path.exists(os.path.join(static_out, img_filename)):
+                item["thumbnail_url"] = f"/static/output/{img_filename}"
+            elif mode_name == "JPEG" and os.path.exists(os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images", img_filename)):
+                item["thumbnail_url"] = f"/data/digital_turbo_jpeg/images/{img_filename}"
+            elif mode_name == "PNG" and os.path.exists(os.path.join(ROOT_DIR, "data", "images", img_filename)):
+                item["thumbnail_url"] = f"/data/images/{img_filename}"
             else:
                 item["thumbnail_url"] = None
 
@@ -172,34 +169,31 @@ class TurboPNGAnalyzerService:
 
         static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
         mode_name = SystemFactory.get_mode()
-        primary_ext = ".jpg" if mode_name == "JPEG" else ".png"
-        secondary_ext = ".png" if mode_name == "JPEG" else ".jpg"
+        target_ext = ".jpg" if mode_name == "JPEG" else ".png"
 
-        # ユーザー単体画像 (現在のエンジンモード優先)
+        # ユーザー単体画像 (現在のエンジンモードのみ厳格に探索)
         user_img_url = None
         if user_id and user_has_data:
-            for ext in (primary_ext, secondary_ext):
-                fname = f"user_{user_id}_ID_{target_image_id_hex}{ext}"
-                if os.path.exists(os.path.join(static_out, fname)):
-                    user_img_url = f"/static/output/{fname}"
-                    break
+            fname = f"user_{user_id}_ID_{target_image_id_hex}{target_ext}"
+            if os.path.exists(os.path.join(static_out, fname)):
+                user_img_url = f"/static/output/{fname}"
 
-        # ユーザー累積画像 (現在のエンジンモード優先)
+        # ユーザー累積画像 (現在のエンジンモードのみ厳格に探索)
         user_cumulative_url = None
         if user_id and user_has_data:
-            for ext in (primary_ext, secondary_ext):
-                fname = f"user_cumulative_{user_id}_ID_{target_image_id_hex}{ext}"
-                if os.path.exists(os.path.join(static_out, fname)):
-                    user_cumulative_url = f"/static/output/{fname}"
-                    break
-
-        # ネットワーク復元画像 (現在のエンジンモード優先)
-        restored_img_url = None
-        for ext in (primary_ext, secondary_ext):
-            fname = f"restored_ID_{target_image_id_hex}{ext}"
+            fname = f"user_cumulative_{user_id}_ID_{target_image_id_hex}{target_ext}"
             if os.path.exists(os.path.join(static_out, fname)):
-                restored_img_url = f"/static/output/{fname}"
-                break
+                user_cumulative_url = f"/static/output/{fname}"
+
+        # ネットワーク復元画像 (現在のエンジンモードのみ厳格に探索)
+        restored_img_url = None
+        fname = f"restored_ID_{target_image_id_hex}{target_ext}"
+        if os.path.exists(os.path.join(static_out, fname)):
+            restored_img_url = f"/static/output/{fname}"
+        elif mode_name == "JPEG" and os.path.exists(os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images", fname)):
+            restored_img_url = f"/data/digital_turbo_jpeg/images/{fname}"
+        elif mode_name == "PNG" and os.path.exists(os.path.join(ROOT_DIR, "data", "images", fname)):
+            restored_img_url = f"/data/images/{fname}"
 
         return {
             "image_id": target_image_id_hex,

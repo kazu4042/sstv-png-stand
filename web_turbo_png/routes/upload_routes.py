@@ -220,22 +220,8 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                 try:
                     p_bytes = bits_to_bytearray(user_payload)
                     tile_img = None
-                    if mode_name == "JPEG":
-                        # JPEG の安全なデコード
-                        try:
-                            tile_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
-                            tile_img.load()
-                        except Exception:
-                            raw_b = bytes(p_bytes)
-                            soi_idx = raw_b.find(b'\xff\xd8')
-                            fixed_b = bytearray(raw_b[soi_idx:] if soi_idx != -1 else (b'\xff\xd8' + raw_b))
-                            if not fixed_b.endswith(b'\xff\xd9'):
-                                fixed_b.extend(b'\xff\xd9')
-                            try:
-                                tile_img = Image.open(io.BytesIO(fixed_b)).convert("RGB")
-                                tile_img.load()
-                            except Exception:
-                                pass
+                    if hasattr(aggregator, 'decode_tile_bytes_safely'):
+                        tile_img = aggregator.decode_tile_bytes_safely(p_bytes, config.TILE_SIZE, config.TILE_SIZE)
                     else:
                         tile_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
                         tile_img.load()
@@ -290,21 +276,8 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                         try:
                             p_bytes = bits_to_bytearray(best_pkt[0])
                             tile_img = None
-                            if mode_name == "JPEG":
-                                try:
-                                    tile_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
-                                    tile_img.load()
-                                except Exception:
-                                    raw_b = bytes(p_bytes)
-                                    soi_idx = raw_b.find(b'\xff\xd8')
-                                    fixed_b = bytearray(raw_b[soi_idx:] if soi_idx != -1 else (b'\xff\xd8' + raw_b))
-                                    if not fixed_b.endswith(b'\xff\xd9'):
-                                        fixed_b.extend(b'\xff\xd9')
-                                    try:
-                                        tile_img = Image.open(io.BytesIO(fixed_b)).convert("RGB")
-                                        tile_img.load()
-                                    except Exception:
-                                        pass
+                            if hasattr(aggregator, 'decode_tile_bytes_safely'):
+                                tile_img = aggregator.decode_tile_bytes_safely(p_bytes, config.TILE_SIZE, config.TILE_SIZE)
                             else:
                                 tile_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
                                 tile_img.load()
