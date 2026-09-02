@@ -42,7 +42,12 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
         self.samples_per_symbol = max(1, int(config.SAMPLE_RATE * config.MS_SYMBOL / 1000))
         self.t_arr = np.arange(self.samples_per_symbol) / config.SAMPLE_RATE
         self.target_phases = [2 * np.pi * f * self.t_arr for f in config.TARGET_FREQS]
-        
+
+        # ★ ベクトル化用: 4周波数のcos/sinを (4, samples_per_symbol) 行列に事前計算
+        self.hamming_win = np.hamming(self.samples_per_symbol).astype(np.float64)
+        self.cos_matrix = np.array([np.cos(phase) for phase in self.target_phases], dtype=np.float64)  # (4, N)
+        self.sin_matrix = np.array([np.sin(phase) for phase in self.target_phases], dtype=np.float64)  # (4, N)
+
         # 誤検出回避用の5msロング Sync 判定用
         self.sync_long_samples = max(10, int(config.SAMPLE_RATE * 0.005))
         self.sync_t_arr = np.arange(self.sync_long_samples) / config.SAMPLE_RATE
@@ -60,40 +65,53 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
     def detect_symbol_dft(self, audio_segment):
         if len(audio_segment) < self.samples_per_symbol:
             return 0, 0.0
-            
-        segment = audio_segment[:self.samples_per_symbol] * np.hamming(self.samples_per_symbol)
-        
-        powers = []
-        for phase in self.target_phases:
-            c = np.sum(segment * np.cos(phase))
-            s = np.sum(segment * np.sin(phase))
-            powers.append(float(c * c + s * s))
-        
+
+        # ★ ベクトル化: 4周波数のDFTを行列演算で一括計算
+        segment = audio_segment[:self.samples_per_symbol] * self.hamming_win
+        c_vals = self.cos_matrix @ segment  # (4,)
+        s_vals = self.sin_matrix @ segment  # (4,)
+        powers = c_vals * c_vals + s_vals * s_vals  # (4,)
+
         best_idx = int(np.argmax(powers))
         peak_power = powers[best_idx]
-        
-        other_powers = [p for i, p in enumerate(powers) if i != best_idx]
-        noise_power = np.mean(other_powers) + 1e-10
+
+        noise_power = (np.sum(powers) - peak_power) / 3.0 + 1e-10
         snr = float(peak_power / noise_power)
-        
+
         return best_idx, snr
 
     def decode_symbols_exact(self, audio_data, start_idx, num_symbols):
-        """正確な間隔でのシンボル切り出し・復号"""
-        all_bits = []
-        snr_list = []
-        bits_map = {0: [0, 0], 1: [0, 1], 2: [1, 0], 3: [1, 1]}
-        
-        for s in range(num_symbols):
-            pos = start_idx + s * self.samples_per_symbol
-            segment = audio_data[pos : pos + self.samples_per_symbol]
-            if len(segment) < self.samples_per_symbol:
-                break
-            best_idx, snr = self.detect_symbol_dft(segment)
-            all_bits.extend(bits_map[best_idx])
-            snr_list.append(snr)
-            
-        avg_snr = np.mean(snr_list) if snr_list else 0.0
+        """★ ベクトル化: 全シンボルを一括で行列演算して復号"""
+        sps = self.samples_per_symbol
+        end_idx = start_idx + num_symbols * sps
+
+        # データ不足チェック
+        if end_idx > len(audio_data):
+            num_symbols = max(0, (len(audio_data) - start_idx) // sps)
+            if num_symbols == 0:
+                return [], 0.0
+            end_idx = start_idx + num_symbols * sps
+
+        # 全シンボルのオーディオ区間を (num_symbols, sps) 行列に一括切り出し
+        raw_block = audio_data[start_idx:end_idx].reshape(num_symbols, sps)
+        windowed = raw_block * self.hamming_win  # (num_symbols, sps)
+
+        # 4周波数のDFTを行列積で一括計算: (4, sps) @ (sps, num_symbols) = (4, num_symbols)
+        c_all = self.cos_matrix @ windowed.T  # (4, num_symbols)
+        s_all = self.sin_matrix @ windowed.T  # (4, num_symbols)
+        powers = c_all * c_all + s_all * s_all  # (4, num_symbols)
+
+        # 各シンボルの最大パワー周波数インデックス
+        best_indices = np.argmax(powers, axis=0)  # (num_symbols,)
+        peak_powers = powers[best_indices, np.arange(num_symbols)]
+        noise_powers = (np.sum(powers, axis=0) - peak_powers) / 3.0 + 1e-10
+        snr_arr = peak_powers / noise_powers
+
+        # シンボルインデックス → 2ビットに展開
+        bits_table = np.array([[0, 0], [0, 1], [1, 0], [1, 1]], dtype=np.int8)
+        all_bits = bits_table[best_indices].ravel().tolist()
+
+        avg_snr = float(np.mean(snr_arr))
         return all_bits, avg_snr
 
     def calculate_snr_to_4bit(self, avg_snr):

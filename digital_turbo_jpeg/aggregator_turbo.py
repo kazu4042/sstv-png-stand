@@ -101,15 +101,17 @@ class TurboJPEGAggregator(BaseAggregator):
         return True
 
     def bits_to_bytearray(self, bits_str):
-        byte_list = []
-        for i in range(0, len(bits_str), 8):
-            chunk = bits_str[i:i + 8]
-            if len(chunk) == 8:
-                val = 0
-                for b in chunk:
-                    val = (val << 1) | (1 if b == '1' else 0)
-                byte_list.append(val)
-        return bytearray(byte_list)
+        """★ NumPy ベクトル化: ビット文字列を一括でバイト配列に変換"""
+        n = (len(bits_str) // 8) * 8
+        if n == 0:
+            return bytearray()
+        # '0'/'1' 文字列 → uint8 配列 (0 or 1) に一括変換
+        bit_arr = np.frombuffer(bits_str[:n].encode('ascii'), dtype=np.uint8) - ord('0')
+        # (N/8, 8) に reshape して [128, 64, 32, 16, 8, 4, 2, 1] との内積でバイト化
+        byte_weights = np.array([128, 64, 32, 16, 8, 4, 2, 1], dtype=np.uint8)
+        byte_arr = bit_arr.reshape(-1, 8) @ byte_weights
+        return bytearray(byte_arr.astype(np.uint8).tobytes())
+
 
     def _get_jpeg_header_template(self):
         """16x16 タイル用の正常な JPEG ヘッダテンプレート (SOI〜SOS) をキャッシュ"""
