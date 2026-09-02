@@ -308,3 +308,19 @@ class TurboJPEGAggregator(BaseAggregator):
 
     def close(self):
         self.db.close()
+
+if __name__ == "__main__":
+    try:
+        print("=== SSTV Turbo JPEG アグリゲータ (画像復元) 開始 ===")
+        aggregator = TurboJPEGAggregator()
+        saved_files = aggregator.process_and_save_images()
+        if saved_files:
+            print(f"🎉 復元完了！ 生成画像:")
+            for f in saved_files:
+                print(f"  -> {f}")
+        else:
+            print("⚠️ 復元対象のパケットログが見つかりませんでした。")
+            print("   先に decoder_turbo.py を実行してください。")
+    except KeyboardInterrupt:
+        print("\n[停止] プログラムを終了しました。")
+

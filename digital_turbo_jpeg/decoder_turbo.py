@@ -191,14 +191,18 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
                 step_size = max(1, int(config.SAMPLE_RATE * 0.002))
                 while i < total_samples - samples_sync_full - header_samples:
                     now = time.time()
-                    if now - last_progress_time >= 0.2:
+                    if now - last_progress_time >= 2.0:
                         pct = min(99.0, 100.0 * i / total_samples)
+                        pos_sec = i / config.SAMPLE_RATE
+                        remain_sec = max(0, duration_sec - pos_sec)
+                        print(f"  [進捗] {pct:5.1f}% ({pos_sec:.0f}/{duration_sec:.0f}秒) | 検出パケット: {success_count} | 残り約 {remain_sec:.0f}秒", flush=True)
                         if progress_callback:
                             try:
                                 progress_callback(pct)
                             except Exception:
                                 pass
                         last_progress_time = now
+
 
                     sync_power = self.detect_sync_long_dft(data[i : i + self.sync_long_samples])
 
@@ -259,9 +263,11 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
                                 log_line = image_id_bits + tile_x_bits + tile_y_bits + payload_len_bits + payload_bits_str + snr_4bit_str
                                 f.write(log_line + "\n")
 
+                                print(f"  ✨ [LOGGED] ID:{image_id:04X} X:{tile_x:2} Y:{tile_y:2} Len:{payload_length:5} B (SNR:{snr_4bit_str})", flush=True)
                                 success_count += 1
                                 i = payload_start + payload_samples
                                 continue
+
 
                         i += step_size
                     else:
@@ -274,4 +280,21 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
             print(f"\n[停止] 中断されました: 検出済み {success_count} パケット保存")
 
         print(f"\n[Done-JPEG] デコード完了: ログ書き込み済みパケット数 = {success_count}")
+        print(f"[Output] テキストログ保存先: {self.output_raw}\n")
         return success_count, self.output_raw
+
+if __name__ == "__main__":
+    try:
+        decoder = DigitalTurboJPEGDecoder()
+        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
+        wav_path = os.path.join(root_dir, config.OUTPUT_WAV)
+        if not os.path.exists(wav_path):
+            print(f"[Error] WAVファイルが見つかりません: {wav_path}")
+            print(f"[Info]  先に encoder_turbo.py を実行してください。")
+            sys.exit(1)
+        success_count, log_path = decoder.run(wav_path)
+        print(f"[Info] テキストログ: {log_path}")
+        print(f"[Info] 次に aggregator_turbo.py を実行して画像を復元してください。")
+    except KeyboardInterrupt:
+        print("\n[停止] プログラムを終了しました。")
+
