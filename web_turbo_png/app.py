@@ -196,10 +196,10 @@ def inject_session_data():
         print(f"⚠️ Context processor error: {e}")
         pass
 
-    import digital_turbo_png.config_turbo as config
     from core.system_factory import SystemFactory
     from web_turbo_png.routes.auth_routes import is_admin
 
+    config = SystemFactory.get_config()
     user_email = session.get('email', '')
     is_admin_user = is_admin(user_email)
 

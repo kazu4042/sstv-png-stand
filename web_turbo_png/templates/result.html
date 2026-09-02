@@ -417,11 +417,14 @@
 
                     const cacheBuster = new Date().getTime();
 
+                    let targetUserUrl = "";
                     if (userImgMode === 'session') {
-                        userImg.src = `/static/output/user_${currentUserId}_ID_${activeImageId}.png?t=${cacheBuster}`;
+                        targetUserUrl = (currentUserStatus && currentUserStatus.user_img_url) ? `${currentUserStatus.user_img_url}?t=${cacheBuster}` : `/static/output/user_${currentUserId}_ID_${activeImageId}.jpg?t=${cacheBuster}`;
+                        userImg.src = targetUserUrl;
                         userImg.onerror = function() {
                             this.onerror = null;
-                            this.src = `/static/output/user_cumulative_${currentUserId}_ID_${activeImageId}.png?t=${cacheBuster}`;
+                            const fallbackUrl = (currentUserStatus && currentUserStatus.user_cumulative_url) ? `${currentUserStatus.user_cumulative_url}?t=${cacheBuster}` : `/static/output/user_${currentUserId}_ID_${activeImageId}.png?t=${cacheBuster}`;
+                            this.src = fallbackUrl;
                             this.onerror = function() {
                                 this.onerror = null;
                                 this.src = "/static/user_slices_placeholder.png";
@@ -441,10 +444,12 @@
                             viewModeCumulativeBtn.style.border = '1px solid #cbd5e1';
                         }
                     } else {
-                        userImg.src = `/static/output/user_cumulative_${currentUserId}_ID_${activeImageId}.png?t=${cacheBuster}`;
+                        targetUserUrl = (currentUserStatus && currentUserStatus.user_cumulative_url) ? `${currentUserStatus.user_cumulative_url}?t=${cacheBuster}` : `/static/output/user_cumulative_${currentUserId}_ID_${activeImageId}.jpg?t=${cacheBuster}`;
+                        userImg.src = targetUserUrl;
                         userImg.onerror = function() {
                             this.onerror = null;
-                            this.src = `/static/output/user_${currentUserId}_ID_${activeImageId}.png?t=${cacheBuster}`;
+                            const fallbackUrl = (currentUserStatus && currentUserStatus.user_img_url) ? `${currentUserStatus.user_img_url}?t=${cacheBuster}` : `/static/output/user_cumulative_${currentUserId}_ID_${activeImageId}.png?t=${cacheBuster}`;
+                            this.src = fallbackUrl;
                             this.onerror = function() {
                                 this.onerror = null;
                                 this.src = "/static/user_slices_placeholder.png";
@@ -492,17 +497,21 @@
                     else el.classList.remove('active');
                 });
 
-                // 全員用の多数決画像ソース更新（どのアカウントでも全体画像は見られる）
-                targetImg.src = `/static/output/restored_ID_${imageId}.png?t=${timestamp}`;
-                
                 overallRestorationScore = "計算中...";
                 renderScore();
 
-                // ユーザー状態の取得
+                // ユーザー状態および多数決画像URLの取得
                 fetch(`/api/image_status?image_id=${imageId}`)
                     .then(response => response.json())
                     .then(statusData => {
                         if (statusData.status === "success") {
+                            // 全員用の多数決画像ソース更新 (APIから正確なURLを取得)
+                            if (statusData.restored_img_url) {
+                                targetImg.src = `${statusData.restored_img_url}?t=${new Date().getTime()}`;
+                            } else {
+                                targetImg.src = `/static/latest_aggregated_placeholder.png`;
+                            }
+
                             updateUserImageSource(statusData);
                             if (statusData.user_has_data) {
                                 myContributionScore = statusData.user_score.toFixed(1);
@@ -512,6 +521,7 @@
                             overallRestorationScore = statusData.network_score.toFixed(1);
                             overallRestorationDetails = `<i data-lucide="package-check" class="icon-inline"></i> 現在 <strong>${statusData.network_received}</strong> / ${statusData.total_required} パケット収集済み`;
                         } else {
+                            targetImg.src = `/static/latest_aggregated_placeholder.png`;
                             updateUserImageSource(null);
                             myContributionScore = "0.0";
                         }
@@ -519,6 +529,7 @@
                     })
                     .catch(err => {
                         console.error("ステータス取得エラー:", err);
+                        targetImg.src = `/static/latest_aggregated_placeholder.png`;
                         updateUserImageSource(null);
                         myContributionScore = "0.0";
                         renderScore();

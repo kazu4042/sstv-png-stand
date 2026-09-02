@@ -1,9 +1,11 @@
 import sys
-if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-    except AttributeError:
-        pass
+for stream in (sys.stdout, sys.stderr):
+    reconf = getattr(stream, 'reconfigure', None)
+    if callable(reconf):
+        try:
+            reconf(encoding='utf-8')
+        except Exception:
+            pass
 
 import numpy as np
 from PIL import Image

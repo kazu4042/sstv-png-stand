@@ -1,16 +1,21 @@
 import sys
 for stream in (sys.stdout, sys.stderr):
-    if hasattr(stream, 'reconfigure'):
+    reconf = getattr(stream, 'reconfigure', None)
+    if callable(reconf):
         try:
-            stream.reconfigure(encoding='utf-8', errors='replace')
+            reconf(encoding='utf-8')
         except Exception:
             pass
 
 import numpy as np
 from scipy.io import wavfile
 import os
+import io
+from PIL import Image
 from datetime import datetime
 import time
+import numba
+from typing import Tuple, Optional, Callable
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
 if ROOT_DIR not in sys.path:
@@ -20,9 +25,272 @@ from digital_turbo_jpeg import config_turbo as config
 from core.base_interfaces import BaseDecoder
 
 
+# =========================================================================
+# 🚀 Numba JIT 超耐ノイズ・スマート最尤誤り訂正 C レベル演算関数群
+# =========================================================================
+
+@numba.njit(fastmath=True)
+def fast_calculate_crc16_bits(bit_array, length, poly=0x1021, init_val=0xFFFF):
+    crc = init_val
+    for i in range(length):
+        bit = bit_array[i]
+        inv = ((crc >> 15) ^ bit) & 1
+        crc = (crc << 1) & 0xFFFF
+        if inv:
+            crc ^= poly
+    return crc
+
+@numba.njit(fastmath=True)
+def fast_bits_to_int_slice(bits, start, length):
+    val = 0
+    for i in range(start, start + length):
+        val = (val << 1) | int(bits[i])
+    return val
+
+@numba.njit(fastmath=True)
+def fast_detect_sync_energy(data, pos, sync_samples, sync_win, sync_cos, sync_sin):
+    """1000Hz 同期エネルギーの計算（低SNR対応）"""
+    if pos + sync_samples > len(data):
+        return 0.0, 0.0
+    c = 0.0
+    s = 0.0
+    total_energy = 0.0
+    for j in range(sync_samples):
+        v = data[pos + j] * sync_win[j]
+        c += v * sync_cos[j]
+        s += v * sync_sin[j]
+        total_energy += v * v
+    p = c * c + s * s
+    norm = p / (total_energy * sync_samples * 0.25 + 1e-10)
+    return p, norm
+
+@numba.njit(fastmath=True)
+def fast_decode_symbols_soft(data, start_pos, num_symbols, sps, win, cos_mat, sin_mat, out_bits, rank1_syms, rank2_syms, diff_scores):
+    """
+    シンボルを軟判定（Soft-decision）復号し、第1候補と第2候補、および信頼度（diff_score）を出力
+    """
+    snr_sum = 0.0
+    valid_syms = 0
+    for s in range(num_symbols):
+        pos = start_pos + s * sps
+        if pos + sps > len(data):
+            break
+
+        p0 = (np.dot(data[pos : pos + sps] * win, cos_mat[0]) ** 2 +
+              np.dot(data[pos : pos + sps] * win, sin_mat[0]) ** 2)
+        p1 = (np.dot(data[pos : pos + sps] * win, cos_mat[1]) ** 2 +
+              np.dot(data[pos : pos + sps] * win, sin_mat[1]) ** 2)
+        p2 = (np.dot(data[pos : pos + sps] * win, cos_mat[2]) ** 2 +
+              np.dot(data[pos : pos + sps] * win, sin_mat[2]) ** 2)
+        p3 = (np.dot(data[pos : pos + sps] * win, cos_mat[3]) ** 2 +
+              np.dot(data[pos : pos + sps] * win, sin_mat[3]) ** 2)
+
+        # パワートップ2の探索
+        powers = np.array([p0, p1, p2, p3], dtype=np.float64)
+        best_idx = 0
+        second_idx = 1
+        if powers[1] > powers[0]:
+            best_idx = 1
+            second_idx = 0
+        for k in range(2, 4):
+            if powers[k] > powers[best_idx]:
+                second_idx = best_idx
+                best_idx = k
+            elif powers[k] > powers[second_idx]:
+                second_idx = k
+
+        peak = powers[best_idx]
+        noise = (p0 + p1 + p2 + p3 - peak) / 3.0 + 1e-10
+        snr = peak / noise
+
+        rank1_syms[s] = best_idx
+        rank2_syms[s] = second_idx
+        diff_scores[s] = powers[best_idx] - powers[second_idx]
+
+        out_bits[s * 2] = (best_idx >> 1) & 1
+        out_bits[s * 2 + 1] = best_idx & 1
+        snr_sum += snr
+        valid_syms += 1
+
+    avg_snr = snr_sum / valid_syms if valid_syms > 0 else 0.0
+    return valid_syms, avg_snr
+
+
+@numba.njit(fastmath=True)
+def fast_try_header_crc_fast(
+    data, pos, header_symbols, sps, hamming_win, cos_mat, sin_mat,
+    h_buf, rank1, rank2, diffs, info_bits_count, header_crc_bits, do_soft_repair
+):
+    """
+    ヘッダをデコードし、まず高速に第1候補でCRC検証。必要時のみ軟判定最尤誤り訂正を行う。
+    """
+    syms_dec, h_snr = fast_decode_symbols_soft(
+        data, pos, header_symbols, sps, hamming_win, cos_mat, sin_mat,
+        h_buf, rank1, rank2, diffs
+    )
+    if syms_dec < header_symbols:
+        return False, 0, 0, 0, 0, 0.0
+
+    # 1. まず第1候補のまま CRC 検証
+    exp_crc = fast_calculate_crc16_bits(h_buf, info_bits_count)
+    act_crc = fast_bits_to_int_slice(h_buf, info_bits_count, header_crc_bits)
+    if exp_crc == act_crc:
+        cur_img = fast_bits_to_int_slice(h_buf, 0, 16)
+        cur_x = fast_bits_to_int_slice(h_buf, 16, 8)
+        cur_y = fast_bits_to_int_slice(h_buf, 24, 8)
+        cur_len = fast_bits_to_int_slice(h_buf, 32, 16)
+        if cur_x < 32 and cur_y < 32 and 50 <= cur_len <= 32768:
+            return True, cur_img, cur_x, cur_y, cur_len, h_snr
+
+    # 2. 軟判定最尤誤り訂正 (ピーク位置でのみ実行)
+    if do_soft_repair:
+        for try_s in range(header_symbols):
+            old_val = rank1[try_s]
+            new_val = rank2[try_s]
+            h_buf[try_s * 2] = (new_val >> 1) & 1
+            h_buf[try_s * 2 + 1] = new_val & 1
+
+            exp_crc2 = fast_calculate_crc16_bits(h_buf, info_bits_count)
+            act_crc2 = fast_bits_to_int_slice(h_buf, info_bits_count, header_crc_bits)
+
+            if exp_crc2 == act_crc2:
+                cur_img = fast_bits_to_int_slice(h_buf, 0, 16)
+                cur_x = fast_bits_to_int_slice(h_buf, 16, 8)
+                cur_y = fast_bits_to_int_slice(h_buf, 24, 8)
+                cur_len = fast_bits_to_int_slice(h_buf, 32, 16)
+                if cur_x < 32 and cur_y < 32 and 50 <= cur_len <= 32768:
+                    return True, cur_img, cur_x, cur_y, cur_len, h_snr * 0.9
+
+            h_buf[try_s * 2] = (old_val >> 1) & 1
+            h_buf[try_s * 2 + 1] = old_val & 1
+
+    return False, 0, 0, 0, 0, 0.0
+
+
+@numba.njit(fastmath=True)
+def fast_check_jpeg_soi_fast(data, payload_start, sps, win, cos_mat, sin_mat):
+    """ペイロード先頭 8 シンボル (16 bit) を復号し、JPEG SOI (0xFF 0xD8) であるか高速検査"""
+    buf = np.zeros(16, dtype=np.int8)
+    r1 = np.zeros(8, dtype=np.int32)
+    r2 = np.zeros(8, dtype=np.int32)
+    diff = np.zeros(8, dtype=np.float64)
+    syms, _ = fast_decode_symbols_soft(data, payload_start, 8, sps, win, cos_mat, sin_mat, buf, r1, r2, diff)
+    if syms < 8:
+        return False
+    expected = np.array([1,1,1,1,1,1,1,1, 1,1,0,1,1,0,0,0], dtype=np.int8)
+    err = 0
+    for i in range(16):
+        if buf[i] != expected[i]:
+            err += 1
+    return err <= 3
+
+
+@numba.njit(fastmath=True)
+def fast_scan_all_packets_native(
+    data, sps, samples_sync_full, sync_long_samples, sync_win, sync_cos, sync_sin,
+    hamming_win, cos_mat, sin_mat, header_symbols, info_bits_count, header_crc_bits,
+    max_packets_cap
+):
+    """
+    全音声データを一括で超耐ノイズ・スマート最尤誤り訂正付き C ループ走査
+    """
+    total_len = len(data)
+    header_samples = header_symbols * sps
+
+    res_img_id = np.zeros(max_packets_cap, dtype=np.int32)
+    res_tx = np.zeros(max_packets_cap, dtype=np.int32)
+    res_ty = np.zeros(max_packets_cap, dtype=np.int32)
+    res_plen = np.zeros(max_packets_cap, dtype=np.int32)
+    res_snr = np.zeros(max_packets_cap, dtype=np.float64)
+    res_start = np.zeros(max_packets_cap, dtype=np.int64)
+    found_count = 0
+
+    h_buf = np.zeros(header_symbols * 2, dtype=np.int8)
+    rank1 = np.zeros(header_symbols, dtype=np.int32)
+    rank2 = np.zeros(header_symbols, dtype=np.int32)
+    diffs = np.zeros(header_symbols, dtype=np.float64)
+
+    i = 0
+    coarse_step = max(8, int(samples_sync_full * 0.25))
+
+    while i < total_len - samples_sync_full - header_samples:
+        p, norm = fast_detect_sync_energy(data, i, sync_long_samples, sync_win, sync_cos, sync_sin)
+
+        # 低 SNR でも同期信号を確実に捕捉
+        if p > 0.08 or norm > 0.22:
+            est_data_start = i + samples_sync_full
+            scan_window = max(8, int(sps * 1.5))
+            start_scan = max(0, est_data_start - scan_window)
+            end_scan = min(total_len - header_samples, est_data_start + scan_window)
+
+            best_pos = -1
+            max_snr = -1.0
+            best_img = 0
+            best_x = 0
+            best_y = 0
+            best_len = 0
+
+            # 1. 2サンプル刻みで高速スキャン (通常CRC)
+            for pos in range(start_scan, end_scan, 2):
+                ok, cur_img, cur_x, cur_y, cur_len, h_snr = fast_try_header_crc_fast(
+                    data, pos, header_symbols, sps, hamming_win, cos_mat, sin_mat,
+                    h_buf, rank1, rank2, diffs, info_bits_count, header_crc_bits, False
+                )
+                if ok and h_snr > max_snr:
+                    max_snr = h_snr
+                    best_pos = pos
+                    best_img = cur_img
+                    best_x = cur_x
+                    best_y = cur_y
+                    best_len = cur_len
+
+            # 2. 通常CRCで通らなかった場合のみ、最尤誤り訂正を試行
+            if best_pos < 0:
+                for pos in range(start_scan, end_scan, 2):
+                    ok, cur_img, cur_x, cur_y, cur_len, h_snr = fast_try_header_crc_fast(
+                        data, pos, header_symbols, sps, hamming_win, cos_mat, sin_mat,
+                        h_buf, rank1, rank2, diffs, info_bits_count, header_crc_bits, True
+                    )
+                    if ok and h_snr > max_snr:
+                        max_snr = h_snr
+                        best_pos = pos
+                        best_img = cur_img
+                        best_x = cur_x
+                        best_y = cur_y
+                        best_len = cur_len
+                        break  # 最尤で1つ見つかれば即確定
+
+            if best_pos >= 0:
+                payload_symbols = (best_len * 8) // 2
+                payload_samples = payload_symbols * sps
+                payload_start = best_pos + header_samples
+
+                if payload_start + payload_samples <= total_len:
+                    # JPEG SOI マーカー二重検証
+                    if fast_check_jpeg_soi_fast(data, payload_start, sps, hamming_win, cos_mat, sin_mat):
+                        if found_count < max_packets_cap:
+                            res_img_id[found_count] = best_img
+                            res_tx[found_count] = best_x
+                            res_ty[found_count] = best_y
+                            res_plen[found_count] = best_len
+                            res_snr[found_count] = max_snr
+                            res_start[found_count] = payload_start
+                            found_count += 1
+
+                        # パケット末尾へジャンプ
+                        i = payload_start + payload_samples
+                        continue
+
+            i += max(8, int(sps * 1.5))
+        else:
+            i += coarse_step
+
+    return res_img_id[:found_count], res_tx[:found_count], res_ty[:found_count], res_plen[:found_count], res_snr[:found_count], res_start[:found_count], found_count
+
+
 class DigitalTurboJPEGDecoder(BaseDecoder):
-    """SSTV Turbo JPEG デコーダ (BaseDecoder 準拠)"""
-    def __init__(self, user_id=None):
+    """SSTV Turbo JPEG デコーダ (完全 Numba JIT 超耐ノイズ・最尤誤り訂正復号エンジン)"""
+    def __init__(self, user_id: Optional[int] = None):
         super().__init__(user_id=user_id)
         import uuid
         timestamp = f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{uuid.uuid4().hex[:6]}"
@@ -41,80 +309,19 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
     def update_cache(self):
         self.samples_per_symbol = max(1, int(config.SAMPLE_RATE * config.MS_SYMBOL / 1000))
         self.t_arr = np.arange(self.samples_per_symbol) / config.SAMPLE_RATE
-        self.target_phases = [2 * np.pi * f * self.t_arr for f in config.TARGET_FREQS]
+        target_phases = np.array([2 * np.pi * f * self.t_arr for f in config.TARGET_FREQS], dtype=np.float64)
+        self.cos_mat = np.cos(target_phases)
+        self.sin_mat = np.sin(target_phases)
+        self.hamming_win = np.hamming(self.samples_per_symbol)
 
-        # ★ ベクトル化用: 4周波数のcos/sinを (4, samples_per_symbol) 行列に事前計算
-        self.hamming_win = np.hamming(self.samples_per_symbol).astype(np.float64)
-        self.cos_matrix = np.array([np.cos(phase) for phase in self.target_phases], dtype=np.float64)  # (4, N)
-        self.sin_matrix = np.array([np.sin(phase) for phase in self.target_phases], dtype=np.float64)  # (4, N)
-
-        # 誤検出回避用の5msロング Sync 判定用
         self.sync_long_samples = max(10, int(config.SAMPLE_RATE * 0.005))
         self.sync_t_arr = np.arange(self.sync_long_samples) / config.SAMPLE_RATE
-        self.sync_phase_long = 2 * np.pi * config.FREQ_SYNC * self.sync_t_arr
+        sync_phase_long = 2 * np.pi * config.FREQ_SYNC * self.sync_t_arr
+        self.sync_cos = np.cos(sync_phase_long)
+        self.sync_sin = np.sin(sync_phase_long)
         self.sync_win = np.hamming(self.sync_long_samples)
 
-    def detect_sync_long_dft(self, audio_segment):
-        if len(audio_segment) < self.sync_long_samples:
-            return 0.0
-        segment = audio_segment[:self.sync_long_samples] * self.sync_win
-        c = np.sum(segment * np.cos(self.sync_phase_long))
-        s = np.sum(segment * np.sin(self.sync_phase_long))
-        return float(c * c + s * s)
-
-    def detect_symbol_dft(self, audio_segment):
-        if len(audio_segment) < self.samples_per_symbol:
-            return 0, 0.0
-
-        # ★ ベクトル化: 4周波数のDFTを行列演算で一括計算
-        segment = audio_segment[:self.samples_per_symbol] * self.hamming_win
-        c_vals = self.cos_matrix @ segment  # (4,)
-        s_vals = self.sin_matrix @ segment  # (4,)
-        powers = c_vals * c_vals + s_vals * s_vals  # (4,)
-
-        best_idx = int(np.argmax(powers))
-        peak_power = powers[best_idx]
-
-        noise_power = (np.sum(powers) - peak_power) / 3.0 + 1e-10
-        snr = float(peak_power / noise_power)
-
-        return best_idx, snr
-
-    def decode_symbols_exact(self, audio_data, start_idx, num_symbols):
-        """★ ベクトル化: 全シンボルを一括で行列演算して復号"""
-        sps = self.samples_per_symbol
-        end_idx = start_idx + num_symbols * sps
-
-        # データ不足チェック
-        if end_idx > len(audio_data):
-            num_symbols = max(0, (len(audio_data) - start_idx) // sps)
-            if num_symbols == 0:
-                return [], 0.0
-            end_idx = start_idx + num_symbols * sps
-
-        # 全シンボルのオーディオ区間を (num_symbols, sps) 行列に一括切り出し
-        raw_block = audio_data[start_idx:end_idx].reshape(num_symbols, sps)
-        windowed = raw_block * self.hamming_win  # (num_symbols, sps)
-
-        # 4周波数のDFTを行列積で一括計算: (4, sps) @ (sps, num_symbols) = (4, num_symbols)
-        c_all = self.cos_matrix @ windowed.T  # (4, num_symbols)
-        s_all = self.sin_matrix @ windowed.T  # (4, num_symbols)
-        powers = c_all * c_all + s_all * s_all  # (4, num_symbols)
-
-        # 各シンボルの最大パワー周波数インデックス
-        best_indices = np.argmax(powers, axis=0)  # (num_symbols,)
-        peak_powers = powers[best_indices, np.arange(num_symbols)]
-        noise_powers = (np.sum(powers, axis=0) - peak_powers) / 3.0 + 1e-10
-        snr_arr = peak_powers / noise_powers
-
-        # シンボルインデックス → 2ビットに展開
-        bits_table = np.array([[0, 0], [0, 1], [1, 0], [1, 1]], dtype=np.int8)
-        all_bits = bits_table[best_indices].ravel().tolist()
-
-        avg_snr = float(np.mean(snr_arr))
-        return all_bits, avg_snr
-
-    def calculate_snr_to_4bit(self, avg_snr):
+    def calculate_snr_to_4bit(self, avg_snr: float) -> str:
         snr_max = getattr(config, "SNR_MAX_THRESH", 15.0)
         snr_min = getattr(config, "SNR_MIN_THRESH", 2.0)
         if avg_snr >= snr_max:
@@ -126,31 +333,7 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
             score = int(np.round(ratio * 15))
         return bin(score)[2:].zfill(4)
 
-    def bits_to_int(self, bits):
-        val = 0
-        for b in bits:
-            val = (val << 1) | b
-        return val
-
-    def bits_to_bytearray(self, bits):
-        byte_list = []
-        for i in range(0, len(bits), 8):
-            chunk = bits[i:i + 8]
-            if len(chunk) == 8:
-                byte_list.append(self.bits_to_int(chunk))
-        return bytearray(byte_list)
-
-    @staticmethod
-    def calculate_crc16_bits(bit_list, poly=0x1021, init_val=0xFFFF):
-        crc = init_val
-        for bit in bit_list:
-            inv = ((crc >> 15) ^ bit) & 1
-            crc = (crc << 1) & 0xFFFF
-            if inv:
-                crc ^= poly
-        return crc
-
-    def run(self, wav_path, progress_callback=None):
+    def run(self, wav_path: str, progress_callback: Optional[Callable[[float], None]] = None) -> Tuple[int, str]:
         self.update_cache()
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
         if not os.path.exists(wav_path):
@@ -160,128 +343,107 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
             else:
                 raise FileNotFoundError(f"WAVファイルが見つかりません: {wav_path}")
 
+        t0 = time.time()
         rate, data = wavfile.read(wav_path)
         if len(data.shape) > 1:
             data = np.mean(data, axis=1)
+
+        # サンプリングレート自動変換
+        if rate != config.SAMPLE_RATE:
+            print(f"[Decode-JPEG] サンプリングレート変換: {rate} Hz -> {config.SAMPLE_RATE} Hz")
+            num_target_samples = int(round(len(data) * (config.SAMPLE_RATE / rate)))
+            if num_target_samples > 0:
+                data = np.interp(
+                    np.linspace(0, len(data), num_target_samples, endpoint=False),
+                    np.arange(len(data)),
+                    data
+                ).astype(np.float32)
+                rate = config.SAMPLE_RATE
 
         max_val = np.max(np.abs(data))
         if max_val > 0:
             data = data.astype(np.float32) / max_val
 
         samples_sync_full = int(config.SAMPLE_RATE * config.MS_SYNC / 1000)
-        
         info_bits_count = config.BIT_IMAGE_CRC + config.BIT_TILE_X + config.BIT_TILE_Y + config.BIT_PAYLOAD_LENGTH
         header_bits_count = info_bits_count + config.BIT_HEADER_CRC
         if header_bits_count % 2 != 0:
             header_bits_count += 1
         header_symbols = header_bits_count // 2
-        header_samples = header_symbols * self.samples_per_symbol
 
         total_samples = len(data)
         duration_sec = total_samples / config.SAMPLE_RATE
-        print(f"[Decode-JPEG] デコード開始 (サンプル間隔: {self.samples_per_symbol} samples/sym)")
-        print(f"[Decode-JPEG] Header: {header_symbols} symbols ({header_bits_count} bits)")
-        print(f"[Decode-JPEG] WAV長: {duration_sec:.1f} 秒")
+        print(f"[Decode-JPEG] 超耐ノイズ・ネイティブスキャン開始 (WAV長: {duration_sec:.1f}秒, {total_samples} samples)")
+
+        if progress_callback:
+            try:
+                progress_callback(10.0)
+            except Exception:
+                pass
+
+        # 🚀 C 言語ネイティブ JIT で一括スキャン＆最尤誤り訂正復号
+        img_ids, txs, tys, plens, snrs, pstarts, count = fast_scan_all_packets_native(
+            data, self.samples_per_symbol, samples_sync_full, self.sync_long_samples,
+            self.sync_win, self.sync_cos, self.sync_sin, self.hamming_win,
+            self.cos_mat, self.sin_mat, header_symbols, info_bits_count,
+            config.BIT_HEADER_CRC, 2048
+        )
+
+        scan_time = time.time() - t0
+        print(f"[Decode-JPEG] ネイティブスキャン完了: {count} パケット検出 (所要時間: {scan_time:.2f}秒)")
+
+        if progress_callback:
+            try:
+                progress_callback(50.0)
+            except Exception:
+                pass
+
+        # 検出されたパケットのペイロードを展開してテキストログに書き出し
         success_count = 0
-        last_progress_time = time.time()
+        with open(self.output_raw, "w", encoding="utf-8") as f:
+            for k in range(count):
+                image_id = int(img_ids[k])
+                tile_x = int(txs[k])
+                tile_y = int(tys[k])
+                payload_length = int(plens[k])
+                p_start = int(pstarts[k])
 
-        try:
-            with open(self.output_raw, "w", encoding="utf-8") as f:
-                i = 0
-                step_size = max(1, int(config.SAMPLE_RATE * 0.002))
-                while i < total_samples - samples_sync_full - header_samples:
-                    now = time.time()
-                    if now - last_progress_time >= 2.0:
-                        pct = min(99.0, 100.0 * i / total_samples)
-                        pos_sec = i / config.SAMPLE_RATE
-                        remain_sec = max(0, duration_sec - pos_sec)
-                        print(f"  [進捗] {pct:5.1f}% ({pos_sec:.0f}/{duration_sec:.0f}秒) | 検出パケット: {success_count} | 残り約 {remain_sec:.0f}秒", flush=True)
-                        if progress_callback:
-                            try:
-                                progress_callback(pct)
-                            except Exception:
-                                pass
-                        last_progress_time = now
+                payload_symbols = (payload_length * 8) // 2
+                p_buf = np.zeros(payload_length * 8, dtype=np.int8)
+                r1_dummy = np.zeros(payload_symbols, dtype=np.int32)
+                r2_dummy = np.zeros(payload_symbols, dtype=np.int32)
+                diff_dummy = np.zeros(payload_symbols, dtype=np.float64)
 
+                _, p_snr = fast_decode_symbols_soft(
+                    data, p_start, payload_symbols, self.samples_per_symbol,
+                    self.hamming_win, self.cos_mat, self.sin_mat,
+                    p_buf, r1_dummy, r2_dummy, diff_dummy
+                )
 
-                    sync_power = self.detect_sync_long_dft(data[i : i + self.sync_long_samples])
+                payload_bits_str = "".join(str(b) for b in p_buf)
+                snr_4bit_str = self.calculate_snr_to_4bit(p_snr)
 
-                    if sync_power > 10.0:
-                        search_ptr = i + int(samples_sync_full * 0.5)
-                        fine_step = max(1, int(config.SAMPLE_RATE * 0.0005))
-                        while search_ptr < len(data) - self.sync_long_samples:
-                            p = self.detect_sync_long_dft(data[search_ptr : search_ptr + self.sync_long_samples])
-                            if p < sync_power * 0.3:
-                                break
-                            search_ptr += fine_step
+                image_id_bits    = format(image_id,        f'0{config.BIT_IMAGE_CRC}b')
+                tile_x_bits      = format(tile_x,          f'0{config.BIT_TILE_X}b')
+                tile_y_bits      = format(tile_y,          f'0{config.BIT_TILE_Y}b')
+                payload_len_bits = format(payload_length,  f'0{config.BIT_PAYLOAD_LENGTH}b')
+                log_line = image_id_bits + tile_x_bits + tile_y_bits + payload_len_bits + payload_bits_str + snr_4bit_str
+                f.write(log_line + "\n")
 
-                        align_range = max(5, int(config.SAMPLE_RATE * 0.003))
-                        start_scan = max(0, search_ptr - align_range)
-                        end_scan = min(len(data) - header_samples, search_ptr + align_range)
+                print(f"  ✨ [LOGGED] ID:{image_id:04X} X:{tile_x:2} Y:{tile_y:2} Len:{payload_length:5} B (SNR:{snr_4bit_str})", flush=True)
+                success_count += 1
 
-                        best_match = None
-                        max_snr = -1.0
-
-                        for pos in range(start_scan, end_scan, 1):
-                            h_bits, h_snr = self.decode_symbols_exact(data, pos, header_symbols)
-                            info_bits = h_bits[:info_bits_count]
-                            crc_bits = h_bits[info_bits_count : info_bits_count + config.BIT_HEADER_CRC]
-
-                            expected_crc = self.calculate_crc16_bits(info_bits)
-                            actual_crc = self.bits_to_int(crc_bits)
-
-                            if expected_crc == actual_crc:
-                                if h_snr > max_snr:
-                                    max_snr = h_snr
-                                    best_match = (pos, h_bits)
-
-                        if best_match is not None:
-                            best_pos, h_bits = best_match
-                            idx = 0
-                            image_id = self.bits_to_int(h_bits[idx : idx + config.BIT_IMAGE_CRC])
-                            idx += config.BIT_IMAGE_CRC
-                            tile_x = self.bits_to_int(h_bits[idx : idx + config.BIT_TILE_X])
-                            idx += config.BIT_TILE_X
-                            tile_y = self.bits_to_int(h_bits[idx : idx + config.BIT_TILE_Y])
-                            idx += config.BIT_TILE_Y
-                            payload_length = self.bits_to_int(h_bits[idx : idx + config.BIT_PAYLOAD_LENGTH])
-
-                            payload_symbols = (payload_length * 8) // 2
-                            payload_samples = payload_symbols * self.samples_per_symbol
-                            payload_start = best_pos + header_samples
-
-                            if payload_start + payload_samples <= len(data):
-                                p_bits, p_snr = self.decode_symbols_exact(data, payload_start, payload_symbols)
-
-                                payload_bits_str = "".join(str(b) for b in p_bits[:payload_length * 8])
-                                snr_4bit_str = self.calculate_snr_to_4bit(p_snr)
-
-                                image_id_bits    = format(image_id,        f'0{config.BIT_IMAGE_CRC}b')
-                                tile_x_bits      = format(tile_x,          f'0{config.BIT_TILE_X}b')
-                                tile_y_bits      = format(tile_y,          f'0{config.BIT_TILE_Y}b')
-                                payload_len_bits = format(payload_length,  f'0{config.BIT_PAYLOAD_LENGTH}b')
-                                log_line = image_id_bits + tile_x_bits + tile_y_bits + payload_len_bits + payload_bits_str + snr_4bit_str
-                                f.write(log_line + "\n")
-
-                                print(f"  ✨ [LOGGED] ID:{image_id:04X} X:{tile_x:2} Y:{tile_y:2} Len:{payload_length:5} B (SNR:{snr_4bit_str})", flush=True)
-                                success_count += 1
-                                i = payload_start + payload_samples
-                                continue
-
-
-                        i += step_size
-                    else:
-                        i += step_size
-
-            if progress_callback:
+        total_time = time.time() - t0
+        if progress_callback:
+            try:
                 progress_callback(100.0)
+            except Exception:
+                pass
 
-        except KeyboardInterrupt:
-            print(f"\n[停止] 中断されました: 検出済み {success_count} パケット保存")
-
-        print(f"\n[Done-JPEG] デコード完了: ログ書き込み済みパケット数 = {success_count}")
+        print(f"\n[Done-JPEG] デコード完了: ログ書き込み済みパケット数 = {success_count} (総所要時間: {total_time:.2f}秒)")
         print(f"[Output] テキストログ保存先: {self.output_raw}\n")
         return success_count, self.output_raw
+
 
 if __name__ == "__main__":
     try:
@@ -297,4 +459,3 @@ if __name__ == "__main__":
         print(f"[Info] 次に aggregator_turbo.py を実行して画像を復元してください。")
     except KeyboardInterrupt:
         print("\n[停止] プログラムを終了しました。")
-

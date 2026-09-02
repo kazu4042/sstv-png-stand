@@ -10,7 +10,7 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-import digital_turbo_png.config_turbo as config
+from core.system_factory import SystemFactory
 
 main_bp = Blueprint('main', __name__)
 
@@ -30,6 +30,7 @@ def index():
 @main_bp.route('/analytics')
 def analytics():
     """アナリティクス画面を表示"""
+    config = SystemFactory.get_config()
     return render_template(
         'analytics.html',
         timestamp=int(time.time()),
@@ -48,6 +49,7 @@ def analytics():
 @main_bp.route('/ranking')
 def ranking():
     """受信者ランキング画面"""
+    config = SystemFactory.get_config()
     if not getattr(config, 'ENABLE_RANKING', False):
         from flask import redirect, url_for
         return redirect(url_for('main.result'))
@@ -112,6 +114,7 @@ def result():
         result_data['user_output_url'] = status_info['user_img_url'] or ''
         result_data['available_image_ids'] = available_ids
 
+    config = SystemFactory.get_config()
     return render_template(
         'result.html',
         show_heatmap=getattr(config, 'ENABLE_HEATMAP', False),
@@ -125,6 +128,7 @@ def result():
 @login_required
 def calendar():
     """カレンダー（履歴）画面"""
+    config = SystemFactory.get_config()
     return render_template(
         'calendar.html',
         show_heatmap=getattr(config, 'ENABLE_HEATMAP', False),
@@ -135,6 +139,7 @@ def calendar():
 @main_bp.route('/heatmap')
 def heatmap():
     """SNRヒートマップ画面"""
+    config = SystemFactory.get_config()
     if not getattr(config, 'ENABLE_HEATMAP', False):
         from flask import redirect, url_for
         return redirect(url_for('main.result'))

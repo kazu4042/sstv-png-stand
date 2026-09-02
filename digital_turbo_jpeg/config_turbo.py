@@ -40,6 +40,7 @@ TARGET_FREQS = [8000, 6000, 4000, 2000]
 # --- 有効通信帯域 ---
 VALID_BAND_MIN = 500
 VALID_BAND_MAX = 9000
+BANDPASS_ENABLE = True  # 受信時のノイズフィルタを有効にするか
 
 # --- ファイル・パス設定 (新階層 1対1 対応) ---
 TEXT_LOG_DIR = "data/digital_turbo_jpeg/logs"
@@ -50,7 +51,7 @@ INPUT_IMAGE = "data/input/test.jpg"
 OUTPUT_WAV = "data/digital_turbo_jpeg/audio/turbo_256_256.wav"
 
 # --- テスト用ノイズ設定 ---
-NOISE_LEVEL = 0.0
+NOISE_LEVEL = 0.5
 
 def update_tile_size(new_size):
     global TILE_SIZE, TILE_COUNT_X, TILE_COUNT_Y

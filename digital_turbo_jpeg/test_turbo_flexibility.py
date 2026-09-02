@@ -1,12 +1,16 @@
 import sys
-if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-    except AttributeError:
-        pass
+for stream in (sys.stdout, sys.stderr):
+    reconf = getattr(stream, 'reconfigure', None)
+    if callable(reconf):
+        try:
+            reconf(encoding='utf-8')
+        except Exception:
+            pass
 
 import time
 import os
+import glob
+import numpy as np
 from PIL import Image, ImageDraw
 
 root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
@@ -20,16 +24,14 @@ from digital_turbo_jpeg.aggregator_turbo import TurboJPEGAggregator
 
 def generate_test_image(path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    print(f"[Create] Test 256x256 image created at: {path}")
     img = Image.new('RGB', (256, 256), color='navy')
     draw = ImageDraw.Draw(img)
     for i in range(0, 120, 20):
         draw.rectangle([i, i, 255-i, 255-i], outline=(i*2, 255-i*2, 150))
     draw.text((70, 120), "TURBO JPEG!", fill="white")
-    img.save(path)
+    img.save(path, format="JPEG", quality=85)
+    print(f"[Create] Test 256x256 image created at: {path}")
     return path
-
-import glob
 
 def run_experiment():
     print("==================================================================")
@@ -55,7 +57,7 @@ def run_experiment():
 
     # 実験シナリオ表: (名称, タイルサイズ, シンボル時間(ms), Sync時間(ms))
     scenarios = [
-        ("1. 旧仕様・標準設定相当", 16, 2.0, 100),
+        ("1. 旧仕様・標準設定相当", 16, 2.0, 20),
         ("2. タイル中規模 + 高速シンボル", 32, 1.0, 20),
         ("3. タイル大判化 (64x64) + ターボ", 64, 1.0, 20),
         ("4. 超大判タイル (128x128) + 極限最速", 128, 1.0, 20)
@@ -87,7 +89,7 @@ def run_experiment():
     config.update_symbol_speed(results[-1][2], 20)
 
     decoder = DigitalTurboJPEGDecoder()
-    success_pkts, raw_log_path, tile_dir = decoder.run(fastest_wav)
+    success_pkts, raw_log_path = decoder.run(fastest_wav)
 
     print("[Aggregate] デコードログからのアグリゲータ（全集約・再構築）処理を実行...")
     aggregator = TurboJPEGAggregator()
@@ -99,7 +101,7 @@ def run_experiment():
         print(f"[SUCCESS] 全 {success_pkts} パケットを 100% 正確に高速DFT復号し、画像再建を達成しました！")
         print(f"[Output] 最終復元画像ファイル: {restored_paths[0]}")
     else:
-        print(f"[WARN] 一部のタイルがデコードできませんでしたが処理は継続完了しました (成功: {success_pkts} / {results[-1][3]})。")
+        print(f"[WARN] 検出パケット: {success_pkts} / {results[-1][3]} | 生成画像数: {len(restored_paths)}")
 
 if __name__ == "__main__":
     run_experiment()

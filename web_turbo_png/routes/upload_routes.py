@@ -219,33 +219,60 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                 # ユーザー受信タイルを描画
                 try:
                     p_bytes = bits_to_bytearray(user_payload)
-                    tile_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
-                    tile_img.load()
-                    tw, th = tile_img.size
-                    paste_x = tile_x * tw
-                    paste_y = tile_y * th
-                    if paste_x + tw <= config.WIDTH and paste_y + th <= config.HEIGHT:
-                        user_image_buffer.paste(tile_img, (paste_x, paste_y))
+                    tile_img = None
+                    if mode_name == "JPEG":
+                        # JPEG の安全なデコード
+                        try:
+                            tile_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
+                            tile_img.load()
+                        except Exception:
+                            raw_b = bytes(p_bytes)
+                            soi_idx = raw_b.find(b'\xff\xd8')
+                            fixed_b = bytearray(raw_b[soi_idx:] if soi_idx != -1 else (b'\xff\xd8' + raw_b))
+                            if not fixed_b.endswith(b'\xff\xd9'):
+                                fixed_b.extend(b'\xff\xd9')
+                            try:
+                                tile_img = Image.open(io.BytesIO(fixed_b)).convert("RGB")
+                                tile_img.load()
+                            except Exception:
+                                pass
                     else:
-                        tile_img = tile_img.crop((0, 0,
-                            min(tw, config.WIDTH - paste_x),
-                            min(th, config.HEIGHT - paste_y)))
-                        user_image_buffer.paste(tile_img, (paste_x, paste_y))
+                        tile_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
+                        tile_img.load()
+
+                    if tile_img is not None:
+                        tw, th = tile_img.size
+                        paste_x = tile_x * tw
+                        paste_y = tile_y * th
+                        if paste_x + tw <= config.WIDTH and paste_y + th <= config.HEIGHT:
+                            user_image_buffer.paste(tile_img, (paste_x, paste_y))
+                        else:
+                            tile_img = tile_img.crop((0, 0,
+                                min(tw, config.WIDTH - paste_x),
+                                min(th, config.HEIGHT - paste_y)))
+                            user_image_buffer.paste(tile_img, (paste_x, paste_y))
                 except Exception:
                     pass
 
-            # 今回のセッション単体画像を保存
-            user_img_path = os.path.join(output_dir, f"user_{user_id}_ID_{img_id_hex}.png")
-            user_image_buffer.save(user_img_path, format="PNG")
+            # モードに応じた拡張子と保存フォーマット
+            img_ext = ".jpg" if mode_name == "JPEG" else ".png"
+            img_fmt = "JPEG" if mode_name == "JPEG" else "PNG"
+
+            # 今回のセッション単体画像を保存 (user_{user_id}_ID_{hex}.{ext})
+            user_img_path = os.path.join(output_dir, f"user_{user_id}_ID_{img_id_hex}{img_ext}")
+            user_image_buffer.save(user_img_path, format=img_fmt)
 
             if img_id_hex == current_image_id:
-                user_output_url = f"/static/output/user_{user_id}_ID_{img_id_hex}.png"
+                user_output_url = f"/static/output/user_{user_id}_ID_{img_id_hex}{img_ext}"
                 main_score = round((matched_packets / total_required_packets) * 100, 1)
                 if main_score > 100.0:
                     main_score = 100.0
                 main_matched = matched_packets
 
         # 2. このユーザーが過去に送信したすべての画像IDについて累積画像をDBから完全合成して保存
+        img_ext = ".jpg" if mode_name == "JPEG" else ".png"
+        img_fmt = "JPEG" if mode_name == "JPEG" else "PNG"
+
         if user_id:
             user_all_counts = aggregator.db.get_all_image_ids_with_counts(user_id=user_id)
             for u_img_id_int in user_all_counts.keys():
@@ -262,26 +289,46 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                         best_pkt = max(pkts, key=lambda p: p[1])
                         try:
                             p_bytes = bits_to_bytearray(best_pkt[0])
-                            tile_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
-                            tile_img.load()
-                            tw, th = tile_img.size
-                            paste_x = tx * tw
-                            paste_y = ty * th
-                            if paste_x + tw <= config.WIDTH and paste_y + th <= config.HEIGHT:
-                                u_canvas.paste(tile_img, (paste_x, paste_y))
+                            tile_img = None
+                            if mode_name == "JPEG":
+                                try:
+                                    tile_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
+                                    tile_img.load()
+                                except Exception:
+                                    raw_b = bytes(p_bytes)
+                                    soi_idx = raw_b.find(b'\xff\xd8')
+                                    fixed_b = bytearray(raw_b[soi_idx:] if soi_idx != -1 else (b'\xff\xd8' + raw_b))
+                                    if not fixed_b.endswith(b'\xff\xd9'):
+                                        fixed_b.extend(b'\xff\xd9')
+                                    try:
+                                        tile_img = Image.open(io.BytesIO(fixed_b)).convert("RGB")
+                                        tile_img.load()
+                                    except Exception:
+                                        pass
                             else:
-                                tile_img = tile_img.crop((0, 0, min(tw, config.WIDTH - paste_x), min(th, config.HEIGHT - paste_y)))
-                                u_canvas.paste(tile_img, (paste_x, paste_y))
+                                tile_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
+                                tile_img.load()
+
+                            if tile_img is not None:
+                                tw, th = tile_img.size
+                                paste_x = tx * tw
+                                paste_y = ty * th
+                                if paste_x + tw <= config.WIDTH and paste_y + th <= config.HEIGHT:
+                                    u_canvas.paste(tile_img, (paste_x, paste_y))
+                                else:
+                                    tile_img = tile_img.crop((0, 0, min(tw, config.WIDTH - paste_x), min(th, config.HEIGHT - paste_y)))
+                                    u_canvas.paste(tile_img, (paste_x, paste_y))
                         except Exception:
                             pass
-                u_accum_path = os.path.join(output_dir, f"user_{user_id}_ID_{u_img_id_hex}.png")
-                u_canvas.save(u_accum_path, format="PNG")
+                # ユーザー累積画像は user_cumulative_ プレフィックスで保存！
+                u_accum_path = os.path.join(output_dir, f"user_cumulative_{user_id}_ID_{u_img_id_hex}{img_ext}")
+                u_canvas.save(u_accum_path, format=img_fmt)
 
         if not current_image_id:
             all_ids = list(user_packets_by_id.keys())
             current_image_id = all_ids[0] if all_ids else "UNKNOWN"
 
-        net_img_filename = f"restored_ID_{current_image_id}.jpg" if (mode_name == "JPEG" or os.path.exists(os.path.join(output_dir, f"restored_ID_{current_image_id}.jpg"))) else f"restored_ID_{current_image_id}.png"
+        net_img_filename = f"restored_ID_{current_image_id}{img_ext}"
 
         result_data = {
             "image_id": current_image_id,

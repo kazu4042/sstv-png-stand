@@ -1,13 +1,14 @@
 from abc import ABC, abstractmethod
+from typing import Tuple, List, Optional, Callable
 
 
 class BaseDecoder(ABC):
     """SSTV Turbo デコーダの共通抽象基底クラス"""
-    def __init__(self, user_id=None):
+    def __init__(self, user_id: Optional[int] = None):
         self.user_id = user_id
 
     @abstractmethod
-    def run(self, wav_path, progress_callback=None):
+    def run(self, wav_path: str, progress_callback: Optional[Callable[[float], None]] = None) -> Tuple[int, str]:
         """WAVファイルをデコードし、(success_count, log_path) を返す"""
         pass
 
@@ -20,7 +21,7 @@ class BaseAggregator(ABC):
         pass
 
     @abstractmethod
-    def process_and_save_images(self, min_tile_ratio=0.0, user_id=None) -> list:
+    def process_and_save_images(self, min_tile_ratio: float = 0.0, user_id: Optional[int] = None) -> List[str]:
         """DBから多数決および画像復元を実行し、保存されたファイルパスリストを返す"""
         pass
 
@@ -33,3 +34,4 @@ class BaseAggregator(ABC):
     def close(self) -> None:
         """DB接続をクローズ"""
         pass
+

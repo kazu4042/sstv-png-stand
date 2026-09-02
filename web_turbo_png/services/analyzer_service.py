@@ -46,15 +46,20 @@ class TurboPNGAnalyzerService:
             t_count = int(item["tile_count"]) if item.get("tile_count") is not None else 0
             item["restoration_score"] = round((t_count / total_required) * 100, 1) if total_required > 0 else 0.0
             
-            # 画像プレビューパス (PNG または JPG)
-            img_png = f"restored_ID_{img_hex}.png"
-            img_jpg = f"restored_ID_{img_hex}.jpg"
-            if os.path.exists(os.path.join(static_out, img_png)):
-                item["thumbnail_url"] = f"/static/output/{img_png}"
-            elif os.path.exists(os.path.join(static_out, img_jpg)):
-                item["thumbnail_url"] = f"/static/output/{img_jpg}"
-            elif os.path.exists(os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images", img_jpg)):
-                item["thumbnail_url"] = f"/data/digital_turbo_jpeg/images/{img_jpg}"
+            # 画像プレビューパス (現在のエンジンモードを優先)
+            mode_name = SystemFactory.get_mode()
+            primary_ext = ".jpg" if mode_name == "JPEG" else ".png"
+            secondary_ext = ".png" if mode_name == "JPEG" else ".jpg"
+
+            img_primary = f"restored_ID_{img_hex}{primary_ext}"
+            img_secondary = f"restored_ID_{img_hex}{secondary_ext}"
+
+            if os.path.exists(os.path.join(static_out, img_primary)):
+                item["thumbnail_url"] = f"/static/output/{img_primary}"
+            elif os.path.exists(os.path.join(static_out, img_secondary)):
+                item["thumbnail_url"] = f"/static/output/{img_secondary}"
+            elif mode_name == "JPEG" and os.path.exists(os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images", img_primary)):
+                item["thumbnail_url"] = f"/data/digital_turbo_jpeg/images/{img_primary}"
             else:
                 item["thumbnail_url"] = None
 
@@ -166,9 +171,35 @@ class TurboPNGAnalyzerService:
                     user_score = 100.0
 
         static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
-        user_img_url = f"/static/output/user_{user_id}_ID_{target_image_id_hex}.png" if (user_id and user_has_data and os.path.exists(os.path.join(static_out, f"user_{user_id}_ID_{target_image_id_hex}.png"))) else None
-        user_cumulative_url = f"/static/output/user_cumulative_{user_id}_ID_{target_image_id_hex}.png" if (user_id and user_has_data and os.path.exists(os.path.join(static_out, f"user_cumulative_{user_id}_ID_{target_image_id_hex}.png"))) else None
-        restored_img_url = f"/static/output/restored_ID_{target_image_id_hex}.png" if os.path.exists(os.path.join(static_out, f"restored_ID_{target_image_id_hex}.png")) else None
+        mode_name = SystemFactory.get_mode()
+        primary_ext = ".jpg" if mode_name == "JPEG" else ".png"
+        secondary_ext = ".png" if mode_name == "JPEG" else ".jpg"
+
+        # ユーザー単体画像 (現在のエンジンモード優先)
+        user_img_url = None
+        if user_id and user_has_data:
+            for ext in (primary_ext, secondary_ext):
+                fname = f"user_{user_id}_ID_{target_image_id_hex}{ext}"
+                if os.path.exists(os.path.join(static_out, fname)):
+                    user_img_url = f"/static/output/{fname}"
+                    break
+
+        # ユーザー累積画像 (現在のエンジンモード優先)
+        user_cumulative_url = None
+        if user_id and user_has_data:
+            for ext in (primary_ext, secondary_ext):
+                fname = f"user_cumulative_{user_id}_ID_{target_image_id_hex}{ext}"
+                if os.path.exists(os.path.join(static_out, fname)):
+                    user_cumulative_url = f"/static/output/{fname}"
+                    break
+
+        # ネットワーク復元画像 (現在のエンジンモード優先)
+        restored_img_url = None
+        for ext in (primary_ext, secondary_ext):
+            fname = f"restored_ID_{target_image_id_hex}{ext}"
+            if os.path.exists(os.path.join(static_out, fname)):
+                restored_img_url = f"/static/output/{fname}"
+                break
 
         return {
             "image_id": target_image_id_hex,
