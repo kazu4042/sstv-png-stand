@@ -3,13 +3,12 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SSTV Aggregator - 管理者ダッシュボード & 管制室</title>
+    <title>Turbo 管理ダッシュボード - エンジン切替 & 画像クリア</title>
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -17,12 +16,13 @@
                     colors: {
                         forest: '#008d54',
                         forestLight: '#e6f3ec',
-                        earth: '#8b7d6b',
-                        ink: '#231815',
-                        paper: '#f9f9f9'
+                        earth: '#71717a',
+                        ink: '#0f172a',
+                        cardBg: '#ffffff'
                     },
                     fontFamily: {
                         sans: ['"Zen Kaku Gothic New"', 'sans-serif'],
+                        mono: ['"JetBrains Mono"', 'monospace'],
                     }
                 }
             }
@@ -30,1211 +30,835 @@
     </script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        body { background-color: #f9f9f9; color: #231815; font-family: 'Zen Kaku Gothic New', sans-serif; }
-        .tab-btn.active {
-            border-color: #008d54;
-            color: #008d54;
-            background-color: #e6f3ec;
+        body { 
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            color: #0f172a; 
+            font-family: 'Zen Kaku Gothic New', sans-serif;
+            min-height: 100vh;
         }
         .pulse-dot {
             animation: pulse-animation 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
         }
         @keyframes pulse-animation {
             0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.4; transform: scale(1.2); }
+            50% { opacity: 0.3; transform: scale(1.3); }
+        }
+        .custom-toast {
+            animation: slideIn 0.3s ease-out forwards;
+        }
+        @keyframes slideIn {
+            from { transform: translateY(-20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
         }
     </style>
 </head>
-<body class="flex h-screen overflow-hidden">
+<body class="flex flex-col min-h-screen">
 
-    <!-- Main Content -->
-    <main class="flex-1 flex flex-col overflow-hidden bg-paper relative w-full">
-        <!-- Top Nav -->
-        <header class="top-nav h-16 px-6 flex items-center shrink-0 bg-white border-b border-gray-100 shadow-sm justify-between" style="z-index: 30;">
-            <div class="flex items-center gap-4">
-                <a href="/" class="text-xs font-bold text-earth hover:text-forest flex items-center gap-1 transition-colors">
-                    <i data-lucide="arrow-left" class="w-4 h-4"></i> トップへ戻る
-                </a>
-                <span class="text-gray-300">|</span>
-                <span class="font-bold text-ink tracking-widest flex items-center text-lg">
-                    <i data-lucide="shield-check" class="w-6 h-6 inline mr-2 text-forest"></i> TurboPNG 管理・管制センター
+    <!-- トースト通知コンテナ -->
+    <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- 上部ヘッダー -->
+    <header class="h-16 px-4 md:px-8 bg-slate-900 text-white border-b border-slate-800 shadow-sm flex items-center justify-between sticky top-0 z-40">
+        <div class="flex items-center gap-3 md:gap-4">
+            <a href="/" class="text-xs font-bold text-slate-300 hover:text-emerald-400 flex items-center gap-1.5 transition-colors px-2.5 py-1.5 rounded-lg hover:bg-slate-800">
+                <i data-lucide="arrow-left" class="w-4 h-4"></i>
+                <span class="hidden sm:inline">トップへ戻る</span>
+            </a>
+            <span class="text-slate-700">|</span>
+            <div class="flex items-center gap-2">
+                <div class="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                    <i data-lucide="sliders-horizontal" class="w-4 h-4"></i>
+                </div>
+                <span class="font-bold text-base md:text-lg tracking-wide text-white">
+                    TurboPNG 管理・管制センター
+                </span>
+                <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/60 hidden md:inline">
+                    Admin Console
                 </span>
             </div>
-            
-            <div class="flex items-center gap-3">
-                <!-- クイック最適化ボタン -->
-                <button onclick="optimizeDatabase()" id="btn-quick-optimize" class="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 hover:bg-forestLight text-earth hover:text-forest border border-gray-200 rounded-xl text-xs font-bold transition-all shadow-sm" title="データベースのVACUUM最適化">
-                    <i data-lucide="database" class="w-3.5 h-3.5"></i> DB最適化
-                </button>
-                <button onclick="clearCache()" id="btn-quick-cache" class="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 hover:bg-forestLight text-earth hover:text-forest border border-gray-200 rounded-xl text-xs font-bold transition-all shadow-sm" title="アナライザーキャッシュをクリア">
-                    <i data-lucide="zap" class="w-3.5 h-3.5"></i> キャッシュ再生成
-                </button>
+        </div>
 
-                <span class="text-gray-200 hidden sm:inline">|</span>
-                <span class="text-xs text-earth hidden md:inline"><i data-lucide="user" class="w-3 h-3 inline"></i> {{ session.get('email') }}</span>
-                <a href="/logout" class="text-xs font-bold text-red-600 hover:text-white hover:bg-red-600 px-3 py-1.5 rounded-lg transition-colors border border-red-600 flex items-center">
-                    <i data-lucide="log-out" class="w-3.5 h-3.5 inline mr-1"></i> ログアウト
-                </a>
-            </div>
-        </header>
+        <div class="flex items-center gap-3">
+            <span class="text-xs text-slate-400 hidden md:flex items-center gap-1.5 font-mono">
+                <i data-lucide="shield" class="w-3.5 h-3.5 text-emerald-400"></i>
+                {{ session.get('email', 'admin') }}
+            </span>
+            <a href="/logout" class="text-xs font-bold text-rose-400 hover:text-white hover:bg-rose-600 px-3 py-1.5 rounded-lg transition-all border border-rose-500/40 hover:border-rose-600 flex items-center gap-1">
+                <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
+                <span>ログアウト</span>
+            </a>
+        </div>
+    </header>
 
-        <!-- Main Content Area -->
-        <div class="flex-1 overflow-y-auto p-4 md:p-8">
-            <div class="max-w-6xl mx-auto space-y-6">
+    <!-- メインコンテンツ -->
+    <main class="flex-1 max-w-6xl w-full mx-auto p-4 md:p-8 space-y-8">
 
-                <!-- 🔥 デコードエンジン管制バナー (PNG / JPEG 最上部常設) -->
-                <div class="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white p-5 rounded-2xl shadow-lg border border-slate-700 flex flex-col md:flex-row items-center justify-between gap-4">
-                    <div class="flex items-center gap-3.5">
-                        <div class="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center border border-white/20">
-                            <i data-lucide="cpu" class="w-6 h-6 text-emerald-400"></i>
-                        </div>
-                        <div>
-                            <div class="flex items-center gap-2">
-                                <span class="text-[11px] font-bold uppercase tracking-wider text-emerald-400">Active Decoder Engine</span>
-                                <span id="banner-engine-badge" class="px-2.5 py-0.5 text-xs font-bold rounded-full {% if current_engine_mode == 'JPEG' %}bg-amber-500/20 text-amber-300 border border-amber-500/40{% else %}bg-emerald-500/20 text-emerald-300 border border-emerald-500/40{% endif %}">
-                                    {{ current_engine_mode if current_engine_mode else 'PNG' }} モード
-                                </span>
-                            </div>
-                            <h2 class="text-base md:text-lg font-bold text-white tracking-wide mt-0.5">
-                                現在稼働中: <span id="banner-engine-name" class="{% if current_engine_mode == 'JPEG' %}text-amber-300{% else %}text-emerald-300{% endif %}">{% if current_engine_mode == 'JPEG' %}JPEG (アナログざらざら感・段階的復元){% else %}PNG (0/100 多数決完全復元){% endif %}</span>
-                            </h2>
-                            <p class="text-xs text-slate-300">管理者はいつでもワンクリックでデコード＆画像復元エンジンを相互に切り替えられます。</p>
-                        </div>
+        <!-- ========================================== -->
+        <!-- 1. ACTIVE DECODER ENGINE 管制セクション     -->
+        <!-- ========================================== -->
+        <section class="bg-white rounded-2xl p-6 md:p-8 border border-slate-200/80 shadow-sm space-y-6">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-5">
+                <div>
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-xs font-bold tracking-wider uppercase text-slate-500">Engine Controller</span>
+                        <span id="current-badge" class="px-2.5 py-0.5 text-xs font-bold rounded-full transition-all {% if current_engine_mode == 'JPEG' %}bg-amber-100 text-amber-800 border border-amber-300{% else %}bg-emerald-100 text-emerald-800 border border-emerald-300{% endif %}">
+                            <span class="inline-block w-2 h-2 rounded-full mr-1 {% if current_engine_mode == 'JPEG' %}bg-amber-500{% else %}bg-emerald-500{% endif %} pulse-dot"></span>
+                            {{ current_engine_mode if current_engine_mode else 'PNG' }} モード稼働中
+                        </span>
                     </div>
-                    <div class="flex items-center gap-2 bg-slate-900/80 p-1.5 rounded-xl border border-slate-700 w-full md:w-auto justify-center">
-                        <button onclick="setEngineMode('PNG')" id="banner-btn-png" class="px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 {% if current_engine_mode != 'JPEG' %}bg-emerald-600 text-white shadow{% else %}text-slate-400 hover:text-white{% endif %}">
-                            <i data-lucide="file-code" class="w-4 h-4"></i> PNG (0/100)
-                        </button>
-                        <button onclick="setEngineMode('JPEG')" id="banner-btn-jpeg" class="px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 {% if current_engine_mode == 'JPEG' %}bg-amber-600 text-white shadow{% else %}text-slate-400 hover:text-white{% endif %}">
-                            <i data-lucide="image" class="w-4 h-4"></i> JPEG (ざらざら感)
-                        </button>
-                    </div>
+                    <h2 class="text-xl md:text-2xl font-bold text-slate-900 tracking-tight">
+                        Active Decoder Engine 切替
+                    </h2>
+                    <p class="text-sm text-slate-500 mt-1">
+                        ワンクリックで受信デコーダーと画像復元アルゴリズムを瞬時に切り替えます。
+                    </p>
                 </div>
+            </div>
 
-                <!-- Header Stats Cards (6枚グリッド) -->
-                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5">
-                    <!-- 1. リアルタイムアクティブ数 -->
-                    <div class="bg-white p-4 rounded-2xl border border-emerald-100 shadow-sm relative overflow-hidden">
-                        <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-[11px] font-bold text-earth tracking-wider">現在アクティブ</span>
-                            <span class="relative flex h-2.5 w-2.5">
-                                <span class="pulse-dot absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+            <!-- エンジン選択カード (PNG vs JPEG) -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+                
+                <!-- PNG Card -->
+                <div id="card-mode-png" onclick="switchEngine('PNG')" class="relative p-6 rounded-2xl border-2 transition-all cursor-pointer select-none group {% if current_engine_mode != 'JPEG' %}border-emerald-500 bg-emerald-50/40 shadow-md ring-2 ring-emerald-500/20{% else %}border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50{% endif %}">
+                    <div class="flex items-start justify-between">
+                        <div class="w-12 h-12 rounded-xl flex items-center justify-center transition-colors {% if current_engine_mode != 'JPEG' %}bg-emerald-600 text-white shadow-md shadow-emerald-600/30{% else %}bg-slate-100 text-slate-500 group-hover:text-emerald-600{% endif %}" id="icon-container-png">
+                            <i data-lucide="file-code" class="w-6 h-6"></i>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <span id="active-tag-png" class="text-xs font-bold px-2.5 py-1 rounded-full {% if current_engine_mode != 'JPEG' %}bg-emerald-600 text-white flex items-center gap-1{% else %}hidden{% endif %}">
+                                <i data-lucide="check" class="w-3.5 h-3.5"></i> 現在稼働中
                             </span>
                         </div>
-                        <div class="text-2xl font-bold text-emerald-600 leading-tight" id="stat-active-now">
-                            {{ overview_stats.active_now if overview_stats else 0 }} <span class="text-xs text-earth font-normal">名</span>
-                        </div>
-                        <div class="text-[10px] text-earth mt-1 flex items-center gap-1">
-                            <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 直近5分以内の訪問
-                        </div>
                     </div>
 
-                    <!-- 2. 電波受信品質 (平均SNR) -->
-                    <div class="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
-                        <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-[11px] font-bold text-earth tracking-wider">平均電波品質(SNR)</span>
-                            <i data-lucide="radio" class="w-4 h-4 text-forest"></i>
-                        </div>
-                        <div class="text-2xl font-bold text-ink leading-tight" id="stat-avg-snr">
-                            {{ snr_stats.avg_snr if snr_stats else 0.0 }} <span class="text-xs text-earth font-normal">dB</span>
-                        </div>
-                        <div class="text-[10px] font-bold mt-1 {% if snr_stats and snr_stats.avg_snr >= 14 %}text-forest{% elif snr_stats and snr_stats.avg_snr >= 9 %}text-sky-600{% else %}text-amber-600{% endif %}" id="stat-condition-label">
-                            {{ snr_stats.condition_label if snr_stats else 'データ待機中' }}
-                        </div>
+                    <div class="mt-4">
+                        <h3 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+                            PNG デコードモード
+                            <span class="text-xs px-2 py-0.5 rounded font-mono font-bold bg-slate-100 text-slate-600 border border-slate-200">0/100 多数決</span>
+                        </h3>
+                        <p class="text-xs text-slate-600 mt-1 leading-relaxed">
+                            完全ビット一致による無劣化復元。複数局の受信パケットから多数決アルゴリズムで完全な画像を再構築します。
+                        </p>
                     </div>
 
-                    <!-- 3. 本日 訪問者 (UU) & 閲覧数 (PV) -->
-                    <div class="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
-                        <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-[11px] font-bold text-earth tracking-wider">本日 訪問 / PV</span>
-                            <i data-lucide="eye" class="w-4 h-4 text-sky-500"></i>
-                        </div>
-                        <div class="text-xl font-bold text-ink leading-tight">
-                            <span id="stat-today-uu">{{ overview_stats.today_uu if overview_stats else 0 }}</span> <span class="text-xs text-earth font-normal">人</span> / <span id="stat-today-pv">{{ overview_stats.today_pv if overview_stats else 0 }}</span> <span class="text-[10px] text-earth font-normal">PV</span>
-                        </div>
-                        <div class="text-[10px] text-earth mt-1">ログイン: <span id="stat-today-logged" class="font-bold text-ink">{{ overview_stats.today_logged_in_users if overview_stats else 0 }}</span>名</div>
-                    </div>
-
-                    <!-- 4. 画像復元コンプリート状況 -->
-                    <div class="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
-                        <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-[11px] font-bold text-earth tracking-wider">画像復元達成度</span>
-                            <i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-500"></i>
-                        </div>
-                        <div class="text-2xl font-bold text-ink leading-tight">
-                            {{ restoration_overview.completed_count if restoration_overview else 0 }} <span class="text-xs text-earth font-normal">/ {{ restoration_overview.total_images if restoration_overview else 0 }} 枚</span>
-                        </div>
-                        <div class="text-[10px] text-earth mt-1">平均復元: <span class="font-bold text-forest">{{ restoration_overview.avg_restoration_score if restoration_overview else 0.0 }}%</span></div>
-                    </div>
-
-                    <!-- 5. 蓄積パケット総数 -->
-                    <div class="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
-                        <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-[11px] font-bold text-earth tracking-wider">総蓄積パケット</span>
-                            <i data-lucide="layers" class="w-4 h-4 text-sky-600"></i>
-                        </div>
-                        <div class="text-2xl font-bold text-ink leading-tight">
-                            {{ system_health.total_packets if system_health else 0 }}
-                        </div>
-                        <div class="text-[10px] text-earth mt-1">取込ファイル: <span class="font-bold text-ink">{{ system_health.imported_files_count if system_health else 0 }}</span> 件</div>
-                    </div>
-
-                    <!-- 6. DB & ストレージ容量 -->
-                    <div class="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
-                        <div class="flex items-center justify-between mb-1.5">
-                            <span class="text-[11px] font-bold text-earth tracking-wider">ストレージ使用量</span>
-                            <i data-lucide="hard-drive" class="w-4 h-4 text-amber-500"></i>
-                        </div>
-                        <div class="text-2xl font-bold text-ink leading-tight">
-                            {{ system_health.db_size_mb if system_health else 0.0 }} <span class="text-xs text-earth font-normal">MB</span>
-                        </div>
-                        <div class="text-[10px] text-earth mt-1">画像: <span class="font-bold text-ink">{{ system_health.image_storage_mb if system_health else 0.0 }}MB</span> ({{ system_health.restored_files_count if system_health else 0 }}枚)</div>
+                    <div class="mt-4 pt-4 border-t border-slate-200/60 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-slate-200">
+                            <i data-lucide="sparkles" class="w-3 h-3 text-emerald-600"></i> ロスレス完全復元
+                        </span>
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-slate-200">
+                            <i data-lucide="users" class="w-3 h-3 text-emerald-600"></i> パケット多数決補正
+                        </span>
                     </div>
                 </div>
 
-                <!-- Tabs & Container -->
-                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                    
-                    <!-- Tab Header -->
-                    <div class="flex border-b border-gray-100 px-6 pt-4 gap-2 bg-gray-50/50 overflow-x-auto">
-                        <button id="tab-btn-analytics" class="tab-btn active px-4 py-3 text-xs md:text-sm font-bold rounded-t-xl border-b-2 flex items-center gap-2 transition-all whitespace-nowrap">
-                            <i data-lucide="trending-up" class="w-4 h-4"></i> アクティブ & トラフィック
-                        </button>
-                        <button id="tab-btn-snr" class="tab-btn px-4 py-3 text-xs md:text-sm font-bold text-earth rounded-t-xl border-b-2 border-transparent hover:text-ink flex items-center gap-2 transition-all whitespace-nowrap">
-                            <i data-lucide="radio" class="w-4 h-4"></i> 電波品質・SNR & システム管制
-                        </button>
-                        <button id="tab-btn-ranking" class="tab-btn px-4 py-3 text-xs md:text-sm font-bold text-earth rounded-t-xl border-b-2 border-transparent hover:text-ink flex items-center gap-2 transition-all whitespace-nowrap">
-                            <i data-lucide="trophy" class="w-4 h-4"></i> ユーザー貢献ランキング
-                        </button>
-                        <button id="tab-btn-images" class="tab-btn px-4 py-3 text-xs md:text-sm font-bold text-earth rounded-t-xl border-b-2 border-transparent hover:text-ink flex items-center gap-2 transition-all whitespace-nowrap">
-                            <i data-lucide="trash-2" class="w-4 h-4"></i> 受信画像管理 (選択クリーン)
-                        </button>
-                        <button id="tab-btn-users" class="tab-btn px-4 py-3 text-xs md:text-sm font-bold text-earth rounded-t-xl border-b-2 border-transparent hover:text-ink flex items-center gap-2 transition-all whitespace-nowrap">
-                            <i data-lucide="users" class="w-4 h-4"></i> ユーザー管理
-                        </button>
-                        <button id="tab-btn-logs" class="tab-btn px-4 py-3 text-xs md:text-sm font-bold text-earth rounded-t-xl border-b-2 border-transparent hover:text-ink flex items-center gap-2 transition-all whitespace-nowrap">
-                            <i data-lucide="list" class="w-4 h-4"></i> アクセス履歴
-                        </button>
-                    </div>
-
-                    <!-- TAB 1: アクティブ・アクセス推移 & パケットトラフィックグラフ -->
-                    <div id="tab-content-analytics" class="p-6 space-y-6">
-                        <div class="flex flex-wrap items-center justify-between gap-4 pb-2 border-b border-gray-100">
-                            <div>
-                                <h2 class="text-lg font-bold text-ink tracking-wider flex items-center gap-2">
-                                    <i data-lucide="activity" class="w-5 h-5 text-forest"></i> 時間帯別アクセス & 受信パケット推移
-                                </h2>
-                                <p class="text-earth text-xs mt-1">サイト訪問者数（UU/PV）と、実際に受信されたパケットトラフィックを連動して可視化しています。</p>
-                            </div>
-
-                            <div class="flex items-center gap-2">
-                                <!-- 期間切り替えピルボタン -->
-                                <div class="bg-gray-100 p-1 rounded-xl flex items-center text-xs font-bold" id="period-buttons">
-                                    <button class="period-btn px-3 py-1.5 rounded-lg transition-all bg-white text-forest shadow-sm" data-period="today">今日 (時間別)</button>
-                                    <button class="period-btn px-3 py-1.5 rounded-lg text-earth hover:text-ink transition-all" data-period="24h">過去24時間</button>
-                                    <button class="period-btn px-3 py-1.5 rounded-lg text-earth hover:text-ink transition-all" data-period="7d">過去7日間</button>
-                                    <button class="period-btn px-3 py-1.5 rounded-lg text-earth hover:text-ink transition-all" data-period="30d">過去30日間</button>
-                                </div>
-
-                                <button id="btn-refresh-stats" class="p-2 bg-gray-50 hover:bg-forestLight text-earth hover:text-forest rounded-xl border border-gray-200 transition-colors" title="最新データを再取得">
-                                    <i data-lucide="refresh-cw" class="w-4 h-4"></i>
-                                </button>
-                            </div>
+                <!-- JPEG Card -->
+                <div id="card-mode-jpeg" onclick="switchEngine('JPEG')" class="relative p-6 rounded-2xl border-2 transition-all cursor-pointer select-none group {% if current_engine_mode == 'JPEG' %}border-amber-500 bg-amber-50/40 shadow-md ring-2 ring-amber-500/20{% else %}border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50{% endif %}">
+                    <div class="flex items-start justify-between">
+                        <div class="w-12 h-12 rounded-xl flex items-center justify-center transition-colors {% if current_engine_mode == 'JPEG' %}bg-amber-600 text-white shadow-md shadow-amber-600/30{% else %}bg-slate-100 text-slate-500 group-hover:text-amber-600{% endif %}" id="icon-container-jpeg">
+                            <i data-lucide="image" class="w-6 h-6"></i>
                         </div>
-
-                        <!-- メイン複合グラフエリア -->
-                        <div class="bg-gradient-to-b from-white to-gray-50/50 p-5 rounded-2xl border border-gray-100 shadow-sm relative">
-                            <div class="h-72 md:h-84 w-full relative">
-                                <canvas id="activityChart"></canvas>
-                            </div>
-                        </div>
-
-                        <!-- サブグリッド: 人気ページ割合 & ピーク時間帯インサイト -->
-                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-2">
-                            <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm lg:col-span-2 space-y-4">
-                                <div class="flex items-center justify-between">
-                                    <h3 class="text-sm font-bold text-ink flex items-center gap-2">
-                                        <i data-lucide="pie-chart" class="w-4 h-4 text-forest"></i> 閲覧されているページ分布
-                                    </h3>
-                                    <span class="text-[11px] text-earth">過去7日間の集計</span>
-                                </div>
-                                <div class="grid grid-cols-1 sm:grid-cols-2 items-center gap-4">
-                                    <div class="h-44 flex items-center justify-center relative">
-                                        <canvas id="pagesPieChart"></canvas>
-                                    </div>
-                                    <div class="space-y-2.5">
-                                        {% for page in top_pages %}
-                                        <div class="flex items-center justify-between text-xs">
-                                            <div class="flex items-center gap-2 truncate">
-                                                <span class="w-2 h-2 rounded-full {% if loop.index == 1 %}bg-forest{% elif loop.index == 2 %}bg-sky-500{% elif loop.index == 3 %}bg-amber-500{% elif loop.index == 4 %}bg-purple-500{% else %}bg-gray-400{% endif %}"></span>
-                                                <span class="font-mono font-bold text-ink truncate">{{ page.endpoint }}</span>
-                                            </div>
-                                            <div class="text-right shrink-0">
-                                                <span class="font-bold text-ink">{{ page.pv }} PV</span>
-                                                <span class="text-earth text-[11px]">({{ page.uu }} UU)</span>
-                                            </div>
-                                        </div>
-                                        {% else %}
-                                        <div class="text-xs text-earth text-center py-4">アクセスデータはまだありません</div>
-                                        {% endfor %}
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="bg-forestLight/40 p-5 rounded-2xl border border-forest/10 shadow-sm space-y-4 flex flex-col justify-between">
-                                <div>
-                                    <h3 class="text-sm font-bold text-forest flex items-center gap-2 mb-3">
-                                        <i data-lucide="sparkles" class="w-4 h-4 text-forest"></i> 通信 & 受信インサイト
-                                    </h3>
-                                    <ul class="text-xs text-ink space-y-3">
-                                        <li class="flex items-start gap-2">
-                                            <i data-lucide="clock" class="w-4 h-4 text-forest shrink-0 mt-0.5"></i>
-                                            <div>
-                                                <div class="font-bold text-ink">パケットトラフィック連動</div>
-                                                <div class="text-earth text-[11px] mt-0.5">オレンジの棒グラフがパケット受信数、緑/青のラインが閲覧者数を表します。</div>
-                                            </div>
-                                        </li>
-                                        <li class="flex items-start gap-2">
-                                            <i data-lucide="shield-check" class="w-4 h-4 text-forest shrink-0 mt-0.5"></i>
-                                            <div>
-                                                <div class="font-bold text-ink">高速集計 & セキュリティ</div>
-                                                <div class="text-earth text-[11px] mt-0.5">SQLite WALジャーナルにより高負荷時も即座にレスポンスします。</div>
-                                            </div>
-                                        </li>
-                                    </ul>
-                                </div>
-
-                                <div class="bg-white/80 p-3 rounded-xl border border-forest/20 text-center">
-                                    <span class="text-[11px] text-earth">自動更新間隔</span>
-                                    <div class="text-xs font-bold text-forest mt-0.5">30秒ごとに自動リフレッシュ</div>
-                                </div>
-                            </div>
+                        <div class="flex items-center gap-1.5">
+                            <span id="active-tag-jpeg" class="text-xs font-bold px-2.5 py-1 rounded-full {% if current_engine_mode == 'JPEG' %}bg-amber-600 text-white flex items-center gap-1{% else %}hidden{% endif %}">
+                                <i data-lucide="check" class="w-3.5 h-3.5"></i> 現在稼働中
+                            </span>
                         </div>
                     </div>
 
-                    <!-- TAB 2: 電波品質・SNR & システム管制 -->
-                    <div id="tab-content-snr" class="p-6 space-y-6 hidden">
-                        <div class="mb-4">
-                            <h2 class="text-lg font-bold text-ink tracking-wider flex items-center gap-2">
-                                <i data-lucide="radio" class="w-5 h-5 text-forest"></i> 電波品質 (SNR) アナリティクス & システム管制
-                            </h2>
-                            <p class="text-earth text-xs mt-1">受信したTurboPNGパケットのS/N比（信号対雑音比）分布と、ストレージ健全度・メンテナンス情報です。</p>
-                        </div>
-
-                        <!-- SNR メトリクスカード -->
-                        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                            <div class="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
-                                <span class="text-xs text-earth font-bold">平均 SNR</span>
-                                <div class="text-3xl font-mono font-bold text-forest mt-1">{{ snr_stats.avg_snr if snr_stats else 0.0 }} <span class="text-sm font-normal">dB</span></div>
-                                <div class="text-[11px] text-earth mt-1">全受信パケットの平均値</div>
-                            </div>
-                            <div class="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
-                                <span class="text-xs text-earth font-bold">最高 / 最低 SNR</span>
-                                <div class="text-xl font-mono font-bold text-ink mt-1">
-                                    <span class="text-emerald-600">{{ snr_stats.max_snr if snr_stats else 0.0 }}</span> / <span class="text-amber-600">{{ snr_stats.min_snr if snr_stats else 0.0 }}</span> <span class="text-xs font-normal">dB</span>
-                                </div>
-                                <div class="text-[11px] text-earth mt-1">ピーク信号強度 / 限界感度</div>
-                            </div>
-                            <div class="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
-                                <span class="text-xs text-earth font-bold">クリーンパケット (≥15dB)</span>
-                                <div class="text-2xl font-mono font-bold text-emerald-600 mt-1">{{ snr_stats.count_high if snr_stats else 0 }} <span class="text-xs font-normal text-earth">個</span></div>
-                                <div class="text-[11px] text-earth mt-1">高品質・高信頼度タイル</div>
-                            </div>
-                            <div class="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
-                                <span class="text-xs text-earth font-bold">弱電界・ノイズ (<8dB)</span>
-                                <div class="text-2xl font-mono font-bold text-amber-600 mt-1">{{ snr_stats.count_low if snr_stats else 0 }} <span class="text-xs font-normal text-earth">個</span></div>
-                                <div class="text-[11px] text-earth mt-1">多数決復元による補正対象</div>
-                            </div>
-                        </div>
-
-                        <!-- SNR 分布チャート & ストレージ内訳 -->
-                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            <!-- SNR分布ドーナツチャート -->
-                            <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-4">
-                                <h3 class="text-sm font-bold text-ink flex items-center gap-2">
-                                    <i data-lucide="bar-chart-3" class="w-4 h-4 text-forest"></i> 受信信号強度 (SNR) 分布比率
-                                </h3>
-                                <div class="h-48 flex items-center justify-center relative">
-                                    <canvas id="snrPieChart"></canvas>
-                                </div>
-                                <div class="grid grid-cols-3 gap-2 text-center text-xs pt-2 border-t border-gray-50">
-                                    <div>
-                                        <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 mr-1"></span>
-                                        <span class="text-earth">高SNR (≥15dB):</span>
-                                        <div class="font-bold text-ink mt-0.5">{{ snr_stats.count_high if snr_stats else 0 }}</div>
-                                    </div>
-                                    <div>
-                                        <span class="inline-block w-2.5 h-2.5 rounded-full bg-sky-500 mr-1"></span>
-                                        <span class="text-earth">中SNR (8-15dB):</span>
-                                        <div class="font-bold text-ink mt-0.5">{{ snr_stats.count_mid if snr_stats else 0 }}</div>
-                                    </div>
-                                    <div>
-                                        <span class="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 mr-1"></span>
-                                        <span class="text-earth">低SNR (<8dB):</span>
-                                        <div class="font-bold text-ink mt-0.5">{{ snr_stats.count_low if snr_stats else 0 }}</div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- ストレージ & メンテナンス管制 -->
-                            <div class="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm space-y-4 flex flex-col justify-between">
-                                <div>
-                                    <h3 class="text-sm font-bold text-ink flex items-center gap-2 mb-3">
-                                        <i data-lucide="settings-2" class="w-4 h-4 text-forest"></i> ストレージ管理 & 管制オペレーション
-                                    </h3>
-                                    <div class="space-y-3 text-xs">
-                                        <div class="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
-                                            <span class="text-earth font-bold">パケットデータベース:</span>
-                                            <span class="font-mono font-bold text-ink">{{ system_health.db_size_mb if system_health else 0 }} MB ({{ system_health.total_packets if system_health else 0 }} パケット)</span>
-                                        </div>
-                                        <div class="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
-                                            <span class="text-earth font-bold">出力画像キャッシュストレージ:</span>
-                                            <span class="font-mono font-bold text-ink">{{ system_health.image_storage_mb if system_health else 0 }} MB ({{ system_health.restored_files_count if system_health else 0 }} ファイル)</span>
-                                        </div>
-                                        <div class="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
-                                            <span class="text-earth font-bold">インポート済みログファイル:</span>
-                                            <span class="font-mono font-bold text-ink">{{ system_health.imported_files_count if system_health else 0 }} 件</span>
-                                        </div>
-                                    </div>
-
-                                    <!-- エンジン切り替えコントロール -->
-                                    <div class="mt-4 p-3.5 bg-gradient-to-r from-forestLight/50 to-emerald-50/50 rounded-xl border border-forest/20 flex flex-wrap items-center justify-between gap-3">
-                                        <div class="flex items-center gap-2.5">
-                                            <div class="p-2 bg-forest text-white rounded-lg">
-                                                <i data-lucide="cpu" class="w-4 h-4"></i>
-                                            </div>
-                                            <div>
-                                                <div class="text-xs font-bold text-ink">デコードエンジン (PNG / JPEG)</div>
-                                                <div class="text-[11px] text-earth">現在: <span id="current-engine-label" class="font-bold text-forest font-mono">{{ current_engine_mode if current_engine_mode else 'PNG' }} モード</span></div>
-                                            </div>
-                                        </div>
-                                        <div class="flex items-center gap-2">
-                                            <button id="btn-set-png" onclick="setEngineMode('PNG')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all {% if current_engine_mode == 'PNG' %}bg-forest text-white shadow-sm{% else %}bg-white text-earth hover:text-ink border border-gray-200{% endif %}">
-                                                PNG (0/100)
-                                            </button>
-                                            <button id="btn-set-jpeg" onclick="setEngineMode('JPEG')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all {% if current_engine_mode == 'JPEG' %}bg-forest text-white shadow-sm{% else %}bg-white text-earth hover:text-ink border border-gray-200{% endif %}">
-                                                JPEG (ざらざら感)
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div class="flex flex-wrap items-center gap-3 pt-4 border-t border-gray-100">
-                                    <button onclick="optimizeDatabase()" class="flex-1 py-2.5 px-4 bg-forest hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors shadow-sm flex items-center justify-center gap-2">
-                                        <i data-lucide="database" class="w-4 h-4"></i> DB VACUUM (最適化実行)
-                                    </button>
-                                    <button onclick="clearCache()" class="flex-1 py-2.5 px-4 bg-gray-100 hover:bg-gray-200 text-ink rounded-xl text-xs font-bold transition-colors shadow-sm flex items-center justify-center gap-2">
-                                        <i data-lucide="refresh-cw" class="w-4 h-4"></i> キャッシュ強制クリア
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
+                    <div class="mt-4">
+                        <h3 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+                            JPEG デコードモード
+                            <span class="text-xs px-2 py-0.5 rounded font-mono font-bold bg-amber-100 text-amber-800 border border-amber-200">ざらざら感再現</span>
+                        </h3>
+                        <p class="text-xs text-slate-600 mt-1 leading-relaxed">
+                            超耐ノイズ・段階的復元。低SNRの悪条件下でも即座に大まかな輪郭が浮かび上がり、アナログSSTV特有のディテールを段階復元します。
+                        </p>
                     </div>
 
-                    <!-- TAB 3: ユーザー貢献ランキング -->
-                    <div id="tab-content-ranking" class="p-6 space-y-6 hidden">
-                        <div class="mb-4">
-                            <h2 class="text-lg font-bold text-ink tracking-wider flex items-center gap-2">
-                                <i data-lucide="trophy" class="w-5 h-5 text-amber-500"></i> トップコントリビューター (貢献度ランキング)
-                            </h2>
-                            <p class="text-earth text-xs mt-1">パケットをアップロードして画像復元に最も貢献しているユーザーランキングです。</p>
-                        </div>
-
-                        <div class="overflow-x-auto rounded-xl border border-gray-100">
-                            <table class="w-full text-left border-collapse">
-                                <thead>
-                                    <tr class="bg-gray-50 border-b border-gray-200 text-xs font-bold text-earth tracking-wider">
-                                        <th class="p-4 text-center w-16">順位</th>
-                                        <th class="p-4">アカウント / ユーザー名</th>
-                                        <th class="p-4">提供パケット数</th>
-                                        <th class="p-4">貢献タイル数</th>
-                                        <th class="p-4">貢献画像数</th>
-                                        <th class="p-4">平均受信SNR</th>
-                                        <th class="p-4">最終貢献日時</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="divide-y divide-gray-100">
-                                    {% for c in top_contributors %}
-                                    <tr class="hover:bg-gray-50/80 transition-colors">
-                                        <td class="p-4 text-center font-bold font-mono">
-                                            {% if loop.index == 1 %}
-                                            <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-100 text-amber-600 text-sm">👑 1</span>
-                                            {% elif loop.index == 2 %}
-                                            <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-slate-200 text-slate-700 text-sm">🥈 2</span>
-                                            {% elif loop.index == 3 %}
-                                            <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-800/10 text-amber-800 text-sm">🥉 3</span>
-                                            {% else %}
-                                            <span class="text-earth text-sm">#{{ loop.index }}</span>
-                                            {% endif %}
-                                        </td>
-                                        <td class="p-4 font-bold text-ink text-sm">
-                                            <span class="flex items-center gap-1.5">
-                                                <i data-lucide="user" class="w-4 h-4 text-forest"></i>
-                                                {{ c.email }}
-                                            </span>
-                                        </td>
-                                        <td class="p-4 font-mono font-bold text-forest text-base">
-                                            {{ c.packet_count }} <span class="text-xs text-earth font-normal">pkts</span>
-                                        </td>
-                                        <td class="p-4 font-mono text-sm text-ink">
-                                            {{ c.tile_count }} <span class="text-xs text-earth">tiles</span>
-                                        </td>
-                                        <td class="p-4 font-mono text-sm text-ink">
-                                            {{ c.image_count }} <span class="text-xs text-earth">枚</span>
-                                        </td>
-                                        <td class="p-4 font-mono text-sm">
-                                            <span class="font-bold {% if c.avg_snr >= 14 %}text-forest{% elif c.avg_snr >= 9 %}text-sky-600{% else %}text-amber-600{% endif %}">
-                                                {{ c.avg_snr }} dB
-                                            </span>
-                                        </td>
-                                        <td class="p-4 text-xs font-mono text-earth">
-                                            {{ c.last_seen }}
-                                        </td>
-                                    </tr>
-                                    {% else %}
-                                    <tr>
-                                        <td colspan="7" class="p-12 text-center text-earth">貢献ユーザーデータはまだありません</td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
+                    <div class="mt-4 pt-4 border-t border-slate-200/60 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-slate-200">
+                            <i data-lucide="activity" class="w-3 h-3 text-amber-600"></i> 低SNR即座表示
+                        </span>
+                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-slate-200">
+                            <i data-lucide="zap" class="w-3 h-3 text-amber-600"></i> 段階的クオリティ向上
+                        </span>
                     </div>
-
-                    <!-- TAB 4: 受信画像管理 (選択クリーン) -->
-                    <div id="tab-content-images" class="p-6 hidden">
-                        <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
-                            <div>
-                                <h2 class="text-lg font-bold text-ink tracking-wider flex items-center gap-2">
-                                    <i data-lucide="image" class="w-5 h-5 text-forest"></i> データベース内の受信画像一覧
-                                </h2>
-                                <p class="text-earth text-xs mt-1">選択した画像IDのパケットデータおよび復元ファイルを安全に削除・クリーンアップできます。</p>
-                            </div>
-
-                            <div class="flex items-center gap-3">
-                                <button id="btn-delete-selected" disabled class="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-xl text-sm font-bold flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-red-600 hover:text-white transition-all shadow-sm">
-                                    <i data-lucide="trash" class="w-4 h-4"></i> 選択した画像を削除 (<span id="selected-count">0</span>件)
-                                </button>
-                            </div>
-                        </div>
-
-                        <div class="overflow-x-auto rounded-xl border border-gray-100">
-                            <table class="w-full text-left border-collapse">
-                                <thead>
-                                    <tr class="bg-gray-50 border-b border-gray-200 text-xs font-bold text-earth tracking-wider">
-                                        <th class="p-4 w-12 text-center">
-                                            <input type="checkbox" id="select-all-images" class="w-4 h-4 rounded border-gray-300 text-forest focus:ring-forest cursor-pointer">
-                                        </th>
-                                        <th class="p-4">プレビュー</th>
-                                        <th class="p-4">画像ID</th>
-                                        <th class="p-4">復元度 (タイル数)</th>
-                                        <th class="p-4">パケット数</th>
-                                        <th class="p-4">参加ユーザー</th>
-                                        <th class="p-4">最終受信日時</th>
-                                        <th class="p-4 text-center">操作</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="divide-y divide-gray-100" id="images-tbody">
-                                    {% for img in images %}
-                                    <tr class="hover:bg-gray-50/80 transition-colors" data-id="{{ img.image_id_hex }}">
-                                        <td class="p-4 text-center">
-                                            <input type="checkbox" value="{{ img.image_id_hex }}" class="image-checkbox w-4 h-4 rounded border-gray-300 text-forest focus:ring-forest cursor-pointer">
-                                        </td>
-                                        <td class="p-4">
-                                            {% if img.thumbnail_url %}
-                                            <img src="{{ img.thumbnail_url }}" alt="Preview" class="w-12 h-12 rounded-lg object-cover bg-black border border-gray-200 shadow-sm hover:scale-110 transition-transform cursor-pointer" onclick="openPreviewModal('{{ img.thumbnail_url }}', '0x{{ img.image_id_hex }}')">
-                                            {% else %}
-                                            <div class="w-12 h-12 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center text-earth/50 text-[10px] font-mono">
-                                                No Img
-                                            </div>
-                                            {% endif %}
-                                        </td>
-                                        <td class="p-4 font-mono font-bold text-forest text-base">
-                                            0x{{ img.image_id_hex }}
-                                        </td>
-                                        <td class="p-4">
-                                            <div class="flex items-center gap-2">
-                                                <div class="w-24 bg-gray-200 rounded-full h-2 overflow-hidden">
-                                                    <div class="bg-forest h-2 rounded-full" data-progress="{{ img.restoration_score }}" style="width: 0%;"></div>
-                                                </div>
-                                                <span class="text-xs font-bold text-ink">{{ img.restoration_score }}%</span>
-                                            </div>
-                                            <div class="text-[11px] text-earth mt-0.5">{{ img.tile_count }} / {{ img.total_required }} タイル</div>
-                                        </td>
-                                        <td class="p-4 font-mono text-sm text-ink font-bold">
-                                            {{ img.packet_count }}
-                                        </td>
-                                        <td class="p-4 text-sm text-earth">
-                                            <span class="inline-flex items-center gap-1 font-bold text-ink">
-                                                <i data-lucide="user" class="w-3.5 h-3.5 text-forest"></i> {{ img.user_count }} 名
-                                            </span>
-                                        </td>
-                                        <td class="p-4 text-xs text-earth">
-                                            {{ img.last_received }}
-                                        </td>
-                                        <td class="p-4 text-center">
-                                            <div class="flex items-center justify-center gap-2">
-                                                <a href="/result?image_id={{ img.image_id_hex }}" target="_blank" class="p-1.5 text-gray-500 hover:text-forest hover:bg-forestLight rounded-lg transition-colors" title="結果画面で確認">
-                                                    <i data-lucide="external-link" class="w-4 h-4"></i>
-                                                </a>
-                                                <button onclick="confirmSingleDelete('{{ img.image_id_hex }}')" class="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="この画像を削除">
-                                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                    {% else %}
-                                    <tr id="no-images-row">
-                                        <td colspan="8" class="p-12 text-center text-earth">
-                                            <i data-lucide="inbox" class="w-10 h-10 mx-auto text-gray-300 mb-2"></i>
-                                            受信画像データは存在しません
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <!-- TAB 5: ユーザー管理 -->
-                    <div id="tab-content-users" class="p-6 hidden">
-                        <div class="mb-6 flex items-center justify-between">
-                            <div>
-                                <h2 class="text-lg font-bold text-ink tracking-wider flex items-center gap-2">
-                                    <i data-lucide="users" class="w-5 h-5 text-forest"></i> 登録アカウント一覧
-                                </h2>
-                                <p class="text-earth text-xs mt-1">システムに登録されているすべてのアカウント情報です。</p>
-                            </div>
-                        </div>
-
-                        <div class="overflow-x-auto rounded-xl border border-gray-100">
-                            <table class="w-full text-left border-collapse">
-                                <thead>
-                                    <tr class="bg-gray-50 border-b border-gray-200 text-xs font-bold text-earth tracking-wider">
-                                        <th class="p-4">ID</th>
-                                        <th class="p-4">メールアドレス / ユーザー名</th>
-                                        <th class="p-4">登録日時</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="divide-y divide-gray-100">
-                                    {% for user in users %}
-                                    <tr class="hover:bg-gray-50/80 transition-colors">
-                                        <td class="p-4 text-ink font-mono text-sm">#{{ user.id }}</td>
-                                        <td class="p-4 text-ink font-bold">{{ user.email }}</td>
-                                        <td class="p-4 text-earth text-xs">{{ user.created_at }}</td>
-                                    </tr>
-                                    {% else %}
-                                    <tr>
-                                        <td colspan="3" class="p-12 text-center text-earth">ユーザーはまだ登録されていません</td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <!-- TAB 6: 直近アクセス履歴ログ -->
-                    <div id="tab-content-logs" class="p-6 hidden">
-                        <div class="mb-6 flex items-center justify-between">
-                            <div>
-                                <h2 class="text-lg font-bold text-ink tracking-wider flex items-center gap-2">
-                                    <i data-lucide="list" class="w-5 h-5 text-forest"></i> 直近のアクセス履歴
-                                </h2>
-                                <p class="text-earth text-xs mt-1">ユーザーやゲストがアクセスした最新のページリクエスト履歴です。</p>
-                            </div>
-                        </div>
-
-                        <div class="overflow-x-auto rounded-xl border border-gray-100">
-                            <table class="w-full text-left border-collapse">
-                                <thead>
-                                    <tr class="bg-gray-50 border-b border-gray-200 text-xs font-bold text-earth tracking-wider">
-                                        <th class="p-4">アクセス日時</th>
-                                        <th class="p-4">ユーザー / ゲスト</th>
-                                        <th class="p-4">ページ / エンドポイント</th>
-                                        <th class="p-4">Method</th>
-                                        <th class="p-4">接続元IP</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="divide-y divide-gray-100" id="logs-tbody">
-                                    {% for log in recent_logs %}
-                                    <tr class="hover:bg-gray-50/80 transition-colors">
-                                        <td class="p-4 text-xs font-mono text-earth">{{ log.created_at }}</td>
-                                        <td class="p-4 text-sm font-bold text-ink">
-                                            {% if log.user_id %}
-                                            <span class="text-forest flex items-center gap-1"><i data-lucide="user" class="w-3.5 h-3.5 inline"></i> {{ log.user_name }}</span>
-                                            {% else %}
-                                            <span class="text-earth/70">ゲスト (未ログイン)</span>
-                                            {% endif %}
-                                        </td>
-                                        <td class="p-4 text-xs font-mono font-bold text-ink">{{ log.endpoint }}</td>
-                                        <td class="p-4 text-xs font-mono text-earth">
-                                            <span class="px-2 py-0.5 rounded bg-gray-100 text-gray-700 font-bold">{{ log.method }}</span>
-                                        </td>
-                                        <td class="p-4 text-xs font-mono text-earth">{{ log.ip_address or '-' }}</td>
-                                    </tr>
-                                    {% else %}
-                                    <tr>
-                                        <td colspan="5" class="p-12 text-center text-earth">アクセスログはまだありません</td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
                 </div>
 
             </div>
-        </div>
+        </section>
+
+
+        <!-- ========================================== -->
+        <!-- 2. 受信画像管理 & クリーンアップ セクション -->
+        <!-- ========================================== -->
+        <section class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden space-y-0">
+            
+            <!-- ツールバー -->
+            <div class="p-6 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-50/50">
+                <div>
+                    <div class="flex items-center gap-2.5">
+                        <div class="w-8 h-8 rounded-lg bg-slate-200 flex items-center justify-center text-slate-700">
+                            <i data-lucide="database" class="w-4 h-4"></i>
+                        </div>
+                        <h2 class="text-lg md:text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                            受信画像データ管理・クリア
+                            <span id="badge-total-count" class="px-2.5 py-0.5 text-xs font-mono font-bold rounded-full bg-slate-200 text-slate-800">
+                                {{ images|length }} 件
+                            </span>
+                        </h2>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-1">
+                        受信・集約された画像データとパケットDBの削除・クリーンアップを行います。
+                    </p>
+                </div>
+
+                <!-- アクションボタン群 -->
+                <div class="flex flex-wrap items-center gap-2.5">
+                    <!-- リフレッシュ -->
+                    <button onclick="reloadImages()" id="btn-refresh" class="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5" title="最新状態を取得">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5" id="refresh-icon"></i>
+                        <span>更新</span>
+                    </button>
+
+                    <!-- 選択削除ボタン -->
+                    <button onclick="openDeleteSelectedModal()" id="btn-delete-selected" disabled class="px-3.5 py-2 bg-rose-50 text-rose-600 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-rose-600 hover:text-white transition-all shadow-sm">
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                        <span>選択削除 (<span id="selected-count">0</span>)</span>
+                    </button>
+
+                    <!-- 全画像クリアボタン -->
+                    <button onclick="openClearAllModal()" id="btn-clear-all" class="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm shadow-rose-600/20">
+                        <i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i>
+                        <span>すべての画像をクリア</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- テーブルコンテナ -->
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-slate-100/70 border-b border-slate-200 text-xs font-bold text-slate-600 tracking-wider">
+                            <th class="py-3.5 px-4 w-12 text-center">
+                                <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll(this)" class="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer">
+                            </th>
+                            <th class="py-3.5 px-4 w-20">プレビュー</th>
+                            <th class="py-3.5 px-4">画像ID</th>
+                            <th class="py-3.5 px-4">復元スコア</th>
+                            <th class="py-3.5 px-4">パケット数</th>
+                            <th class="py-3.5 px-4">受信局数</th>
+                            <th class="py-3.5 px-4">最終受信</th>
+                            <th class="py-3.5 px-4 text-center w-28">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 text-sm" id="images-tbody">
+                        {% for img in images %}
+                        <tr class="hover:bg-slate-50/80 transition-colors" data-id="{{ img.image_id_hex }}">
+                            <!-- チェックボックス -->
+                            <td class="py-3.5 px-4 text-center">
+                                <input type="checkbox" value="{{ img.image_id_hex }}" onchange="handleRowCheckboxChange()" class="row-checkbox w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer">
+                            </td>
+
+                            <!-- プレビュー -->
+                            <td class="py-3.5 px-4">
+                                {% if img.thumbnail_url %}
+                                <img src="{{ img.thumbnail_url }}" alt="Preview" class="w-12 h-12 rounded-lg object-cover bg-black border border-slate-200 shadow-sm hover:scale-105 transition-transform cursor-pointer" onclick="openPreviewModal('{{ img.thumbnail_url }}', '0x{{ img.image_id_hex }}')">
+                                {% else %}
+                                <div class="w-12 h-12 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 text-[10px] font-mono">
+                                    No Img
+                                </div>
+                                {% endif %}
+                            </td>
+
+                            <!-- 画像ID -->
+                            <td class="py-3.5 px-4">
+                                <div class="flex items-center gap-1.5">
+                                    <span class="font-mono font-bold text-slate-900 text-base">0x{{ img.image_id_hex }}</span>
+                                    <button onclick="copyToClipboard('0x{{ img.image_id_hex }}')" class="text-slate-400 hover:text-slate-600 p-1 rounded" title="IDをコピー">
+                                        <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                                    </button>
+                                </div>
+                            </td>
+
+                            <!-- 復元スコア -->
+                            <td class="py-3.5 px-4">
+                                <div class="flex items-center gap-2">
+                                    <div class="w-24 bg-slate-200 rounded-full h-2 overflow-hidden">
+                                        <div class="bg-emerald-600 h-2 rounded-full transition-all duration-500" style="width: {{ img.restoration_score }}%;"></div>
+                                    </div>
+                                    <span class="text-xs font-bold font-mono text-slate-800">{{ img.restoration_score }}%</span>
+                                </div>
+                                <div class="text-[11px] text-slate-500 mt-0.5 font-mono">
+                                    {{ img.tile_count }} / {{ img.total_required }} タイル
+                                </div>
+                            </td>
+
+                            <!-- パケット数 -->
+                            <td class="py-3.5 px-4 font-mono font-bold text-slate-700">
+                                {{ img.packet_count }} <span class="text-xs text-slate-400 font-normal">pkts</span>
+                            </td>
+
+                            <!-- 受信局数 -->
+                            <td class="py-3.5 px-4 text-slate-700">
+                                <span class="inline-flex items-center gap-1 font-bold text-xs bg-slate-100 px-2 py-1 rounded-md">
+                                    <i data-lucide="users" class="w-3 h-3 text-slate-500"></i>
+                                    {{ img.user_count }} 局
+                                </span>
+                            </td>
+
+                            <!-- 最終受信 -->
+                            <td class="py-3.5 px-4 text-xs font-mono text-slate-500">
+                                {{ img.last_received }}
+                            </td>
+
+                            <!-- 操作 -->
+                            <td class="py-3.5 px-4 text-center">
+                                <div class="flex items-center justify-center gap-1.5">
+                                    <a href="/result?image_id={{ img.image_id_hex }}" target="_blank" class="p-2 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors" title="結果画面を開く">
+                                        <i data-lucide="external-link" class="w-4 h-4"></i>
+                                    </a>
+                                    <button onclick="openSingleDeleteModal('{{ img.image_id_hex }}')" class="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors" title="この画像をクリア">
+                                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr id="empty-state-row">
+                            <td colspan="8" class="p-16 text-center text-slate-400">
+                                <div class="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400 mb-3">
+                                    <i data-lucide="inbox" class="w-7 h-7"></i>
+                                </div>
+                                <h4 class="font-bold text-slate-700 text-base">受信画像データはありません</h4>
+                                <p class="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                                    無線信号を受信またはアップロードすると、ここに自動的に画像が蓄積されます。
+                                </p>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+        </section>
+
     </main>
 
-    <!-- 画像拡大プレビューモーダル -->
-    <div id="preview-modal" class="fixed inset-0 bg-black/60 z-50 hidden items-center justify-center backdrop-blur-sm p-4" onclick="closePreviewModal()">
-        <div class="bg-white rounded-2xl p-4 max-w-lg w-full shadow-2xl relative" onclick="event.stopPropagation()">
-            <div class="flex items-center justify-between mb-3">
-                <span id="preview-title" class="font-mono font-bold text-forest text-lg">0x----</span>
-                <button onclick="closePreviewModal()" class="text-gray-400 hover:text-gray-600 p-1">
+
+    <!-- ========================================== -->
+    <!-- モーダル: 画像プレビュー                     -->
+    <!-- ========================================== -->
+    <div id="preview-modal" class="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm hidden items-center justify-center p-4" onclick="closePreviewModal(event)">
+        <div class="bg-white rounded-2xl max-w-lg w-full p-5 shadow-2xl space-y-4 relative" onclick="event.stopPropagation()">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="image" class="w-5 h-5 text-emerald-600"></i>
+                    <h3 class="font-bold text-slate-900" id="preview-modal-title">画像プレビュー</h3>
+                </div>
+                <button onclick="closePreviewModal()" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100">
                     <i data-lucide="x" class="w-5 h-5"></i>
                 </button>
             </div>
-            <img id="preview-img" src="" alt="Full Preview" class="w-full h-auto rounded-xl bg-black border border-gray-200 object-contain max-h-[70vh]">
+            <div class="flex justify-center bg-black/5 rounded-xl p-2">
+                <img id="preview-modal-img" src="" alt="Preview Large" class="max-h-[60vh] max-w-full rounded-lg object-contain shadow">
+            </div>
+            <div class="flex justify-end">
+                <button onclick="closePreviewModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors">
+                    閉じる
+                </button>
+            </div>
         </div>
     </div>
 
-    <!-- 削除確認モーダル -->
-    <div id="delete-modal" class="fixed inset-0 bg-black/50 z-50 hidden items-center justify-center backdrop-blur-sm p-4">
-        <div class="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
-            <div class="flex items-center gap-3 text-red-600">
-                <div class="bg-red-100 p-3 rounded-full">
+
+    <!-- ========================================== -->
+    <!-- モーダル: 削除・クリア確認ダイアログ        -->
+    <!-- ========================================== -->
+    <div id="delete-modal" class="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm hidden items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 relative">
+            <div class="flex items-center gap-3">
+                <div id="delete-modal-icon-bg" class="w-12 h-12 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
                     <i data-lucide="alert-triangle" class="w-6 h-6"></i>
                 </div>
                 <div>
-                    <h3 class="text-lg font-bold text-ink">画像のクリーンアップ</h3>
-                    <p class="text-xs text-earth">この操作は取り消せません</p>
+                    <h3 class="text-lg font-bold text-slate-900" id="delete-modal-title">画像の削除確認</h3>
+                    <p class="text-xs text-slate-500 mt-0.5" id="delete-modal-subtitle">この操作は元に戻すことができません</p>
                 </div>
             </div>
-            
-            <p class="text-sm text-ink" id="delete-modal-msg">
-                選択した画像を削除しますか？
-            </p>
 
-            <div class="flex justify-end gap-3 pt-2">
-                <button onclick="closeDeleteModal()" class="px-4 py-2 rounded-xl text-sm font-bold text-earth hover:bg-gray-100 transition-colors">
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200/80 text-xs text-slate-700 space-y-2 leading-relaxed" id="delete-modal-body">
+                <!-- 動的テキストが挿入されます -->
+            </div>
+
+            <div class="flex items-center justify-end gap-2.5 pt-2">
+                <button onclick="closeDeleteModal()" type="button" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors">
                     キャンセル
                 </button>
-                <button id="confirm-delete-btn" class="px-5 py-2 rounded-xl text-sm font-bold bg-red-600 text-white hover:bg-red-700 transition-colors shadow-sm">
-                    削除を実行する
+                <button onclick="executeDelete()" id="btn-confirm-delete" type="button" class="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-rose-600/20 flex items-center gap-1.5">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    <span id="btn-confirm-delete-text">削除を実行する</span>
                 </button>
             </div>
         </div>
     </div>
 
-    <!-- サーバー側埋め込みデータ -->
-    <script id="data-initial-graph" type="application/json">{{ (initial_graph if initial_graph else {}) | tojson | safe }}</script>
-    <script id="data-initial-packet" type="application/json">{{ (packet_traffic if packet_traffic else {}) | tojson | safe }}</script>
-    <script id="data-top-pages" type="application/json">{{ (top_pages if top_pages else []) | tojson | safe }}</script>
-    <script id="data-snr-stats" type="application/json">{{ (snr_stats if snr_stats else {}) | tojson | safe }}</script>
 
+    <!-- JavaScript ロジック -->
     <script>
-        // Lucide アイコン初期化 & プログレスバー反映
-        try { lucide.createIcons(); } catch(e) {}
-        document.querySelectorAll('[data-progress]').forEach(el => {
-            el.style.width = (el.getAttribute('data-progress') || '0') + '%';
+        let currentEngineMode = "{{ current_engine_mode or 'PNG' }}";
+        let deleteActionType = null; // 'single', 'selected', 'all'
+        let targetSingleId = null;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            updateSelectionCount();
         });
 
-        // 1. タブ切り替え処理
-        const tabConfigs = [
-            { btn: 'tab-btn-analytics', content: 'tab-content-analytics' },
-            { btn: 'tab-btn-snr', content: 'tab-content-snr' },
-            { btn: 'tab-btn-ranking', content: 'tab-content-ranking' },
-            { btn: 'tab-btn-images', content: 'tab-content-images' },
-            { btn: 'tab-btn-users', content: 'tab-content-users' },
-            { btn: 'tab-btn-logs', content: 'tab-content-logs' }
-        ];
-
-        function switchTab(targetBtnId) {
-            tabConfigs.forEach(t => {
-                const b = document.getElementById(t.btn);
-                const c = document.getElementById(t.content);
-                if (!b || !c) return;
-                if (t.btn === targetBtnId) {
-                    b.classList.add('active');
-                    b.classList.remove('text-earth', 'border-transparent');
-                    c.classList.remove('hidden');
-                } else {
-                    b.classList.remove('active');
-                    b.classList.add('text-earth', 'border-transparent');
-                    c.classList.add('hidden');
-                }
-            });
-        }
-
-        tabConfigs.forEach(t => {
-            const btnEl = document.getElementById(t.btn);
-            if (btnEl) {
-                btnEl.addEventListener('click', () => switchTab(t.btn));
-            }
-        });
-
-        // 2. Chart.js による複合推移グラフ (UU, PV, パケット数)
-        const initialGraphData = JSON.parse(document.getElementById('data-initial-graph')?.textContent || '{}');
-        const initialPacketData = JSON.parse(document.getElementById('data-initial-packet')?.textContent || '{}');
-        let currentPeriod = 'today';
-        let activityChart = null;
-
-        function initActivityChart(labels, pvData, uuData, packetData) {
-            const canvasEl = document.getElementById('activityChart');
-            if (!canvasEl) return;
-            const ctx = canvasEl.getContext('2d');
+        // ==========================================
+        // トースト通知システム
+        // ==========================================
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
             
-            const gradientForest = ctx.createLinearGradient(0, 0, 0, 300);
-            gradientForest.addColorStop(0, 'rgba(0, 141, 84, 0.25)');
-            gradientForest.addColorStop(1, 'rgba(0, 141, 84, 0.0)');
+            const isSuccess = type === 'success';
+            const isError = type === 'error';
+            
+            const bgClass = isSuccess ? 'bg-emerald-800 text-emerald-100 border-emerald-600' :
+                            isError ? 'bg-rose-800 text-rose-100 border-rose-600' :
+                            'bg-slate-800 text-slate-100 border-slate-700';
 
-            const gradientSky = ctx.createLinearGradient(0, 0, 0, 300);
-            gradientSky.addColorStop(0, 'rgba(2, 132, 199, 0.15)');
-            gradientSky.addColorStop(1, 'rgba(2, 132, 199, 0.0)');
+            const iconName = isSuccess ? 'check-circle-2' : isError ? 'alert-circle' : 'info';
 
-            try {
-                activityChart = new Chart(ctx, {
-                    type: 'bar',
-                    data: {
-                        labels: labels || [],
-                        datasets: [
-                            {
-                                type: 'line',
-                                label: 'ユニーク訪問者 (UU)',
-                                data: uuData || [],
-                                borderColor: '#008d54',
-                                backgroundColor: gradientForest,
-                                borderWidth: 2.5,
-                                fill: true,
-                                tension: 0.35,
-                                pointBackgroundColor: '#008d54',
-                                pointRadius: 3,
-                                yAxisID: 'y'
-                            },
-                            {
-                                type: 'line',
-                                label: 'ページ閲覧数 (PV)',
-                                data: pvData || [],
-                                borderColor: '#0284c7',
-                                backgroundColor: gradientSky,
-                                borderWidth: 2,
-                                borderDash: [4, 4],
-                                fill: true,
-                                tension: 0.35,
-                                pointBackgroundColor: '#0284c7',
-                                pointRadius: 2.5,
-                                yAxisID: 'y'
-                            },
-                            {
-                                type: 'bar',
-                                label: '受信パケット数 (pkts)',
-                                data: packetData || [],
-                                backgroundColor: 'rgba(245, 158, 11, 0.45)',
-                                borderColor: '#f59e0b',
-                                borderWidth: 1,
-                                borderRadius: 4,
-                                yAxisID: 'y1'
-                            }
-                        ]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        interaction: {
-                            mode: 'index',
-                            intersect: false,
-                        },
-                        plugins: {
-                            legend: {
-                                position: 'top',
-                                align: 'end',
-                                labels: {
-                                    boxWidth: 12,
-                                    font: { family: "'Zen Kaku Gothic New', sans-serif", weight: 'bold', size: 11 },
-                                    color: '#231815'
-                                }
-                            },
-                            tooltip: {
-                                backgroundColor: 'rgba(35, 24, 21, 0.9)',
-                                titleFont: { family: "'Zen Kaku Gothic New', sans-serif", size: 12, weight: 'bold' },
-                                bodyFont: { family: "'Zen Kaku Gothic New', sans-serif", size: 12 },
-                                padding: 10,
-                                cornerRadius: 8
-                            }
-                        },
-                        scales: {
-                            x: {
-                                grid: { display: false },
-                                ticks: { font: { family: "'Zen Kaku Gothic New', sans-serif", size: 10 }, color: '#8b7d6b' }
-                            },
-                            y: {
-                                type: 'linear',
-                                display: true,
-                                position: 'left',
-                                beginAtZero: true,
-                                ticks: { stepSize: 1, font: { family: "'Zen Kaku Gothic New', sans-serif", size: 10 }, color: '#8b7d6b' },
-                                grid: { color: 'rgba(0,0,0,0.04)' }
-                            },
-                            y1: {
-                                type: 'linear',
-                                display: true,
-                                position: 'right',
-                                beginAtZero: true,
-                                grid: { drawOnChartArea: false },
-                                ticks: { font: { family: "'Zen Kaku Gothic New', sans-serif", size: 10 }, color: '#d97706' }
-                            }
-                        }
-                    }
-                });
-            } catch(err) {
-                console.error("ActivityChart init error:", err);
-            }
+            toast.className = `custom-toast pointer-events-auto flex items-center gap-2.5 px-4 py-3 rounded-xl border shadow-xl text-xs font-bold transition-all ${bgClass}`;
+            toast.innerHTML = `
+                <i data-lucide="${iconName}" class="w-4 h-4 shrink-0"></i>
+                <span>${message}</span>
+            `;
+
+            container.appendChild(toast);
+            lucide.createIcons();
+
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(-10px)';
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
         }
 
-        if (initialGraphData && initialGraphData.labels) {
-            initActivityChart(
-                initialGraphData.labels,
-                initialGraphData.pv,
-                initialGraphData.uu,
-                initialPacketData ? initialPacketData.packets : []
-            );
-        }
-
-        // 期間切り替えAPI
-        async function fetchGraphData(period) {
-            try {
-                const res = await fetch(`/admin/api/activity_stats?period=${period}`);
-                const data = await res.json();
-                if (data.status === 'success') {
-                    if (activityChart) {
-                        activityChart.data.labels = data.graph.labels;
-                        if (activityChart.data.datasets[0]) activityChart.data.datasets[0].data = data.graph.uu;
-                        if (activityChart.data.datasets[1]) activityChart.data.datasets[1].data = data.graph.pv;
-                        if (activityChart.data.datasets[2] && data.packet_traffic) {
-                            activityChart.data.datasets[2].data = data.packet_traffic.packets;
-                        }
-                        activityChart.update();
-                    }
-                    updateOverviewUI(data.overview);
-                }
-            } catch (err) {
-                console.error('Failed to fetch activity stats:', err);
-            }
-        }
-
-        document.querySelectorAll('.period-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                document.querySelectorAll('.period-btn').forEach(b => {
-                    b.classList.remove('bg-white', 'text-forest', 'shadow-sm');
-                    b.classList.add('text-earth');
-                });
-                btn.classList.add('bg-white', 'text-forest', 'shadow-sm');
-                btn.classList.remove('text-earth');
-
-                currentPeriod = btn.dataset.period;
-                fetchGraphData(currentPeriod);
+        // ==========================================
+        // クリップボードコピー
+        // ==========================================
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showToast(`ID: ${text} をコピーしました`);
+            }).catch(() => {
+                showToast('コピーに失敗しました', 'error');
             });
-        });
+        }
 
-        // 3. ドーナツチャート (ページ別割合)
-        const topPagesData = JSON.parse(document.getElementById('data-top-pages')?.textContent || '[]');
-        if (topPagesData && topPagesData.length > 0 && document.getElementById('pagesPieChart')) {
-            try {
-                const pieCtx = document.getElementById('pagesPieChart').getContext('2d');
-                const pieLabels = topPagesData.map(p => p.endpoint);
-                const pieValues = topPagesData.map(p => p.pv);
-                const colors = ['#008d54', '#0284c7', '#f59e0b', '#8b5cf6', '#9ca3af'];
-
-                new Chart(pieCtx, {
-                    type: 'doughnut',
-                    data: {
-                        labels: pieLabels,
-                        datasets: [{
-                            data: pieValues,
-                            backgroundColor: colors.slice(0, pieLabels.length),
-                            borderWidth: 0,
-                            hoverOffset: 4
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: { display: false },
-                            tooltip: {
-                                callbacks: { label: function(c) { return ` ${c.label}: ${c.raw} PV`; } }
-                            }
-                        },
-                        cutout: '70%'
-                    }
-                });
-            } catch (e) {
-                console.error("PagesPieChart error:", e);
+        // ==========================================
+        // 1. エンジン切替ロジック (PNG ↔ JPEG)
+        // ==========================================
+        async function switchEngine(targetMode) {
+            if (currentEngineMode === targetMode) {
+                showToast(`現在すでに ${targetMode} モードです`, 'info');
+                return;
             }
-        }
 
-        // 4. SNR 分布チャート
-        const snrStatsData = JSON.parse(document.getElementById('data-snr-stats')?.textContent || '{}');
-        if (snrStatsData && document.getElementById('snrPieChart')) {
-            try {
-                const snrCtx = document.getElementById('snrPieChart').getContext('2d');
-                const cHigh = snrStatsData.count_high || 0;
-                const cMid = snrStatsData.count_mid || 0;
-                const cLow = snrStatsData.count_low || 0;
-                const total = cHigh + cMid + cLow;
-
-                new Chart(snrCtx, {
-                    type: 'doughnut',
-                    data: {
-                        labels: ['高SNR (≥15dB)', '中SNR (8-15dB)', '低SNR (<8dB)'],
-                        datasets: [{
-                            data: total > 0 ? [cHigh, cMid, cLow] : [0, 0, 1],
-                            backgroundColor: total > 0 ? ['#10b981', '#0ea5e9', '#f59e0b'] : ['#e5e7eb', '#e5e7eb', '#e5e7eb'],
-                            borderWidth: 0,
-                            hoverOffset: 6
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 10 } } }
-                        },
-                        cutout: '65%'
-                    }
-                });
-            } catch(e) {
-                console.error("SnrPieChart error:", e);
+            const targetCard = document.getElementById(`card-mode-${targetMode.toLowerCase()}`);
+            if (targetCard) {
+                targetCard.classList.add('opacity-70', 'pointer-events-none');
             }
-        }
 
-        // 5. 概要カードの更新関数
-        function updateOverviewUI(overview) {
-            if (!overview) return;
-            const elActive = document.getElementById('stat-active-now');
-            const elUU = document.getElementById('stat-today-uu');
-            const elPV = document.getElementById('stat-today-pv');
-            const elLogged = document.getElementById('stat-today-logged');
-
-            if (elActive) elActive.innerHTML = `${overview.active_now || 0} <span class="text-xs text-earth font-normal">名</span>`;
-            if (elUU) elUU.textContent = overview.today_uu || 0;
-            if (elPV) elPV.textContent = overview.today_pv || 0;
-            if (elLogged) elLogged.textContent = overview.today_logged_in_users || 0;
-        }
-
-        // 6. リアルタイム自動更新 (30秒毎)
-        async function fetchRealtimeUpdates() {
-            try {
-                const res = await fetch('/admin/api/realtime_stats');
-                const data = await res.json();
-                if (data.status === 'success') {
-                    updateOverviewUI(data.overview);
-                    fetchGraphData(currentPeriod);
-                }
-            } catch (err) {
-                console.error('Realtime update error:', err);
-            }
-        }
-
-        setInterval(fetchRealtimeUpdates, 30000);
-
-        const refreshBtn = document.getElementById('btn-refresh-stats');
-        if (refreshBtn) refreshBtn.addEventListener('click', fetchRealtimeUpdates);
-
-        // 7. DB 最適化 & キャッシュクリア操作
-        async function optimizeDatabase() {
-            const btn = document.getElementById('btn-quick-optimize');
-            if (btn) btn.disabled = true;
-            try {
-                const res = await fetch('/admin/api/optimize_db', { method: 'POST' });
-                const data = await res.json();
-                alert(data.message || 'DB最適化が完了しました');
-                location.reload();
-            } catch (err) {
-                alert('DB最適化に失敗しました');
-            } finally {
-                if (btn) btn.disabled = false;
-            }
-        }
-
-        async function clearCache() {
-            const btn = document.getElementById('btn-quick-cache');
-            if (btn) btn.disabled = true;
-            try {
-                const res = await fetch('/admin/api/clear_cache', { method: 'POST' });
-                const data = await res.json();
-                alert(data.message || 'キャッシュをクリアしました');
-            } catch (err) {
-                alert('キャッシュクリアに失敗しました');
-            } finally {
-                if (btn) btn.disabled = false;
-            }
-        }
-
-        async function setEngineMode(mode) {
             try {
                 const res = await fetch('/admin/api/engine_mode', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ mode: mode })
+                    body: JSON.stringify({ mode: targetMode })
                 });
                 const data = await res.json();
+
                 if (data.status === 'success') {
-                    alert(`✅ デコードエンジンを ${data.mode} モードに切り替えました`);
-                    location.reload();
+                    currentEngineMode = data.mode;
+                    updateEngineUI(currentEngineMode);
+                    showToast(data.message || `エンジンを ${currentEngineMode} モードに切り替えました`);
+                    // モードに応じた画像一覧を再読み込み
+                    reloadImages(false);
                 } else {
-                    alert('エラー: ' + (data.message || 'エンジンの切り替えに失敗しました'));
+                    showToast(data.message || 'エンジン切替に失敗しました', 'error');
                 }
             } catch (err) {
-                alert('通信エラーが発生しました');
+                console.error(err);
+                showToast('通信エラーが発生しました', 'error');
+            } finally {
+                if (targetCard) {
+                    targetCard.classList.remove('opacity-70', 'pointer-events-none');
+                }
             }
         }
 
-        // 8. 画像管理のチェックボックス & 削除機能
-        const selectAllCheckbox = document.getElementById('select-all-images');
-        const imageCheckboxes = document.querySelectorAll('.image-checkbox');
-        const deleteSelectedBtn = document.getElementById('btn-delete-selected');
-        const selectedCountSpan = document.getElementById('selected-count');
+        function updateEngineUI(mode) {
+            const isJpeg = (mode === 'JPEG');
 
-        function updateSelectionState() {
-            const checkedBoxes = document.querySelectorAll('.image-checkbox:checked');
-            const count = checkedBoxes.length;
-            if (selectedCountSpan) selectedCountSpan.textContent = count;
-            if (deleteSelectedBtn) deleteSelectedBtn.disabled = count === 0;
+            // ヘッダーバッジ
+            const badge = document.getElementById('current-badge');
+            if (badge) {
+                if (isJpeg) {
+                    badge.className = 'px-2.5 py-0.5 text-xs font-bold rounded-full transition-all bg-amber-100 text-amber-800 border border-amber-300';
+                    badge.innerHTML = '<span class="inline-block w-2 h-2 rounded-full mr-1 bg-amber-500 pulse-dot"></span> JPEG モード稼働中';
+                } else {
+                    badge.className = 'px-2.5 py-0.5 text-xs font-bold rounded-full transition-all bg-emerald-100 text-emerald-800 border border-emerald-300';
+                    badge.innerHTML = '<span class="inline-block w-2 h-2 rounded-full mr-1 bg-emerald-500 pulse-dot"></span> PNG モード稼働中';
+                }
+            }
 
-            if (imageCheckboxes.length > 0 && selectAllCheckbox) {
-                selectAllCheckbox.checked = count === imageCheckboxes.length;
-                selectAllCheckbox.indeterminate = count > 0 && count < imageCheckboxes.length;
+            // カード PNG
+            const cardPng = document.getElementById('card-mode-png');
+            const iconPng = document.getElementById('icon-container-png');
+            const tagPng = document.getElementById('active-tag-png');
+            if (!isJpeg) {
+                cardPng.className = 'relative p-6 rounded-2xl border-2 transition-all cursor-pointer select-none group border-emerald-500 bg-emerald-50/40 shadow-md ring-2 ring-emerald-500/20';
+                iconPng.className = 'w-12 h-12 rounded-xl flex items-center justify-center transition-colors bg-emerald-600 text-white shadow-md shadow-emerald-600/30';
+                tagPng.classList.remove('hidden');
+                tagPng.classList.add('flex');
+            } else {
+                cardPng.className = 'relative p-6 rounded-2xl border-2 transition-all cursor-pointer select-none group border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50';
+                iconPng.className = 'w-12 h-12 rounded-xl flex items-center justify-center transition-colors bg-slate-100 text-slate-500 group-hover:text-emerald-600';
+                tagPng.classList.add('hidden');
+                tagPng.classList.remove('flex');
+            }
+
+            // カード JPEG
+            const cardJpeg = document.getElementById('card-mode-jpeg');
+            const iconJpeg = document.getElementById('icon-container-jpeg');
+            const tagJpeg = document.getElementById('active-tag-jpeg');
+            if (isJpeg) {
+                cardJpeg.className = 'relative p-6 rounded-2xl border-2 transition-all cursor-pointer select-none group border-amber-500 bg-amber-50/40 shadow-md ring-2 ring-amber-500/20';
+                iconJpeg.className = 'w-12 h-12 rounded-xl flex items-center justify-center transition-colors bg-amber-600 text-white shadow-md shadow-amber-600/30';
+                tagJpeg.classList.remove('hidden');
+                tagJpeg.classList.add('flex');
+            } else {
+                cardJpeg.className = 'relative p-6 rounded-2xl border-2 transition-all cursor-pointer select-none group border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/50';
+                iconJpeg.className = 'w-12 h-12 rounded-xl flex items-center justify-center transition-colors bg-slate-100 text-slate-500 group-hover:text-amber-600';
+                tagJpeg.classList.add('hidden');
+                tagJpeg.classList.remove('flex');
+            }
+
+            lucide.createIcons();
+        }
+
+        // ==========================================
+        // 2. 画像データ取得・テーブル再構築
+        // ==========================================
+        async function reloadImages(notify = true) {
+            const refreshIcon = document.getElementById('refresh-icon');
+            if (refreshIcon) refreshIcon.classList.add('animate-spin');
+
+            try {
+                const res = await fetch('/admin/api/images');
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    renderImagesTable(data.images);
+                    if (notify) showToast('画像一覧を更新しました');
+                } else {
+                    if (notify) showToast('画像の取得に失敗しました', 'error');
+                }
+            } catch (err) {
+                console.error(err);
+                if (notify) showToast('通信エラーが発生しました', 'error');
+            } finally {
+                if (refreshIcon) refreshIcon.classList.remove('animate-spin');
             }
         }
 
-        if (selectAllCheckbox) {
-            selectAllCheckbox.addEventListener('change', () => {
-                imageCheckboxes.forEach(cb => cb.checked = selectAllCheckbox.checked);
-                updateSelectionState();
+        function renderImagesTable(images) {
+            const tbody = document.getElementById('images-tbody');
+            const totalCountBadge = document.getElementById('badge-total-count');
+            const selectAllCheckbox = document.getElementById('select-all-checkbox');
+
+            if (selectAllCheckbox) selectAllCheckbox.checked = false;
+            if (totalCountBadge) totalCountBadge.textContent = `${images.length} 件`;
+
+            if (!images || images.length === 0) {
+                tbody.innerHTML = `
+                    <tr id="empty-state-row">
+                        <td colspan="8" class="p-16 text-center text-slate-400">
+                            <div class="w-14 h-14 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center mx-auto text-slate-400 mb-3">
+                                <i data-lucide="inbox" class="w-7 h-7"></i>
+                            </div>
+                            <h4 class="font-bold text-slate-700 text-base">受信画像データはありません</h4>
+                            <p class="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                                無線信号を受信またはアップロードすると、ここに自動的に画像が蓄積されます。
+                            </p>
+                        </td>
+                    </tr>
+                `;
+                lucide.createIcons();
+                updateSelectionCount();
+                return;
+            }
+
+            let html = '';
+            images.forEach(img => {
+                const thumbHtml = img.thumbnail_url
+                    ? `<img src="${img.thumbnail_url}" alt="Preview" class="w-12 h-12 rounded-lg object-cover bg-black border border-slate-200 shadow-sm hover:scale-105 transition-transform cursor-pointer" onclick="openPreviewModal('${img.thumbnail_url}', '0x${img.image_id_hex}')">`
+                    : `<div class="w-12 h-12 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 text-[10px] font-mono">No Img</div>`;
+
+                html += `
+                <tr class="hover:bg-slate-50/80 transition-colors" data-id="${img.image_id_hex}">
+                    <td class="py-3.5 px-4 text-center">
+                        <input type="checkbox" value="${img.image_id_hex}" onchange="handleRowCheckboxChange()" class="row-checkbox w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer">
+                    </td>
+                    <td class="py-3.5 px-4">
+                        ${thumbHtml}
+                    </td>
+                    <td class="py-3.5 px-4">
+                        <div class="flex items-center gap-1.5">
+                            <span class="font-mono font-bold text-slate-900 text-base">0x${img.image_id_hex}</span>
+                            <button onclick="copyToClipboard('0x${img.image_id_hex}')" class="text-slate-400 hover:text-slate-600 p-1 rounded" title="IDをコピー">
+                                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                            </button>
+                        </div>
+                    </td>
+                    <td class="py-3.5 px-4">
+                        <div class="flex items-center gap-2">
+                            <div class="w-24 bg-slate-200 rounded-full h-2 overflow-hidden">
+                                <div class="bg-emerald-600 h-2 rounded-full transition-all duration-500" style="width: ${img.restoration_score}%;"></div>
+                            </div>
+                            <span class="text-xs font-bold font-mono text-slate-800">${img.restoration_score}%</span>
+                        </div>
+                        <div class="text-[11px] text-slate-500 mt-0.5 font-mono">
+                            ${img.tile_count} / ${img.total_required} タイル
+                        </div>
+                    </td>
+                    <td class="py-3.5 px-4 font-mono font-bold text-slate-700">
+                        ${img.packet_count} <span class="text-xs text-slate-400 font-normal">pkts</span>
+                    </td>
+                    <td class="py-3.5 px-4 text-slate-700">
+                        <span class="inline-flex items-center gap-1 font-bold text-xs bg-slate-100 px-2 py-1 rounded-md">
+                            <i data-lucide="users" class="w-3 h-3 text-slate-500"></i>
+                            ${img.user_count} 局
+                        </span>
+                    </td>
+                    <td class="py-3.5 px-4 text-xs font-mono text-slate-500">
+                        ${img.last_received}
+                    </td>
+                    <td class="py-3.5 px-4 text-center">
+                        <div class="flex items-center justify-center gap-1.5">
+                            <a href="/result?image_id=${img.image_id_hex}" target="_blank" class="p-2 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors" title="結果画面を開く">
+                                <i data-lucide="external-link" class="w-4 h-4"></i>
+                            </a>
+                            <button onclick="openSingleDeleteModal('${img.image_id_hex}')" class="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors" title="この画像をクリア">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                `;
             });
+
+            tbody.innerHTML = html;
+            lucide.createIcons();
+            updateSelectionCount();
         }
 
-        imageCheckboxes.forEach(cb => cb.addEventListener('change', updateSelectionState));
+        // ==========================================
+        // チェックボックス選択処理
+        // ==========================================
+        function toggleSelectAll(masterCheckbox) {
+            const checkboxes = document.querySelectorAll('.row-checkbox');
+            checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
+            updateSelectionCount();
+        }
 
-        // プレビューモーダル
-        const previewModal = document.getElementById('preview-modal');
-        const previewImg = document.getElementById('preview-img');
-        const previewTitle = document.getElementById('preview-title');
+        function handleRowCheckboxChange() {
+            const checkboxes = document.querySelectorAll('.row-checkbox');
+            const allChecked = Array.from(checkboxes).length > 0 && Array.from(checkboxes).every(cb => cb.checked);
+            const selectAllCheckbox = document.getElementById('select-all-checkbox');
+            if (selectAllCheckbox) selectAllCheckbox.checked = allChecked;
+            updateSelectionCount();
+        }
 
+        function updateSelectionCount() {
+            const checkedBoxes = document.querySelectorAll('.row-checkbox:checked');
+            const count = checkedBoxes.length;
+            const countSpan = document.getElementById('selected-count');
+            const btnDeleteSelected = document.getElementById('btn-delete-selected');
+
+            if (countSpan) countSpan.textContent = count;
+            if (btnDeleteSelected) {
+                btnDeleteSelected.disabled = (count === 0);
+            }
+        }
+
+        // ==========================================
+        // モーダル: プレビュー
+        // ==========================================
         function openPreviewModal(url, title) {
-            if (!previewModal || !previewImg || !previewTitle) return;
-            previewImg.src = url;
-            previewTitle.textContent = title;
-            previewModal.classList.remove('hidden');
-            previewModal.classList.add('flex');
+            const modal = document.getElementById('preview-modal');
+            const img = document.getElementById('preview-modal-img');
+            const titleEl = document.getElementById('preview-modal-title');
+
+            img.src = url;
+            titleEl.textContent = `画像プレビュー (${title})`;
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
         }
 
         function closePreviewModal() {
-            if (!previewModal) return;
-            previewModal.classList.add('hidden');
-            previewModal.classList.remove('flex');
+            const modal = document.getElementById('preview-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            document.getElementById('preview-modal-img').src = '';
         }
 
-        // 削除モーダル
-        let targetDeleteIds = [];
-        const deleteModal = document.getElementById('delete-modal');
-        const deleteModalMsg = document.getElementById('delete-modal-msg');
-        const confirmDeleteBtn = document.getElementById('confirm-delete-btn');
+        // ==========================================
+        // モーダル: 削除ダイアログ
+        // ==========================================
+        function openSingleDeleteModal(imageId) {
+            deleteActionType = 'single';
+            targetSingleId = imageId;
 
-        function confirmSingleDelete(imageId) {
-            targetDeleteIds = [imageId];
-            if (deleteModalMsg) {
-                deleteModalMsg.innerHTML = `画像ID: <strong>0x${imageId}</strong> のパケットデータおよび関連ファイルを完全に削除しますか？`;
-            }
-            if (deleteModal) {
-                deleteModal.classList.remove('hidden');
-                deleteModal.classList.add('flex');
-            }
+            const modal = document.getElementById('delete-modal');
+            const title = document.getElementById('delete-modal-title');
+            const subtitle = document.getElementById('delete-modal-subtitle');
+            const body = document.getElementById('delete-modal-body');
+            const btnText = document.getElementById('btn-confirm-delete-text');
+
+            title.textContent = '画像の個別削除';
+            subtitle.textContent = `対象: 0x${imageId}`;
+            body.innerHTML = `
+                <p>画像ID <strong>0x${imageId}</strong> のパケットデータおよび復元画像ファイルを完全に削除します。</p>
+                <p class="text-rose-600 font-bold">⚠️ この操作を取り消すことはできません。</p>
+            `;
+            btnText.textContent = 'この画像を削除する';
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            lucide.createIcons();
         }
 
-        if (deleteSelectedBtn) {
-            deleteSelectedBtn.addEventListener('click', () => {
-                const checkedBoxes = document.querySelectorAll('.image-checkbox:checked');
-                targetDeleteIds = Array.from(checkedBoxes).map(cb => cb.value);
-                if (targetDeleteIds.length === 0) return;
+        function openDeleteSelectedModal() {
+            const checkedBoxes = document.querySelectorAll('.row-checkbox:checked');
+            const count = checkedBoxes.length;
+            if (count === 0) return;
 
-                if (deleteModalMsg) {
-                    deleteModalMsg.innerHTML = `選択された <strong>${targetDeleteIds.length} 件</strong> の画像（パケットデータおよび復元ファイル）を完全に削除しますか？`;
-                }
-                if (deleteModal) {
-                    deleteModal.classList.remove('hidden');
-                    deleteModal.classList.add('flex');
-                }
-            });
+            deleteActionType = 'selected';
+            targetSingleId = null;
+
+            const modal = document.getElementById('delete-modal');
+            const title = document.getElementById('delete-modal-title');
+            const subtitle = document.getElementById('delete-modal-subtitle');
+            const body = document.getElementById('delete-modal-body');
+            const btnText = document.getElementById('btn-confirm-delete-text');
+
+            title.textContent = '選択した画像の一括削除';
+            subtitle.textContent = `選択中: ${count} 件の画像`;
+            body.innerHTML = `
+                <p>選択された <strong>${count} 件</strong> の画像データ（DB内のパケットおよび出力画像ファイル）を一括削除します。</p>
+                <p class="text-rose-600 font-bold">⚠️ この操作を取り消すことはできません。</p>
+            `;
+            btnText.textContent = `選択した ${count} 件を削除する`;
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            lucide.createIcons();
+        }
+
+        function openClearAllModal() {
+            deleteActionType = 'all';
+            targetSingleId = null;
+
+            const modal = document.getElementById('delete-modal');
+            const title = document.getElementById('delete-modal-title');
+            const subtitle = document.getElementById('delete-modal-subtitle');
+            const body = document.getElementById('delete-modal-body');
+            const btnText = document.getElementById('btn-confirm-delete-text');
+
+            title.textContent = 'すべての画像データを一括クリア';
+            subtitle.textContent = 'データベース内の全パケット & 画像ファイルの消去';
+            body.innerHTML = `
+                <div class="p-3 bg-rose-50 rounded-lg border border-rose-200 text-rose-800">
+                    <p class="font-bold flex items-center gap-1.5 mb-1">
+                        <i data-lucide="alert-octagon" class="w-4 h-4 text-rose-600"></i>
+                        超重要: 全データの一括初期化
+                    </p>
+                    <p>保存されているすべての受信画像、パケットテーブルの全レコード、および生成済みファイルが完全に一掃されます。</p>
+                </div>
+                <p class="mt-2 text-slate-600">本当に全画像データをクリアしてもよろしいですか？</p>
+            `;
+            btnText.textContent = '全データを完全にクリアする';
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            lucide.createIcons();
         }
 
         function closeDeleteModal() {
-            if (!deleteModal) return;
-            deleteModal.classList.add('hidden');
-            deleteModal.classList.remove('flex');
-            targetDeleteIds = [];
+            const modal = document.getElementById('delete-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            deleteActionType = null;
+            targetSingleId = null;
         }
 
-        if (confirmDeleteBtn) {
-            confirmDeleteBtn.addEventListener('click', async () => {
-                if (targetDeleteIds.length === 0) return;
+        // ==========================================
+        // 削除実行API呼び出し
+        // ==========================================
+        async function executeDelete() {
+            const btn = document.getElementById('btn-confirm-delete');
+            const btnText = document.getElementById('btn-confirm-delete-text');
+            const originalText = btnText.textContent;
 
-                confirmDeleteBtn.disabled = true;
-                confirmDeleteBtn.textContent = '削除中...';
+            btn.disabled = true;
+            btnText.textContent = '処理中...';
 
-                try {
-                    const res = await fetch('/admin/delete_images', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ image_ids: targetDeleteIds })
-                    });
-                    const data = await res.json();
+            try {
+                let url = '';
+                let payload = {};
 
-                    if (data.status === 'success') {
-                        targetDeleteIds.forEach(id => {
-                            const row = document.querySelector(`tr[data-id="${id}"]`);
-                            if (row) row.remove();
-                        });
-
-                        updateSelectionState();
-
-                        const remainingRows = document.querySelectorAll('#images-tbody tr[data-id]');
-                        const totalEl = document.getElementById('stat-total-images');
-                        if (totalEl) totalEl.textContent = remainingRows.length;
-
-                        if (remainingRows.length === 0) {
-                            const tbody = document.getElementById('images-tbody');
-                            if (tbody) {
-                                tbody.innerHTML = `
-                                    <tr id="no-images-row">
-                                        <td colspan="8" class="p-12 text-center text-earth">
-                                            <i data-lucide="inbox" class="w-10 h-10 mx-auto text-gray-300 mb-2"></i>
-                                            受信画像データは存在しません
-                                        </td>
-                                    </tr>
-                                `;
-                                try { lucide.createIcons(); } catch(e) {}
-                            }
-                        }
-
+                if (deleteActionType === 'all') {
+                    url = '/admin/clear_all_images';
+                    payload = {};
+                } else if (deleteActionType === 'single') {
+                    url = '/admin/delete_images';
+                    payload = { image_ids: [targetSingleId] };
+                } else if (deleteActionType === 'selected') {
+                    const checkedBoxes = document.querySelectorAll('.row-checkbox:checked');
+                    const ids = Array.from(checkedBoxes).map(cb => cb.value);
+                    if (ids.length === 0) {
                         closeDeleteModal();
-                        alert(data.message);
-                    } else {
-                        alert('エラー: ' + (data.message || '削除に失敗しました'));
+                        return;
                     }
-                } catch (err) {
-                    console.error(err);
-                    alert('通信エラーが発生しました');
-                } finally {
-                    confirmDeleteBtn.disabled = false;
-                    confirmDeleteBtn.textContent = '削除を実行する';
+                    url = '/admin/delete_images';
+                    payload = { image_ids: ids };
                 }
-            });
+
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    closeDeleteModal();
+                    showToast(data.message || '画像をクリアしました');
+                    // 画像一覧を再読み込みして最新化
+                    await reloadImages(false);
+                } else {
+                    showToast(data.message || '削除処理に失敗しました', 'error');
+                }
+            } catch (err) {
+                console.error(err);
+                showToast('通信エラーが発生しました', 'error');
+            } finally {
+                btn.disabled = false;
+                btnText.textContent = originalText;
+            }
         }
     </script>
 </body>

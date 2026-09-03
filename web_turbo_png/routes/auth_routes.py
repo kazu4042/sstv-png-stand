@@ -103,52 +103,37 @@ def admin_dashboard():
         # 管理者でない場合はトップページへリダイレクト
         return redirect(url_for('main.index'))
         
-    db = get_auth_db()
-    users = db.get_all_users()
-    
     from web_turbo_png.routes.api_routes import get_analyzer
+    from core.system_factory import SystemFactory
+
     analyzer = get_analyzer()
     images = analyzer.get_all_images_summary()
-
-    # アクセス統計データ
-    overview_stats = db.get_today_overview_stats()
-    initial_graph = db.get_activity_graph_data(period='today')
-    top_pages = db.get_top_pages_stats(days=7, limit=5)
-    recent_logs = db.get_recent_access_logs(limit=15)
-
-    # 電波品質・SNR統計
-    snr_stats = analyzer.get_snr_analytics()
-
-    # トップ貢献者ランキング
-    top_contributors = analyzer.get_top_contributors(limit=8)
-
-    # パケットトラフィック推移 (今日)
-    packet_traffic = analyzer.get_hourly_packet_traffic(period='today')
-
-    # システム健全度・ストレージメトリクス
-    system_health = analyzer.get_system_health_metrics()
-
-    # 復元達成サマリー
-    restoration_overview = analyzer.get_restoration_overview()
-    
-    from core.system_factory import SystemFactory
     current_engine_mode = SystemFactory.get_mode()
 
     return render_template(
         'admin.html',
-        users=users,
         images=images,
-        overview_stats=overview_stats,
-        initial_graph=initial_graph,
-        top_pages=top_pages,
-        recent_logs=recent_logs,
-        snr_stats=snr_stats,
-        top_contributors=top_contributors,
-        packet_traffic=packet_traffic,
-        system_health=system_health,
-        restoration_overview=restoration_overview,
         current_engine_mode=current_engine_mode
     )
+
+
+@auth_bp.route('/admin/api/images', methods=['GET'])
+@login_required
+def admin_get_images():
+    current_email = session.get('email')
+    if not is_admin(current_email):
+        return jsonify({'status': 'error', 'message': '権限がありません'}), 403
+
+    from web_turbo_png.routes.api_routes import get_analyzer
+    from core.system_factory import SystemFactory
+    analyzer = get_analyzer()
+    images = analyzer.get_all_images_summary()
+    return jsonify({
+        'status': 'success',
+        'current_engine_mode': SystemFactory.get_mode(),
+        'images': images,
+        'count': len(images)
+    })
 
 
 @auth_bp.route('/admin/api/engine_mode', methods=['GET', 'POST'])
@@ -263,6 +248,25 @@ def admin_clear_cache():
 
 
 
+@auth_bp.route('/admin/clear_all_images', methods=['POST'])
+@auth_bp.route('/admin/api/clear_all_images', methods=['POST'])
+@login_required
+def admin_clear_all_images():
+    current_email = session.get('email')
+    if not is_admin(current_email):
+        return jsonify({'status': 'error', 'message': '権限がありません'}), 403
+
+    from web_turbo_png.routes.api_routes import get_analyzer
+    analyzer = get_analyzer()
+    result = analyzer.clear_all_images()
+
+    return jsonify({
+        'status': 'success',
+        'message': f"全画像データを一括クリアしました（クリア画像: {result['deleted_images']}件, パケット数: {result['deleted_packets']}）",
+        'result': result
+    })
+
+
 @auth_bp.route('/admin/delete_images', methods=['POST'])
 @login_required
 def admin_delete_images():
@@ -272,6 +276,18 @@ def admin_delete_images():
 
     # JSONまたはフォームから画像IDリストを取得
     data = request.get_json(silent=True) or {}
+    
+    # 全削除フラグがある場合
+    if data.get('clear_all') is True:
+        from web_turbo_png.routes.api_routes import get_analyzer
+        analyzer = get_analyzer()
+        result = analyzer.clear_all_images()
+        return jsonify({
+            'status': 'success',
+            'message': f"全画像データを一括クリアしました（クリア画像: {result['deleted_images']}件, パケット数: {result['deleted_packets']}）",
+            'result': result
+        })
+
     image_ids = data.get('image_ids')
     
     if not image_ids and 'image_ids' in request.form:

@@ -115,6 +115,47 @@ class TurboPNGAnalyzerService:
             "deleted_files": deleted_files_count
         }
 
+    def clear_all_images(self):
+        """データベース内の全画像・パケットおよび復元ファイルをすべて削除・一掃"""
+        summaries = self.get_all_images_summary()
+        all_hex_ids = [img["image_id_hex"] for img in summaries]
+
+        deleted_packets = 0
+        try:
+            with self.aggregator.db.conn:
+                cursor = self.aggregator.db.conn.cursor()
+                cursor.execute("DELETE FROM packets")
+                deleted_packets = cursor.rowcount
+        except Exception as e:
+            print(f"Error clearing packets table: {e}")
+
+        import glob
+        deleted_files_count = 0
+        directories_to_clean = [
+            os.path.join(ROOT_DIR, "data", "images"),
+            os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images"),
+            os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
+        ]
+        for dir_path in directories_to_clean:
+            if not os.path.exists(dir_path):
+                continue
+            for pat in ["*.png", "*.jpg", "*.jpeg"]:
+                for f in glob.glob(os.path.join(dir_path, pat)):
+                    try:
+                        os.remove(f)
+                        deleted_files_count += 1
+                    except Exception as e:
+                        print(f"Error removing {f}: {e}")
+
+        from web_turbo_png.routes.api_routes import invalidate_analyzer_cache
+        invalidate_analyzer_cache()
+
+        return {
+            "deleted_packets": deleted_packets,
+            "deleted_images": len(all_hex_ids),
+            "deleted_files": deleted_files_count
+        }
+
     def get_image_status(self, target_image_id_hex, user_id=None):
         """指定画像の全体復元状況および特定ユーザーの貢献状況を高速取得"""
         config = SystemFactory.get_config()

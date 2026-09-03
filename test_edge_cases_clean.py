@@ -45,10 +45,9 @@ def test_all_routes_and_edge_cases():
         res_admin = client.get('/admin')
         assert res_admin.status_code == 200
         html = res_admin.get_data(as_text=True)
-        assert 'activityChart' in html
-        assert 'snrPieChart' in html
-        assert 'pagesPieChart' in html
-        assert 'chart.umd.min.js' in html.lower()
+        assert 'Active Decoder Engine 切替' in html
+        assert '受信画像データ管理・クリア' in html
+        assert 'すべての画像をクリア' in html
         print("✅ 管理画面完全ロード正常")
         
         # 期間別 API
