@@ -115,8 +115,10 @@ def result():
         result_data['available_image_ids'] = available_ids
 
     config = SystemFactory.get_config()
+    current_engine_mode = SystemFactory.get_mode()
     return render_template(
         'result.html',
+        current_engine_mode=current_engine_mode,
         show_heatmap=getattr(config, 'ENABLE_HEATMAP', False),
         show_ranking=getattr(config, 'ENABLE_RANKING', False),
         **result_data

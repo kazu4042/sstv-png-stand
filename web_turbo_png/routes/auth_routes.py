@@ -126,13 +126,38 @@ def admin_get_images():
 
     from web_turbo_png.routes.api_routes import get_analyzer
     from core.system_factory import SystemFactory
-    analyzer = get_analyzer()
-    images = analyzer.get_all_images_summary()
+
+    current_mode = SystemFactory.get_mode()
+    req_mode = request.args.get('mode', current_mode).upper()
+
+    analyzer_png = get_analyzer(mode='PNG')
+    images_png = analyzer_png.get_all_images_summary(mode='PNG')
+    for img in images_png:
+        img['engine_mode'] = 'PNG'
+
+    analyzer_jpeg = get_analyzer(mode='JPEG')
+    images_jpeg = analyzer_jpeg.get_all_images_summary(mode='JPEG')
+    for img in images_jpeg:
+        img['engine_mode'] = 'JPEG'
+
+    if req_mode == 'PNG':
+        display_images = images_png
+    elif req_mode == 'JPEG':
+        display_images = images_jpeg
+    elif req_mode == 'ALL':
+        display_images = images_png + images_jpeg
+    else:
+        display_images = images_jpeg if current_mode == 'JPEG' else images_png
+
     return jsonify({
         'status': 'success',
-        'current_engine_mode': SystemFactory.get_mode(),
-        'images': images,
-        'count': len(images)
+        'current_engine_mode': current_mode,
+        'requested_mode': req_mode,
+        'images': display_images,
+        'count': len(display_images),
+        'png_count': len(images_png),
+        'jpeg_count': len(images_jpeg),
+        'all_count': len(images_png) + len(images_jpeg)
     })
 
 
@@ -256,13 +281,22 @@ def admin_clear_all_images():
     if not is_admin(current_email):
         return jsonify({'status': 'error', 'message': '権限がありません'}), 403
 
+    data = request.get_json(silent=True) or {}
+    mode_target = data.get('mode') # 'PNG', 'JPEG', or None/'' (全クリア)
+
     from web_turbo_png.routes.api_routes import get_analyzer
     analyzer = get_analyzer()
-    result = analyzer.clear_all_images()
+
+    if mode_target and mode_target.upper() in ('PNG', 'JPEG'):
+        result = analyzer.clear_all_images(mode_only=True)
+        msg = f"{mode_target.upper()} エンジンの画像データをクリアしました（パケット数: {result['deleted_packets']}）"
+    else:
+        result = analyzer.clear_all_images(mode_only=False)
+        msg = f"全画像データを一括クリアしました（パケット数: {result['deleted_packets']}）"
 
     return jsonify({
         'status': 'success',
-        'message': f"全画像データを一括クリアしました（クリア画像: {result['deleted_images']}件, パケット数: {result['deleted_packets']}）",
+        'message': msg,
         'result': result
     })
 

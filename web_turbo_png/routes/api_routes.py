@@ -12,21 +12,22 @@ from web_turbo_png.routes.auth_routes import login_required
 
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
-_analyzer_cache = None
+_analyzer_cache = {}
 
 
-def get_analyzer():
-    """アナライザーをキャッシュで管理"""
+def get_analyzer(mode=None):
+    """アナライザーをモード別にキャッシュで管理（混在防止）"""
     global _analyzer_cache
-    if _analyzer_cache is None:
-        _analyzer_cache = TurboPNGAnalyzerService()
-    return _analyzer_cache
+    target_mode = (mode or SystemFactory.get_mode()).upper()
+    if target_mode not in _analyzer_cache:
+        _analyzer_cache[target_mode] = TurboPNGAnalyzerService(mode=target_mode)
+    return _analyzer_cache[target_mode]
 
 
 def invalidate_analyzer_cache():
-    """新しいファイルがアップロードされた際にキャッシュを破棄する"""
+    """新しいファイルがアップロードされた際やモード切替時にキャッシュを全破棄する"""
     global _analyzer_cache
-    _analyzer_cache = None
+    _analyzer_cache.clear()
 
 
 @api_bp.route('/images', methods=['GET'])

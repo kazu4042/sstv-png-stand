@@ -11,51 +11,78 @@ from core.system_factory import SystemFactory
 
 
 class TurboPNGAnalyzerService:
-    """SSTV Turbo 統合アナライザーサービス（PNG/JPEG プラガブル対応）"""
+    """SSTV Turbo 統合アナライザーサービス（PNG/JPEG プラガブル・完全分離対応）"""
 
-    def __init__(self):
-        config = SystemFactory.get_config()
-        mode_name = SystemFactory.get_mode()
-        log_dir = getattr(config, "TEXT_LOG_DIR", f"data/digital_turbo_{mode_name.lower()}/logs")
+    def __init__(self, mode=None):
+        self._target_mode = mode.upper() if mode else None
+        self._last_mode = None
+        self._ensure_mode_synced()
+
+    @property
+    def current_mode(self):
+        return self._target_mode or SystemFactory.get_mode()
+
+    def _ensure_mode_synced(self):
+        mode_name = self.current_mode
+        if getattr(self, '_last_mode', None) == mode_name:
+            return
+
+        self._last_mode = mode_name
+        self.config = SystemFactory.get_config(mode_name)
+        log_dir = getattr(self.config, "TEXT_LOG_DIR", f"data/digital_turbo_{mode_name.lower()}/logs")
         if not os.path.isabs(log_dir):
             self.log_directory = os.path.join(ROOT_DIR, log_dir)
         else:
             self.log_directory = log_dir
 
-        self.aggregator = SystemFactory.get_aggregator(log_dir=self.log_directory)
+        self.aggregator = SystemFactory.get_aggregator(log_dir=self.log_directory, mode=mode_name)
         self.aggregator.load_all_logs()
 
     def get_available_image_ids(self, user_id=None):
-        """DB に存在する画像IDを16進数文字列のリストで返す"""
+        """DB に存在する画像IDを16進数文字列のリストで返す（現在のモードのみ）"""
+        self._ensure_mode_synced()
         image_counts = self.aggregator.db.get_all_image_ids_with_counts(user_id=user_id)
         return sorted([f"{img_id:04X}" for img_id in image_counts.keys()])
 
     def get_merge_stats(self, target_image_id_hex):
         return {"total_merged": 0, "details": []}
 
-    def get_all_images_summary(self):
-        """管理画面用: すべての画像IDの詳細一覧を取得"""
-        config = SystemFactory.get_config()
-        summaries = self.aggregator.db.get_images_summary()
-        total_required = config.TILE_COUNT_X * config.TILE_COUNT_Y
+    def get_all_images_summary(self, mode=None):
+        """管理画面用: 指定モード（デフォルトは現在稼働中モード）の画像ID詳細一覧を取得"""
+        target_mode = (mode or self.current_mode).upper()
+        # 一時的に対象モードのアグリゲータを使用
+        target_config = SystemFactory.get_config(target_mode)
+        log_dir = getattr(target_config, "TEXT_LOG_DIR", f"data/digital_turbo_{target_mode.lower()}/logs")
+        if not os.path.isabs(log_dir):
+            log_dir_path = os.path.join(ROOT_DIR, log_dir)
+        else:
+            log_dir_path = log_dir
+
+        target_aggregator = SystemFactory.get_aggregator(log_dir=log_dir_path, mode=target_mode)
+        target_aggregator.load_all_logs()
+
+        summaries = target_aggregator.db.get_images_summary()
+        total_required = target_config.TILE_COUNT_X * target_config.TILE_COUNT_Y
         static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
-        
+        target_ext = ".jpg" if target_mode == "JPEG" else ".png"
+
         for item in summaries:
             img_hex = item["image_id_hex"]
+            item["mode"] = target_mode
+            item["format"] = target_mode
+            item["target_ext"] = target_ext
             item["total_required"] = total_required
             t_count = int(item["tile_count"]) if item.get("tile_count") is not None else 0
             item["restoration_score"] = round((t_count / total_required) * 100, 1) if total_required > 0 else 0.0
-            
-            # 画像プレビューパス (現在のエンジンモードの画像のみを厳格に取得)
-            mode_name = SystemFactory.get_mode()
-            target_ext = ".jpg" if mode_name == "JPEG" else ".png"
+
+            # 画像プレビューパス（指定モードの拡張子のみを厳格に探索）
             img_filename = f"restored_ID_{img_hex}{target_ext}"
 
             if os.path.exists(os.path.join(static_out, img_filename)):
                 item["thumbnail_url"] = f"/static/output/{img_filename}"
-            elif mode_name == "JPEG" and os.path.exists(os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images", img_filename)):
+            elif target_mode == "JPEG" and os.path.exists(os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images", img_filename)):
                 item["thumbnail_url"] = f"/data/digital_turbo_jpeg/images/{img_filename}"
-            elif mode_name == "PNG" and os.path.exists(os.path.join(ROOT_DIR, "data", "images", img_filename)):
+            elif target_mode == "PNG" and os.path.exists(os.path.join(ROOT_DIR, "data", "images", img_filename)):
                 item["thumbnail_url"] = f"/data/images/{img_filename}"
             else:
                 item["thumbnail_url"] = None
@@ -63,7 +90,7 @@ class TurboPNGAnalyzerService:
         return summaries
 
     def delete_images(self, image_ids_hex_list):
-        """指定された画像IDのDBレコードおよび画像ファイルを一括削除"""
+        """指定された画像IDのDBレコードおよび画像ファイルを一括削除（PNG/JPEG両方のDBから安全に消去）"""
         if not image_ids_hex_list:
             return {"deleted_packets": 0, "deleted_images": 0, "deleted_files": 0}
 
@@ -77,7 +104,18 @@ class TurboPNGAnalyzerService:
         if not int_ids:
             return {"deleted_packets": 0, "deleted_images": 0, "deleted_files": 0}
 
-        deleted_packets = self.aggregator.db.delete_images_by_ids(int_ids)
+        # PNG と JPEG 両方のアグリゲータを取得してDBから削除
+        deleted_packets = 0
+        for m in ("PNG", "JPEG"):
+            try:
+                cfg = SystemFactory.get_config(m)
+                ldir = getattr(cfg, "TEXT_LOG_DIR", f"data/digital_turbo_{m.lower()}/logs")
+                ldir_path = os.path.join(ROOT_DIR, ldir) if not os.path.isabs(ldir) else ldir
+                agg = SystemFactory.get_aggregator(log_dir=ldir_path, mode=m)
+                deleted_packets += agg.db.delete_images_by_ids(int_ids)
+                agg.db.close()
+            except Exception as e:
+                print(f"Error deleting from {m} db: {e}")
 
         import glob
         deleted_files_count = 0
@@ -115,19 +153,24 @@ class TurboPNGAnalyzerService:
             "deleted_files": deleted_files_count
         }
 
-    def clear_all_images(self):
+    def clear_all_images(self, mode_only=False):
         """データベース内の全画像・パケットおよび復元ファイルをすべて削除・一掃"""
-        summaries = self.get_all_images_summary()
-        all_hex_ids = [img["image_id_hex"] for img in summaries]
-
         deleted_packets = 0
-        try:
-            with self.aggregator.db.conn:
-                cursor = self.aggregator.db.conn.cursor()
-                cursor.execute("DELETE FROM packets")
-                deleted_packets = cursor.rowcount
-        except Exception as e:
-            print(f"Error clearing packets table: {e}")
+        modes_to_clear = [self.current_mode] if mode_only else ["PNG", "JPEG"]
+
+        for m in modes_to_clear:
+            try:
+                cfg = SystemFactory.get_config(m)
+                ldir = getattr(cfg, "TEXT_LOG_DIR", f"data/digital_turbo_{m.lower()}/logs")
+                ldir_path = os.path.join(ROOT_DIR, ldir) if not os.path.isabs(ldir) else ldir
+                agg = SystemFactory.get_aggregator(log_dir=ldir_path, mode=m)
+                with agg.db.conn:
+                    cursor = agg.db.conn.cursor()
+                    cursor.execute("DELETE FROM packets")
+                    deleted_packets += cursor.rowcount
+                agg.db.close()
+            except Exception as e:
+                print(f"Error clearing packets table ({m}): {e}")
 
         import glob
         deleted_files_count = 0
@@ -136,10 +179,15 @@ class TurboPNGAnalyzerService:
             os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images"),
             os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
         ]
+        
+        target_patterns = ["*.png", "*.jpg", "*.jpeg"]
+        if mode_only:
+            target_patterns = ["*.jpg", "*.jpeg"] if self.current_mode == "JPEG" else ["*.png"]
+
         for dir_path in directories_to_clean:
             if not os.path.exists(dir_path):
                 continue
-            for pat in ["*.png", "*.jpg", "*.jpeg"]:
+            for pat in target_patterns:
                 for f in glob.glob(os.path.join(dir_path, pat)):
                     try:
                         os.remove(f)
@@ -152,7 +200,7 @@ class TurboPNGAnalyzerService:
 
         return {
             "deleted_packets": deleted_packets,
-            "deleted_images": len(all_hex_ids),
+            "deleted_images": 0,
             "deleted_files": deleted_files_count
         }
 

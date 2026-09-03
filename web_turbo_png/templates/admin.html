@@ -234,6 +234,28 @@
                 </div>
             </div>
 
+            <!-- エンジン別フィルタータブ (混在防止) -->
+            <div class="px-6 py-3 bg-slate-100/60 border-b border-slate-200/60 flex items-center justify-between flex-wrap gap-2 text-xs">
+                <div class="flex items-center gap-1.5 bg-slate-200/70 p-1 rounded-xl">
+                    <button onclick="changeViewFilter('CURRENT')" id="tab-filter-current" class="px-3 py-1.5 rounded-lg font-bold transition-all bg-white text-slate-900 shadow-sm">
+                        稼働中エンジン (<span id="tab-label-current-mode">{{ current_engine_mode or 'PNG' }}</span>)
+                    </button>
+                    <button onclick="changeViewFilter('PNG')" id="tab-filter-png" class="px-3 py-1.5 rounded-lg font-bold transition-all text-slate-600 hover:text-slate-900">
+                        PNG画像 (<span id="tab-count-png">0</span>)
+                    </button>
+                    <button onclick="changeViewFilter('JPEG')" id="tab-filter-jpeg" class="px-3 py-1.5 rounded-lg font-bold transition-all text-slate-600 hover:text-slate-900">
+                        JPEG画像 (<span id="tab-count-jpeg">0</span>)
+                    </button>
+                    <button onclick="changeViewFilter('ALL')" id="tab-filter-all" class="px-3 py-1.5 rounded-lg font-bold transition-all text-slate-600 hover:text-slate-900">
+                        すべて (<span id="tab-count-all">0</span>)
+                    </button>
+                </div>
+                <div class="text-[11px] text-slate-500 flex items-center gap-1">
+                    <i data-lucide="shield-check" class="w-3.5 h-3.5 text-emerald-600"></i>
+                    <span>PNG と JPEG は独立したデータベース・フォルダで完全分離されています</span>
+                </div>
+            </div>
+
             <!-- テーブルコンテナ -->
             <div class="overflow-x-auto">
                 <table class="w-full text-left border-collapse">
@@ -243,7 +265,7 @@
                                 <input type="checkbox" id="select-all-checkbox" onchange="toggleSelectAll(this)" class="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer">
                             </th>
                             <th class="py-3.5 px-4 w-20">プレビュー</th>
-                            <th class="py-3.5 px-4">画像ID</th>
+                            <th class="py-3.5 px-4">画像ID / エンジン</th>
                             <th class="py-3.5 px-4">復元スコア</th>
                             <th class="py-3.5 px-4">パケット数</th>
                             <th class="py-3.5 px-4">受信局数</th>
@@ -253,7 +275,7 @@
                     </thead>
                     <tbody class="divide-y divide-slate-100 text-sm" id="images-tbody">
                         {% for img in images %}
-                        <tr class="hover:bg-slate-50/80 transition-colors" data-id="{{ img.image_id_hex }}">
+                        <tr class="hover:bg-slate-50/80 transition-colors" data-id="{{ img.image_id_hex }}" data-mode="{{ img.engine_mode or current_engine_mode }}">
                             <!-- チェックボックス -->
                             <td class="py-3.5 px-4 text-center">
                                 <input type="checkbox" value="{{ img.image_id_hex }}" onchange="handleRowCheckboxChange()" class="row-checkbox w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer">
@@ -270,10 +292,15 @@
                                 {% endif %}
                             </td>
 
-                            <!-- 画像ID -->
+                            <!-- 画像ID & エンジンバッジ -->
                             <td class="py-3.5 px-4">
-                                <div class="flex items-center gap-1.5">
+                                <div class="flex items-center gap-2">
                                     <span class="font-mono font-bold text-slate-900 text-base">0x{{ img.image_id_hex }}</span>
+                                    {% if (img.engine_mode or current_engine_mode) == 'JPEG' %}
+                                    <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-800 border border-amber-300">JPEG</span>
+                                    {% else %}
+                                    <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">PNG</span>
+                                    {% endif %}
                                     <button onclick="copyToClipboard('0x{{ img.image_id_hex }}')" class="text-slate-400 hover:text-slate-600 p-1 rounded" title="IDをコピー">
                                         <i data-lucide="copy" class="w-3.5 h-3.5"></i>
                                     </button>
@@ -284,7 +311,7 @@
                             <td class="py-3.5 px-4">
                                 <div class="flex items-center gap-2">
                                     <div class="w-24 bg-slate-200 rounded-full h-2 overflow-hidden">
-                                        <div class="bg-emerald-600 h-2 rounded-full transition-all duration-500" style="width: {{ img.restoration_score }}%;"></div>
+                                        <div class="{% if (img.engine_mode or current_engine_mode) == 'JPEG' %}bg-amber-600{% else %}bg-emerald-600{% endif %} h-2 rounded-full transition-all duration-500" style="width: {{ img.restoration_score }}%;"></div>
                                     </div>
                                     <span class="text-xs font-bold font-mono text-slate-800">{{ img.restoration_score }}%</span>
                                 </div>
@@ -390,6 +417,21 @@
                 <!-- 動的テキストが挿入されます -->
             </div>
 
+            <!-- クリア範囲選択 (全クリア時のみ表示) -->
+            <div id="clear-scope-container" class="hidden space-y-2 border-t border-slate-200/80 pt-3">
+                <label class="block text-xs font-bold text-slate-700">クリア対象範囲の選択:</label>
+                <div class="space-y-1.5 text-xs text-slate-600">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="clear-scope" value="ALL" checked class="text-rose-600 focus:ring-rose-500 cursor-pointer">
+                        <span class="font-bold text-slate-800">すべての画像データ（PNG & JPEG 両方完全初期化）</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" name="clear-scope" value="CURRENT" class="text-rose-600 focus:ring-rose-500 cursor-pointer">
+                        <span>現在稼働中 (<span id="clear-scope-mode-label">PNG</span>) の画像のみクリア</span>
+                    </label>
+                </div>
+            </div>
+
             <div class="flex items-center justify-end gap-2.5 pt-2">
                 <button onclick="closeDeleteModal()" type="button" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors">
                     キャンセル
@@ -406,12 +448,14 @@
     <!-- JavaScript ロジック -->
     <script>
         let currentEngineMode = "{{ current_engine_mode or 'PNG' }}";
+        let activeViewFilter = 'CURRENT'; // 'CURRENT', 'PNG', 'JPEG', 'ALL'
         let deleteActionType = null; // 'single', 'selected', 'all'
         let targetSingleId = null;
 
         document.addEventListener('DOMContentLoaded', () => {
             lucide.createIcons();
             updateSelectionCount();
+            reloadImages(false);
         });
 
         // ==========================================
@@ -513,6 +557,13 @@
                 }
             }
 
+            // フィルタータブの現在ラベル
+            const tabCurrentLabel = document.getElementById('tab-label-current-mode');
+            if (tabCurrentLabel) tabCurrentLabel.textContent = mode;
+
+            const scopeModeLabel = document.getElementById('clear-scope-mode-label');
+            if (scopeModeLabel) scopeModeLabel.textContent = mode;
+
             // カード PNG
             const cardPng = document.getElementById('card-mode-png');
             const iconPng = document.getElementById('icon-container-png');
@@ -549,17 +600,46 @@
         }
 
         // ==========================================
-        // 2. 画像データ取得・テーブル再構築
+        // 2. フィルタータブ切り替え
+        // ==========================================
+        function changeViewFilter(filterMode) {
+            activeViewFilter = filterMode;
+            
+            const tabs = ['current', 'png', 'jpeg', 'all'];
+            tabs.forEach(t => {
+                const btn = document.getElementById(`tab-filter-${t}`);
+                if (!btn) return;
+                if (t.toUpperCase() === filterMode) {
+                    btn.className = 'px-3 py-1.5 rounded-lg font-bold transition-all bg-white text-slate-900 shadow-sm border border-slate-200';
+                } else {
+                    btn.className = 'px-3 py-1.5 rounded-lg font-bold transition-all text-slate-600 hover:text-slate-900 hover:bg-slate-200/60';
+                }
+            });
+
+            reloadImages(false);
+        }
+
+        // ==========================================
+        // 3. 画像データ取得・テーブル再構築
         // ==========================================
         async function reloadImages(notify = true) {
             const refreshIcon = document.getElementById('refresh-icon');
             if (refreshIcon) refreshIcon.classList.add('animate-spin');
 
             try {
-                const res = await fetch('/admin/api/images');
+                const reqParam = (activeViewFilter === 'CURRENT') ? currentEngineMode : activeViewFilter;
+                const res = await fetch(`/admin/api/images?mode=${reqParam}`);
                 const data = await res.json();
 
                 if (data.status === 'success') {
+                    // タブカウント更新
+                    const cntPng = document.getElementById('tab-count-png');
+                    const cntJpeg = document.getElementById('tab-count-jpeg');
+                    const cntAll = document.getElementById('tab-count-all');
+                    if (cntPng) cntPng.textContent = data.png_count;
+                    if (cntJpeg) cntJpeg.textContent = data.jpeg_count;
+                    if (cntAll) cntAll.textContent = data.all_count;
+
                     renderImagesTable(data.images);
                     if (notify) showToast('画像一覧を更新しました');
                 } else {
@@ -602,6 +682,13 @@
 
             let html = '';
             images.forEach(img => {
+                const isJpeg = (img.engine_mode === 'JPEG');
+                const badgeHtml = isJpeg 
+                    ? `<span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-800 border border-amber-300">JPEG</span>`
+                    : `<span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">PNG</span>`;
+
+                const progressBarColor = isJpeg ? 'bg-amber-600' : 'bg-emerald-600';
+
                 const thumbHtml = img.thumbnail_url
                     ? `<img src="${img.thumbnail_url}" alt="Preview" class="w-12 h-12 rounded-lg object-cover bg-black border border-slate-200 shadow-sm hover:scale-105 transition-transform cursor-pointer" onclick="openPreviewModal('${img.thumbnail_url}', '0x${img.image_id_hex}')">`
                     : `<div class="w-12 h-12 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 text-[10px] font-mono">No Img</div>`;
@@ -615,8 +702,9 @@
                         ${thumbHtml}
                     </td>
                     <td class="py-3.5 px-4">
-                        <div class="flex items-center gap-1.5">
+                        <div class="flex items-center gap-2">
                             <span class="font-mono font-bold text-slate-900 text-base">0x${img.image_id_hex}</span>
+                            ${badgeHtml}
                             <button onclick="copyToClipboard('0x${img.image_id_hex}')" class="text-slate-400 hover:text-slate-600 p-1 rounded" title="IDをコピー">
                                 <i data-lucide="copy" class="w-3.5 h-3.5"></i>
                             </button>
@@ -625,7 +713,7 @@
                     <td class="py-3.5 px-4">
                         <div class="flex items-center gap-2">
                             <div class="w-24 bg-slate-200 rounded-full h-2 overflow-hidden">
-                                <div class="bg-emerald-600 h-2 rounded-full transition-all duration-500" style="width: ${img.restoration_score}%;"></div>
+                                <div class="${progressBarColor} h-2 rounded-full transition-all duration-500" style="width: ${img.restoration_score}%;"></div>
                             </div>
                             <span class="text-xs font-bold font-mono text-slate-800">${img.restoration_score}%</span>
                         </div>
@@ -727,6 +815,8 @@
             const subtitle = document.getElementById('delete-modal-subtitle');
             const body = document.getElementById('delete-modal-body');
             const btnText = document.getElementById('btn-confirm-delete-text');
+            const scopeContainer = document.getElementById('clear-scope-container');
+            if (scopeContainer) scopeContainer.classList.add('hidden');
 
             title.textContent = '画像の個別削除';
             subtitle.textContent = `対象: 0x${imageId}`;
@@ -754,6 +844,8 @@
             const subtitle = document.getElementById('delete-modal-subtitle');
             const body = document.getElementById('delete-modal-body');
             const btnText = document.getElementById('btn-confirm-delete-text');
+            const scopeContainer = document.getElementById('clear-scope-container');
+            if (scopeContainer) scopeContainer.classList.add('hidden');
 
             title.textContent = '選択した画像の一括削除';
             subtitle.textContent = `選択中: ${count} 件の画像`;
@@ -777,20 +869,21 @@
             const subtitle = document.getElementById('delete-modal-subtitle');
             const body = document.getElementById('delete-modal-body');
             const btnText = document.getElementById('btn-confirm-delete-text');
+            const scopeContainer = document.getElementById('clear-scope-container');
+            if (scopeContainer) scopeContainer.classList.remove('hidden');
 
-            title.textContent = 'すべての画像データを一括クリア';
-            subtitle.textContent = 'データベース内の全パケット & 画像ファイルの消去';
+            title.textContent = '画像データの一括クリア';
+            subtitle.textContent = 'パケットDB & 画像ファイルの消去';
             body.innerHTML = `
                 <div class="p-3 bg-rose-50 rounded-lg border border-rose-200 text-rose-800">
                     <p class="font-bold flex items-center gap-1.5 mb-1">
                         <i data-lucide="alert-octagon" class="w-4 h-4 text-rose-600"></i>
-                        超重要: 全データの一括初期化
+                        超重要: データの一括クリア
                     </p>
-                    <p>保存されているすべての受信画像、パケットテーブルの全レコード、および生成済みファイルが完全に一掃されます。</p>
+                    <p>選択した範囲の全パケットテーブルおよび生成済み画像ファイルが一掃されます。</p>
                 </div>
-                <p class="mt-2 text-slate-600">本当に全画像データをクリアしてもよろしいですか？</p>
             `;
-            btnText.textContent = '全データを完全にクリアする';
+            btnText.textContent = 'クリアを実行する';
 
             modal.classList.remove('hidden');
             modal.classList.add('flex');
@@ -822,7 +915,9 @@
 
                 if (deleteActionType === 'all') {
                     url = '/admin/clear_all_images';
-                    payload = {};
+                    const scopeRadio = document.querySelector('input[name="clear-scope"]:checked');
+                    const isCurrentOnly = scopeRadio && scopeRadio.value === 'CURRENT';
+                    payload = { mode: isCurrentOnly ? currentEngineMode : '' };
                 } else if (deleteActionType === 'single') {
                     url = '/admin/delete_images';
                     payload = { image_ids: [targetSingleId] };

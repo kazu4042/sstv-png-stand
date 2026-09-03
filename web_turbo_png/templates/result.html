@@ -418,21 +418,21 @@
                     const cacheBuster = new Date().getTime();
 
                     let targetUserUrl = "";
+                    const currentEngineMode = "{{ current_engine_mode or 'PNG' }}";
+                    const expectedExt = (currentEngineMode === 'JPEG') ? '.jpg' : '.png';
+
                     if (userImgMode === 'session') {
-                        targetUserUrl = (currentUserStatus && currentUserStatus.user_img_url) ? `${currentUserStatus.user_img_url}?t=${cacheBuster}` : `/static/output/user_${currentUserId}_ID_${activeImageId}.jpg?t=${cacheBuster}`;
+                        targetUserUrl = (currentUserStatus && currentUserStatus.user_img_url) 
+                            ? `${currentUserStatus.user_img_url}?t=${cacheBuster}` 
+                            : `/static/output/user_${currentUserId}_ID_${activeImageId}${expectedExt}?t=${cacheBuster}`;
                         userImg.src = targetUserUrl;
                         userImg.onerror = function() {
                             this.onerror = null;
-                            const fallbackUrl = (currentUserStatus && currentUserStatus.user_cumulative_url) ? `${currentUserStatus.user_cumulative_url}?t=${cacheBuster}` : `/static/output/user_${currentUserId}_ID_${activeImageId}.png?t=${cacheBuster}`;
-                            this.src = fallbackUrl;
-                            this.onerror = function() {
-                                this.onerror = null;
-                                this.src = "/static/user_slices_placeholder.png";
-                                if (notPostedOverlay) {
-                                    notPostedOverlay.style.display = 'flex';
-                                    this.style.opacity = '0.3';
-                                }
-                            };
+                            this.src = "/static/user_slices_placeholder.png";
+                            if (notPostedOverlay) {
+                                notPostedOverlay.style.display = 'flex';
+                                this.style.opacity = '0.3';
+                            }
                         };
 
                         if (viewModeSessionBtn && viewModeCumulativeBtn) {
@@ -444,20 +444,17 @@
                             viewModeCumulativeBtn.style.border = '1px solid #cbd5e1';
                         }
                     } else {
-                        targetUserUrl = (currentUserStatus && currentUserStatus.user_cumulative_url) ? `${currentUserStatus.user_cumulative_url}?t=${cacheBuster}` : `/static/output/user_cumulative_${currentUserId}_ID_${activeImageId}.jpg?t=${cacheBuster}`;
+                        targetUserUrl = (currentUserStatus && currentUserStatus.user_cumulative_url) 
+                            ? `${currentUserStatus.user_cumulative_url}?t=${cacheBuster}` 
+                            : `/static/output/user_cumulative_${currentUserId}_ID_${activeImageId}${expectedExt}?t=${cacheBuster}`;
                         userImg.src = targetUserUrl;
                         userImg.onerror = function() {
                             this.onerror = null;
-                            const fallbackUrl = (currentUserStatus && currentUserStatus.user_img_url) ? `${currentUserStatus.user_img_url}?t=${cacheBuster}` : `/static/output/user_cumulative_${currentUserId}_ID_${activeImageId}.png?t=${cacheBuster}`;
-                            this.src = fallbackUrl;
-                            this.onerror = function() {
-                                this.onerror = null;
-                                this.src = "/static/user_slices_placeholder.png";
-                                if (notPostedOverlay) {
-                                    notPostedOverlay.style.display = 'flex';
-                                    this.style.opacity = '0.3';
-                                }
-                            };
+                            this.src = "/static/user_slices_placeholder.png";
+                            if (notPostedOverlay) {
+                                notPostedOverlay.style.display = 'flex';
+                                this.style.opacity = '0.3';
+                            }
                         };
 
                         if (viewModeSessionBtn && viewModeCumulativeBtn) {
