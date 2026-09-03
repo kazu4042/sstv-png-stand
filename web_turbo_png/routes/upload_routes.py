@@ -305,6 +305,7 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
 
         result_data = {
             "image_id": current_image_id,
+            "current_image_id": current_image_id,
             "user_score": main_score,
             "network_score": 0.0,
             "packets_received": max_packets,

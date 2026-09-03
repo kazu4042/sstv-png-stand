@@ -77,9 +77,35 @@ def test_png_jpeg_isolation():
     assert data_all['jpeg_count'] >= 1
     print(f"✅ 3. 全画像一覧取得 合格 (PNG: {data_all['png_count']}, JPEG: {data_all['jpeg_count']})")
 
+    # 6-2. ダミー画像ファイルを作成して /api/image_status での食い違い検証
+    static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
+    os.makedirs(static_out, exist_ok=True)
+    with open(os.path.join(static_out, "user_1_ID_1111.png"), "wb") as f: f.write(b"PNG")
+    with open(os.path.join(static_out, "restored_ID_1111.png"), "wb") as f: f.write(b"PNG")
+    with open(os.path.join(static_out, "user_1_ID_2222.jpg"), "wb") as f: f.write(b"JPG")
+    with open(os.path.join(static_out, "restored_ID_2222.jpg"), "wb") as f: f.write(b"JPG")
+
+    # PNG画像のステータス検証（user_imgとrestored_imgが両方.pngで一致）
+    res_st_png = client.get('/api/image_status?image_id=1111')
+    st_png = res_st_png.get_json()
+    assert st_png['status'] == 'success'
+    assert st_png['engine_mode'] == 'PNG'
+    assert st_png['user_img_url'].endswith('.png')
+    assert st_png['restored_img_url'].endswith('.png')
+    print("✅ 4-1. PNG画像の「あなたの受信結果」と「ネットワーク復元結果」が完全一致 (.png)")
+
+    # JPEG画像のステータス検証（user_imgとrestored_imgが両方.jpgで一致）
+    res_st_jpeg = client.get('/api/image_status?image_id=2222')
+    st_jpeg = res_st_jpeg.get_json()
+    assert st_jpeg['status'] == 'success'
+    assert st_jpeg['engine_mode'] == 'JPEG'
+    assert st_jpeg['user_img_url'].endswith('.jpg')
+    assert st_jpeg['restored_img_url'].endswith('.jpg')
+    print("✅ 4-2. JPEG画像の「あなたの受信結果」と「ネットワーク復元結果」が完全一致 (.jpg)")
+
     # 7. クリーンアップ
     client.post('/admin/clear_all_images')
-    print("✅ 4. テストデータ全クリア 合格")
+    print("✅ 5. テストデータ全クリア 合格")
 
     print("\n🎉 PNG/JPEG の完全分離・混在防止テストに完全合格しました！")
 

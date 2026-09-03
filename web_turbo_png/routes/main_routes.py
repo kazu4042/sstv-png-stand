@@ -95,12 +95,15 @@ def result():
             result_data = job.get("result_data", {})
     
     from web_turbo_png.routes.api_routes import get_analyzer
-    analyzer = get_analyzer()
+    job_engine_mode = result_data.get('engine_mode')
+    analyzer = get_analyzer(mode=job_engine_mode)
     available_ids = analyzer.get_available_image_ids(user_id=None)
 
-    target_image_id = req_image_id or result_data.get('current_image_id')
+    target_image_id = req_image_id or result_data.get('current_image_id') or result_data.get('image_id')
     if not target_image_id and available_ids:
         target_image_id = available_ids[0]
+
+    current_engine_mode = job_engine_mode or SystemFactory.get_mode()
 
     if target_image_id:
         status_info = analyzer.get_image_status(target_image_id, user_id=user_id)
@@ -113,9 +116,10 @@ def result():
         result_data['user_has_data'] = status_info['user_has_data']
         result_data['user_output_url'] = status_info['user_img_url'] or ''
         result_data['available_image_ids'] = available_ids
+        if status_info.get('engine_mode'):
+            current_engine_mode = status_info['engine_mode']
 
-    config = SystemFactory.get_config()
-    current_engine_mode = SystemFactory.get_mode()
+    config = SystemFactory.get_config(current_engine_mode)
     return render_template(
         'result.html',
         current_engine_mode=current_engine_mode,

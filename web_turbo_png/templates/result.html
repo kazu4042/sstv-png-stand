@@ -148,9 +148,14 @@
                 <h2><i data-lucide="party-popper" class="icon-inline"></i> デコード ＆ 多数決集計が完了しました</h2>
                 <div class="subtitle">16-bit Content Addressing Protocol v1.2</div>
                 
-                <div class="active-session-header">
-                    <span class="session-label"><i data-lucide="radio" class="icon-inline"></i> 現在表示中の画像ID:</span>
-                    <span id="display-image-id" class="display-id">0x----</span>
+                <div class="active-session-header" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                    <div>
+                        <span class="session-label"><i data-lucide="radio" class="icon-inline"></i> 現在表示中の画像ID:</span>
+                        <span id="display-image-id" class="display-id">0x----</span>
+                    </div>
+                    <span id="display-engine-badge" class="px-2.5 py-1 text-xs font-bold rounded-full {% if current_engine_mode == 'JPEG' %}bg-amber-100 text-amber-800 border border-amber-300{% else %}bg-emerald-100 text-emerald-800 border border-emerald-300{% endif %}">
+                        {% if current_engine_mode == 'JPEG' %}JPEG モード (段階復元){% else %}PNG モード (0/100 多数決){% endif %}
+                    </span>
                 </div>
 
                 <div class="score-box" style="position: relative;">
@@ -417,9 +422,21 @@
 
                     const cacheBuster = new Date().getTime();
 
+                    function updateEngineBadge(mode) {
+                        const badge = document.getElementById('display-engine-badge');
+                        if (!badge) return;
+                        if (mode === 'JPEG') {
+                            badge.className = 'px-2.5 py-1 text-xs font-bold rounded-full bg-amber-100 text-amber-800 border border-amber-300';
+                            badge.textContent = 'JPEG モード (段階復元)';
+                        } else {
+                            badge.className = 'px-2.5 py-1 text-xs font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300';
+                            badge.textContent = 'PNG モード (0/100 多数決)';
+                        }
+                    }
+
                     let targetUserUrl = "";
-                    const currentEngineMode = "{{ current_engine_mode or 'PNG' }}";
-                    const expectedExt = (currentEngineMode === 'JPEG') ? '.jpg' : '.png';
+                    const imgEngineMode = (currentUserStatus && currentUserStatus.engine_mode) ? currentUserStatus.engine_mode : "{{ current_engine_mode or 'PNG' }}";
+                    const expectedExt = (imgEngineMode === 'JPEG') ? '.jpg' : '.png';
 
                     if (userImgMode === 'session') {
                         targetUserUrl = (currentUserStatus && currentUserStatus.user_img_url) 
@@ -502,6 +519,11 @@
                     .then(response => response.json())
                     .then(statusData => {
                         if (statusData.status === "success") {
+                            // エンジンバッジを画像の形式に合わせて更新
+                            if (statusData.engine_mode) {
+                                updateEngineBadge(statusData.engine_mode);
+                            }
+
                             // 全員用の多数決画像ソース更新 (APIから正確なURLを取得)
                             if (statusData.restored_img_url) {
                                 targetImg.src = `${statusData.restored_img_url}?t=${new Date().getTime()}`;
@@ -727,9 +749,8 @@
                 const url = imgEl.src;
                 
                 // リンクを生成してクリック
-                const dummyLink = document.createElement("a");
-                dummyLink.href = url;
-                dummyLink.setAttribute("download", `${filenamePrefix}_ID_${activeImageId}.png`);
+                const ext = (url.includes('.jpg') || (currentUserStatus && currentUserStatus.engine_mode === 'JPEG')) ? '.jpg' : '.png';
+                dummyLink.setAttribute("download", `${filenamePrefix}_ID_${activeImageId}${ext}`);
                 document.body.appendChild(dummyLink);
                 dummyLink.click();
                 document.body.removeChild(dummyLink);
