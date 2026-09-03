@@ -70,6 +70,7 @@ class TurboPNGAnalyzerService:
             img_hex = item["image_id_hex"]
             item["mode"] = target_mode
             item["format"] = target_mode
+            item["engine_mode"] = target_mode
             item["target_ext"] = target_ext
             item["total_required"] = total_required
             t_count = int(item["tile_count"]) if item.get("tile_count") is not None else 0

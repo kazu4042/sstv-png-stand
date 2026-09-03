@@ -106,13 +106,26 @@ def admin_dashboard():
     from web_turbo_png.routes.api_routes import get_analyzer
     from core.system_factory import SystemFactory
 
-    analyzer = get_analyzer()
-    images = analyzer.get_all_images_summary()
     current_engine_mode = SystemFactory.get_mode()
+
+    analyzer_png = get_analyzer(mode='PNG')
+    images_png = analyzer_png.get_all_images_summary(mode='PNG')
+    for img in images_png:
+        img['engine_mode'] = 'PNG'
+
+    analyzer_jpeg = get_analyzer(mode='JPEG')
+    images_jpeg = analyzer_jpeg.get_all_images_summary(mode='JPEG')
+    for img in images_jpeg:
+        img['engine_mode'] = 'JPEG'
+
+    current_images = images_jpeg if current_engine_mode == 'JPEG' else images_png
 
     return render_template(
         'admin.html',
-        images=images,
+        images=current_images,
+        png_count=len(images_png),
+        jpeg_count=len(images_jpeg),
+        all_count=len(images_png) + len(images_jpeg),
         current_engine_mode=current_engine_mode
     )
 

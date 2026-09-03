@@ -241,13 +241,13 @@
                         稼働中エンジン (<span id="tab-label-current-mode">{{ current_engine_mode or 'PNG' }}</span>)
                     </button>
                     <button onclick="changeViewFilter('PNG')" id="tab-filter-png" class="px-3 py-1.5 rounded-lg font-bold transition-all text-slate-600 hover:text-slate-900">
-                        PNG画像 (<span id="tab-count-png">0</span>)
+                        PNG画像 (<span id="tab-count-png">{{ png_count if png_count is defined else 0 }}</span>)
                     </button>
                     <button onclick="changeViewFilter('JPEG')" id="tab-filter-jpeg" class="px-3 py-1.5 rounded-lg font-bold transition-all text-slate-600 hover:text-slate-900">
-                        JPEG画像 (<span id="tab-count-jpeg">0</span>)
+                        JPEG画像 (<span id="tab-count-jpeg">{{ jpeg_count if jpeg_count is defined else 0 }}</span>)
                     </button>
                     <button onclick="changeViewFilter('ALL')" id="tab-filter-all" class="px-3 py-1.5 rounded-lg font-bold transition-all text-slate-600 hover:text-slate-900">
-                        すべて (<span id="tab-count-all">0</span>)
+                        すべて (<span id="tab-count-all">{{ all_count if all_count is defined else (images|length) }}</span>)
                     </button>
                 </div>
                 <div class="text-[11px] text-slate-500 flex items-center gap-1">
@@ -459,6 +459,14 @@
         });
 
         // ==========================================
+        // API URL 正規化 (Basic認証URLコンテキスト対策)
+        // ==========================================
+        function safeApiUrl(path) {
+            // URLからuser:pass@を除去した安全なOrigin URLを生成
+            return window.location.protocol + '//' + window.location.host + path;
+        }
+
+        // ==========================================
         // トースト通知システム
         // ==========================================
         function showToast(message, type = 'success') {
@@ -516,7 +524,7 @@
             }
 
             try {
-                const res = await fetch('/admin/api/engine_mode', {
+                const res = await fetch(safeApiUrl('/admin/api/engine_mode'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ mode: targetMode })
@@ -628,7 +636,7 @@
 
             try {
                 const reqParam = (activeViewFilter === 'CURRENT') ? currentEngineMode : activeViewFilter;
-                const res = await fetch(`/admin/api/images?mode=${reqParam}`);
+                const res = await fetch(safeApiUrl(`/admin/api/images?mode=${reqParam}`));
                 const data = await res.json();
 
                 if (data.status === 'success') {
@@ -932,7 +940,7 @@
                     payload = { image_ids: ids };
                 }
 
-                const res = await fetch(url, {
+                const res = await fetch(safeApiUrl(url), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
