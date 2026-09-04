@@ -446,10 +446,16 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="SSTV Turbo JPEG デコーダー")
+    parser.add_argument("--user-id", type=int, default=1, help="ユーザーID (デフォルト: 1)")
+    parser.add_argument("--wav", type=str, default=None, help="入力 WAV ファイルパス")
+    args = parser.parse_args()
+
     try:
-        decoder = DigitalTurboJPEGDecoder()
+        decoder = DigitalTurboJPEGDecoder(user_id=args.user_id)
         root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
-        wav_path = os.path.join(root_dir, config.OUTPUT_WAV)
+        wav_path = args.wav if args.wav else os.path.join(root_dir, config.OUTPUT_WAV)
         if not os.path.exists(wav_path):
             print(f"[Error] WAVファイルが見つかりません: {wav_path}")
             print(f"[Info]  先に encoder_turbo.py を実行してください。")

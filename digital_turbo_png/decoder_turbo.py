@@ -135,29 +135,107 @@ def fast_bits_to_int(bits):
         val = (val << 1) | b
     return val
 
-@numba.njit
-def fast_find_header_alignment(data, start_scan, end_scan, header_symbols, samples_per_symbol, hamming_win, target_phases_cos, target_phases_sin, info_bits_count, header_crc_bits):
-    best_pos = -1
-    best_snr = -1.0
-    best_bits = np.zeros(header_symbols * 2, dtype=np.int32)
-    
-    for pos in range(start_scan, end_scan):
-        h_bits, h_snr = fast_decode_symbols_exact(data, pos, header_symbols, samples_per_symbol, hamming_win, target_phases_cos, target_phases_sin)
-        if len(h_bits) < info_bits_count + header_crc_bits:
-            continue
-        info_bits = h_bits[:info_bits_count]
-        crc_bits = h_bits[info_bits_count : info_bits_count + header_crc_bits]
-        
-        expected_crc = fast_calculate_crc16_bits(info_bits)
-        actual_crc = fast_bits_to_int(crc_bits)
-        
-        if expected_crc == actual_crc:
-            if h_snr > best_snr:
-                best_snr = h_snr
-                best_pos = pos
-                best_bits = h_bits.copy()
-                
-    return best_pos, best_snr, best_bits
+@numba.njit(fastmath=True)
+def fast_scan_all_packets_png_native(
+    data, samples_per_symbol, samples_sync_full, sync_long_samples,
+    sync_win, sync_cos, sync_sin, hamming_win,
+    target_phases_cos, target_phases_sin, header_symbols, info_bits_count,
+    header_crc_bits, max_packets_cap
+):
+    res_img_id = np.zeros(max_packets_cap, dtype=np.int32)
+    res_tx = np.zeros(max_packets_cap, dtype=np.int32)
+    res_ty = np.zeros(max_packets_cap, dtype=np.int32)
+    res_plen = np.zeros(max_packets_cap, dtype=np.int32)
+    res_start = np.zeros(max_packets_cap, dtype=np.int32)
+    found_count = 0
+
+    total_samples = len(data)
+    header_samples = header_symbols * samples_per_symbol
+    step_size = max(1, int(samples_per_symbol * 0.5))
+    fine_step = max(1, int(samples_per_symbol * 0.15))
+    align_range = max(5, int(samples_per_symbol * 2.0))
+
+    i = 0
+    while i < total_samples - samples_sync_full - header_samples:
+        c = 0.0
+        s = 0.0
+        for j in range(sync_long_samples):
+            val = data[i + j] * sync_win[j]
+            c += val * sync_cos[j]
+            s += val * sync_sin[j]
+        sync_power = c * c + s * s
+
+        if sync_power > 0.4:
+            search_ptr = i + int(samples_sync_full * 0.5)
+            while search_ptr < total_samples - sync_long_samples:
+                c2 = 0.0
+                s2 = 0.0
+                for j in range(sync_long_samples):
+                    val = data[search_ptr + j] * sync_win[j]
+                    c2 += val * sync_cos[j]
+                    s2 += val * sync_sin[j]
+                p2 = c2 * c2 + s2 * s2
+                if p2 < sync_power * 0.25:
+                    break
+                search_ptr += fine_step
+
+            start_scan = max(0, search_ptr - align_range)
+            end_scan = min(total_samples - header_samples, search_ptr + align_range)
+
+            best_pos = -1
+            best_snr = -1.0
+            best_img = 0
+            best_x = 0
+            best_y = 0
+            best_len = 0
+
+            for pos in range(start_scan, end_scan):
+                h_bits, h_snr = fast_decode_symbols_exact(
+                    data, pos, header_symbols, samples_per_symbol,
+                    hamming_win, target_phases_cos, target_phases_sin
+                )
+                if len(h_bits) < info_bits_count + header_crc_bits:
+                    continue
+
+                info_bits = h_bits[:info_bits_count]
+                crc_bits = h_bits[info_bits_count : info_bits_count + header_crc_bits]
+
+                expected_crc = fast_calculate_crc16_bits(info_bits)
+                actual_crc = fast_bits_to_int(crc_bits)
+
+                if expected_crc == actual_crc:
+                    if h_snr > best_snr:
+                        best_snr = h_snr
+                        best_pos = pos
+                        best_img = fast_bits_to_int(h_bits[0 : 16])
+                        best_x = fast_bits_to_int(h_bits[16 : 24])
+                        best_y = fast_bits_to_int(h_bits[24 : 32])
+                        best_len = fast_bits_to_int(h_bits[32 : 48])
+
+            if best_pos >= 0 and best_len > 0:
+                payload_symbols = (best_len * 8) // 2
+                payload_samples = payload_symbols * samples_per_symbol
+                payload_start = best_pos + header_samples
+
+                if payload_start + payload_samples <= total_samples:
+                    if found_count < max_packets_cap:
+                        res_img_id[found_count] = best_img
+                        res_tx[found_count] = best_x
+                        res_ty[found_count] = best_y
+                        res_plen[found_count] = best_len
+                        res_start[found_count] = payload_start
+                        found_count += 1
+
+                    # パケットの末尾へ一気にジャンプ！
+                    i = payload_start + payload_samples
+                    continue
+
+            # 見つからなかった場合、同期信号の半分スキップして高速化
+            i += max(step_size, samples_sync_full // 2)
+        else:
+            i += step_size
+
+    return res_img_id[:found_count], res_tx[:found_count], res_ty[:found_count], res_plen[:found_count], res_start[:found_count], found_count
 
 
 from core.base_interfaces import BaseDecoder
@@ -285,103 +363,74 @@ class DigitalTurboPNGDecoder(BaseDecoder):
         import time
         total_samples = len(data)
         duration_sec = total_samples / config.SAMPLE_RATE
-        print(f"[Decode] デコード開始 (サンプル間隔: {self.samples_per_symbol} samples/sym)")
-        print(f"[Decode] Header: {header_symbols} symbols ({header_bits_count} bits)")
-        print(f"[Decode] WAV長: {duration_sec:.1f} 秒  (Ctrl+C で途中停止・部分保存が可能)")
+        print(f"[Decode] 超高速ネイティブデコード開始 (サンプル間隔: {self.samples_per_symbol} samples/sym, WAV長: {duration_sec:.1f}秒)")
+
+        if progress_callback:
+            try:
+                progress_callback(10.0)
+            except Exception:
+                pass
+
+        # 🚀 C言語ネイティブ JIT で一括スキャン＆ヘッダ検出
+        img_ids, txs, tys, plens, pstarts, count = fast_scan_all_packets_png_native(
+            data, self.samples_per_symbol, samples_sync_full, self.sync_long_samples,
+            self.sync_win, self.sync_phase_long_cos, self.sync_phase_long_sin,
+            self.hamming_win, self.target_phases_cos, self.target_phases_sin,
+            header_symbols, info_bits_count, config.BIT_HEADER_CRC, 4096
+        )
+
+        if progress_callback:
+            try:
+                progress_callback(50.0)
+            except Exception:
+                pass
+
+        # 検出されたパケットのペイロードをデコードしてテキストログに書き出し
         success_count = 0
-        decoded_packets = []
-        last_progress_time = time.time()
+        with open(self.output_raw, "w", encoding="utf-8") as f:
+            for k in range(count):
+                image_id = int(img_ids[k])
+                tile_x = int(txs[k])
+                tile_y = int(tys[k])
+                payload_length = int(plens[k])
+                payload_start = int(pstarts[k])
+                payload_symbols = (payload_length * 8) // 2
 
-        try:
-            with open(self.output_raw, "w", encoding="utf-8") as f:
-                i = 0
-                step_size = max(1, int(config.SAMPLE_RATE * 0.002))
-                while i < total_samples - samples_sync_full - header_samples:
+                if payload_start + payload_symbols * self.samples_per_symbol > len(data):
+                    continue
 
-                    # ===== 進捗を表示・コールバック =====
-                    now = time.time()
-                    if now - last_progress_time >= 2.0:
-                        pct = 100.0 * i / total_samples
-                        pos_sec = i / config.SAMPLE_RATE
-                        remain_sec = max(0, duration_sec - pos_sec)
-                        print(f"  [進捗] {pct:5.1f}% ({pos_sec:.0f}/{duration_sec:.0f}秒) | パケット検出: {success_count} | 残り約 {remain_sec:.0f}秒", flush=True)
-                        if progress_callback:
-                            progress_callback(pct)
-                        last_progress_time = now
+                p_bits, p_snr = fast_decode_symbols_exact(
+                    data, payload_start, payload_symbols, self.samples_per_symbol,
+                    self.hamming_win, self.target_phases_cos, self.target_phases_sin
+                )
+                if p_snr < 1.0:
+                    continue
 
-                    sync_power = self.detect_sync_long_dft(data[i : i + self.sync_long_samples])
+                payload_bits_str = "".join(str(b) for b in p_bits[:payload_length * 8])
+                snr_4bit_str = self.calculate_snr_to_4bit(p_snr)
 
-                    # 同期検出の固定閾値を下げ、微弱な信号も拾いやすくする（ノイズ判定は後続のCRCで弾く）
-                    if sync_power > 0.4:
-                        search_ptr = i + int(samples_sync_full * 0.5)
-                        fine_step = max(1, int(config.SAMPLE_RATE * 0.0005))
-                        while search_ptr < len(data) - self.sync_long_samples:
-                            p = self.detect_sync_long_dft(data[search_ptr : search_ptr + self.sync_long_samples])
-                            if p < sync_power * 0.25:
-                                break
-                            search_ptr += fine_step
+                image_id_bits    = format(image_id,        f'0{config.BIT_IMAGE_CRC}b')
+                tile_x_bits      = format(tile_x,          f'0{config.BIT_TILE_X}b')
+                tile_y_bits      = format(tile_y,          f'0{config.BIT_TILE_Y}b')
+                payload_len_bits = format(payload_length,  f'0{config.BIT_PAYLOAD_LENGTH}b')
+                log_line = image_id_bits + tile_x_bits + tile_y_bits + payload_len_bits + payload_bits_str + snr_4bit_str
+                f.write(log_line + "\n")
 
-                        align_range = max(5, int(config.SAMPLE_RATE * 0.006))
-                        start_scan = max(0, search_ptr - align_range)
-                        end_scan = min(len(data) - header_samples, search_ptr + align_range)
+                print(f"  ✨ [LOGGED] ID:{image_id:04X} X:{tile_x:2} Y:{tile_y:2} Len:{payload_length:5} B (SNR:{snr_4bit_str})")
+                success_count += 1
 
-                        best_pos, max_snr, h_bits = fast_find_header_alignment(
-                            data, start_scan, end_scan, header_symbols,
-                            self.samples_per_symbol, self.hamming_win,
-                            self.target_phases_cos, self.target_phases_sin,
-                            info_bits_count, config.BIT_HEADER_CRC
-                        )
+                if progress_callback and count > 0:
+                    prog_pct = 50.0 + (k / count) * 45.0
+                    try:
+                        progress_callback(prog_pct)
+                    except Exception:
+                        pass
 
-                        if best_pos >= 0:
-                            idx = 0
-                            image_id = self.bits_to_int(h_bits[idx : idx+config.BIT_IMAGE_CRC])
-                            idx += config.BIT_IMAGE_CRC
-                            tile_x = self.bits_to_int(h_bits[idx : idx+config.BIT_TILE_X])
-                            idx += config.BIT_TILE_X
-                            tile_y = self.bits_to_int(h_bits[idx : idx+config.BIT_TILE_Y])
-                            idx += config.BIT_TILE_Y
-                            payload_length = self.bits_to_int(h_bits[idx : idx+config.BIT_PAYLOAD_LENGTH])
-
-                            payload_symbols = (payload_length * 8) // 2
-                            payload_samples = payload_symbols * self.samples_per_symbol
-                            payload_start = best_pos + header_samples
-
-                            if payload_start + payload_samples <= len(data):
-                                p_bits, p_snr = self.decode_symbols_exact(data, payload_start, payload_symbols)
-
-                                # --- 堅牢性（Robustness）の向上 ---
-                                # CRC16を偶然通過したノイズ（約1/65536の確率）を確実に排除するため、
-                                # ペイロード全体のSNRを評価し、基準値未満ならノイズとみなして破棄する
-                                if p_snr < 1.0:
-                                    continue
-
-                                payload_bits_str = "".join(str(b) for b in p_bits[:payload_length*8])
-                                snr_4bit_str = self.calculate_snr_to_4bit(p_snr)
-
-                                # 全フィールドを2進数に変換して書き込む（0と1のみ）
-                                # 形式: [image_id:16bit][tile_x:8bit][tile_y:8bit][payload_len:16bit][payload_bits][snr:4bit]
-                                image_id_bits    = format(image_id,        f'0{config.BIT_IMAGE_CRC}b')
-                                tile_x_bits      = format(tile_x,          f'0{config.BIT_TILE_X}b')
-                                tile_y_bits      = format(tile_y,          f'0{config.BIT_TILE_Y}b')
-                                payload_len_bits = format(payload_length,  f'0{config.BIT_PAYLOAD_LENGTH}b')
-                                log_line = image_id_bits + tile_x_bits + tile_y_bits + payload_len_bits + payload_bits_str + snr_4bit_str
-                                f.write(log_line + "\n")
-
-                                decoded_packets.append((image_id, tile_x, tile_y, payload_length, payload_bits_str, snr_4bit_str))
-
-                                print(f"  ✨ [LOGGED] ID:{image_id:04X} X:{tile_x:2} Y:{tile_y:2} Len:{payload_length:5} B (SNR:{snr_4bit_str})")
-                                success_count += 1
-                                i = payload_start + payload_samples
-                                continue
-
-                        i += step_size
-                    else:
-                        i += step_size
-
-        except KeyboardInterrupt:
-            print(f"\n[停止] Ctrl+C を検出しました。途中まで検出した {success_count} パケットをログに保存済みです。")
-            print(f"[Info] 部分ログ: {self.output_raw}")
-            print(f"[Info] aggregator_turbo.py を実行すると、部分データから復元を試みます。")
+        if progress_callback:
+            try:
+                progress_callback(100.0)
+            except Exception:
+                pass
 
         print(f"\n[Done] デコード完了: ログ書き込み済みパケット数 = {success_count}")
         print(f"[Output] テキストログ保存先: {self.output_raw}\n")

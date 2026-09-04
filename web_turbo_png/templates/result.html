@@ -222,7 +222,7 @@
                         </div>
                         
                         <div id="user-img-container" style="position: relative;">
-                            <img id="user-img" src="/static/user_slices_placeholder.png" class="restored-img" alt="単体復元画像">
+                            <img id="user-img" src="{{ user_output_url or '/static/user_slices_placeholder.png' }}" class="restored-img" alt="単体復元画像" style="opacity: 1;">
                             <div id="user-img-not-posted" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; align-items: center; justify-content: center; background: rgba(241, 245, 249, 0.85); border-radius: 12px; color: #475569; font-weight: bold; flex-direction: column; gap: 10px; z-index: 10;">
                                 <i data-lucide="image-off" style="width: 40px; height: 40px;"></i>
                                 <span style="font-size: 1.05rem;">まだ投稿していません</span>
@@ -235,7 +235,7 @@
 
                     <div class="image-card">
                         <p><span class="badge-all"><i data-lucide="sparkles" class="icon-inline"></i> 2. 全員の多数決</span> ノイズ除去後の統合写真</p>
-                        <img id="target-img" src="/static/latest_aggregated_placeholder.png" class="restored-img" alt="全員の多数決画像">
+                        <img id="target-img" src="{{ network_image_url or '/static/latest_aggregated_placeholder.png' }}" class="restored-img" alt="全員の多数決画像" style="opacity: 1;">
                         <button id="download-target-img-btn" class="btn-download-img">
                             <i data-lucide="download" class="icon-inline"></i> 多数決画像を保存
                         </button>
@@ -280,6 +280,19 @@
     </main>
 
     <script>
+        // URLバーからBasic認証情報の credentials を除去（fetchエラー防止）
+        if (window.location.href.includes('@')) {
+            try {
+                const cleanUrl = window.location.protocol + '//' + window.location.host + window.location.pathname + window.location.search;
+                window.history.replaceState(null, '', cleanUrl);
+            } catch (_) {}
+        }
+
+        // 安全なAPI URL生成関数 (Basic認証URLコンテキスト対策)
+        function safeApiUrl(path) {
+            return window.location.protocol + '//' + window.location.host + path;
+        }
+
         let missingPacketsData = [];
         const timestamp = "{{ timestamp }}";
         const currentUploadedId = "{{ current_image_id }}";
@@ -312,14 +325,29 @@
             let myContributionScore = "{{ contribution_score }}";
             let overallRestorationScore = "0.0";
             let overallRestorationDetails = "";
+            const initialUserImgUrl = "{{ user_output_url or '' }}";
+            const initialTargetImgUrl = "{{ network_image_url or '' }}";
 
             // マージ情報モーダル関連の処理
             const mergeBtn = document.getElementById('show-merge-btn');
             const mergeModal = document.getElementById('merge-modal');
             const closeMergeBtn = document.getElementById('close-merge-modal');
+
+            function updateEngineBadge(mode) {
+                const badge = document.getElementById('display-engine-badge');
+                if (!badge) return;
+                if (mode === 'JPEG') {
+                    badge.className = 'px-2.5 py-1 text-xs font-bold rounded-full bg-amber-100 text-amber-800 border border-amber-300';
+                    badge.textContent = 'JPEG モード (段階復元)';
+                } else {
+                    badge.className = 'px-2.5 py-1 text-xs font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300';
+                    badge.textContent = 'PNG モード (0/100 多数決)';
+                }
+            }
             
             function checkMergeStats(imageId) {
-                fetch(`/api/merge_stats?image_id=${imageId}`)
+                if (!imageId) return;
+                fetch(safeApiUrl(`/api/merge_stats?image_id=${imageId}`))
                     .then(r => r.json())
                     .then(data => {
                         if(data.status === 'success' && data.total_merged > 0) {
@@ -396,7 +424,10 @@
                 
                 setTimeout(() => {
                     // ユーザーがこの画像を投稿していない場合
-                    if (!currentUserStatus || !currentUserStatus.user_has_data || !currentUserId) {
+                    const hasUserData = (currentUserStatus && (currentUserStatus.user_has_data || currentUserStatus.user_img_url)) ||
+                                        (initialUserImgUrl && initialUserImgUrl.includes(`ID_${activeImageId}`));
+
+                    if (!hasUserData) {
                         if (notPostedOverlay) notPostedOverlay.style.display = 'flex';
                         userImg.src = "/static/user_slices_placeholder.png";
                         userImg.style.opacity = '0.3';
@@ -421,27 +452,18 @@
                     };
 
                     const cacheBuster = new Date().getTime();
-
-                    function updateEngineBadge(mode) {
-                        const badge = document.getElementById('display-engine-badge');
-                        if (!badge) return;
-                        if (mode === 'JPEG') {
-                            badge.className = 'px-2.5 py-1 text-xs font-bold rounded-full bg-amber-100 text-amber-800 border border-amber-300';
-                            badge.textContent = 'JPEG モード (段階復元)';
-                        } else {
-                            badge.className = 'px-2.5 py-1 text-xs font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300';
-                            badge.textContent = 'PNG モード (0/100 多数決)';
-                        }
-                    }
-
                     let targetUserUrl = "";
                     const imgEngineMode = (currentUserStatus && currentUserStatus.engine_mode) ? currentUserStatus.engine_mode : "{{ current_engine_mode or 'PNG' }}";
                     const expectedExt = (imgEngineMode === 'JPEG') ? '.jpg' : '.png';
 
                     if (userImgMode === 'session') {
-                        targetUserUrl = (currentUserStatus && currentUserStatus.user_img_url) 
-                            ? `${currentUserStatus.user_img_url}?t=${cacheBuster}` 
-                            : `/static/output/user_${currentUserId}_ID_${activeImageId}${expectedExt}?t=${cacheBuster}`;
+                        if (initialUserImgUrl && initialUserImgUrl.includes(`ID_${activeImageId}`)) {
+                            targetUserUrl = `${safeApiUrl(initialUserImgUrl)}?t=${cacheBuster}`;
+                        } else if (currentUserStatus && currentUserStatus.user_img_url) {
+                            targetUserUrl = `${safeApiUrl(currentUserStatus.user_img_url)}?t=${cacheBuster}`;
+                        } else {
+                            targetUserUrl = safeApiUrl(`/static/output/user_${currentUserId || 1}_ID_${activeImageId}${expectedExt}?t=${cacheBuster}`);
+                        }
                         userImg.src = targetUserUrl;
                         userImg.onerror = function() {
                             this.onerror = null;
@@ -461,9 +483,11 @@
                             viewModeCumulativeBtn.style.border = '1px solid #cbd5e1';
                         }
                     } else {
-                        targetUserUrl = (currentUserStatus && currentUserStatus.user_cumulative_url) 
-                            ? `${currentUserStatus.user_cumulative_url}?t=${cacheBuster}` 
-                            : `/static/output/user_cumulative_${currentUserId}_ID_${activeImageId}${expectedExt}?t=${cacheBuster}`;
+                        if (currentUserStatus && currentUserStatus.user_cumulative_url) {
+                            targetUserUrl = `${safeApiUrl(currentUserStatus.user_cumulative_url)}?t=${cacheBuster}`;
+                        } else {
+                            targetUserUrl = safeApiUrl(`/static/output/user_cumulative_${currentUserId || 1}_ID_${activeImageId}${expectedExt}?t=${cacheBuster}`);
+                        }
                         userImg.src = targetUserUrl;
                         userImg.onerror = function() {
                             this.onerror = null;
@@ -515,7 +539,7 @@
                 renderScore();
 
                 // ユーザー状態および多数決画像URLの取得
-                fetch(`/api/image_status?image_id=${imageId}`)
+                fetch(safeApiUrl(`/api/image_status?image_id=${imageId}`))
                     .then(response => response.json())
                     .then(statusData => {
                         if (statusData.status === "success") {
@@ -526,7 +550,7 @@
 
                             // 全員用の多数決画像ソース更新 (APIから正確なURLを取得)
                             if (statusData.restored_img_url) {
-                                targetImg.src = `${statusData.restored_img_url}?t=${new Date().getTime()}`;
+                                targetImg.src = `${safeApiUrl(statusData.restored_img_url)}?t=${new Date().getTime()}`;
                             } else {
                                 targetImg.src = `/static/latest_aggregated_placeholder.png`;
                             }
@@ -558,7 +582,7 @@
                 listEl.innerHTML = '<li><span style="color:#94a3b8;">通信中...</span></li>';
                 downloadBtn.disabled = true;
 
-                fetch(`/api/missing?image_id=${imageId}`)
+                fetch(safeApiUrl(`/api/missing?image_id=${imageId}`))
                     .then(response => response.json())
                     .then(data => {
                         listEl.innerHTML = '';

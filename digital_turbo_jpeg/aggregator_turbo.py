@@ -442,6 +442,17 @@ class TurboJPEGAggregator(BaseAggregator):
             static_path = os.path.join(static_out, out_filename)
             canvas.save(static_path, format="JPEG", quality=95)
 
+            # Web用: 全員多数決画像とともに、ユーザー単体・累積画像 (user_1 / user_cumulative_1) も同期生成
+            if not user_id:
+                for fallback_uid in (1,):
+                    u_single = os.path.join(static_out, f"user_{fallback_uid}_ID_{clean_id_str}.jpg")
+                    u_cumul = os.path.join(static_out, f"user_cumulative_{fallback_uid}_ID_{clean_id_str}.jpg")
+                    canvas.save(u_single, format="JPEG", quality=95)
+                    canvas.save(u_cumul, format="JPEG", quality=95)
+            else:
+                u_cumul = os.path.join(static_out, f"user_cumulative_{user_id}_ID_{clean_id_str}.jpg")
+                canvas.save(u_cumul, format="JPEG", quality=95)
+
         return saved_files
 
     def close(self):

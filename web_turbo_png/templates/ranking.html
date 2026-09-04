@@ -259,10 +259,22 @@
         return 'contrib-low';
     }
 
+    // URLバーからBasic認証情報の credentials を除去
+    if (window.location.href.includes('@')) {
+        try {
+            const cleanUrl = window.location.protocol + '//' + window.location.host + window.location.pathname + window.location.search;
+            window.history.replaceState(null, '', cleanUrl);
+        } catch (_) {}
+    }
+
+    function safeApiUrl(path) {
+        return window.location.protocol + '//' + window.location.host + path;
+    }
+
     async function loadRanking(){
         const tbody = document.getElementById('ranking-body');
         try {
-            const resp = await fetch('/api/rankings');
+            const resp = await fetch(safeApiUrl('/api/rankings'));
             const data = await resp.json();
 
             if(!data || !Array.isArray(data) || data.length === 0){

@@ -243,12 +243,24 @@
         sidebar.classList.toggle('collapsed');
     });
 
+    // URLバーからBasic認証情報の credentials を除去
+    if (window.location.href.includes('@')) {
+        try {
+            const cleanUrl = window.location.protocol + '//' + window.location.host + window.location.pathname + window.location.search;
+            window.history.replaceState(null, '', cleanUrl);
+        } catch (_) {}
+    }
+
+    function safeApiUrl(path) {
+        return window.location.protocol + '//' + window.location.host + path;
+    }
+
     let currentDate = new Date();
     let historyData = {}; // key: "YYYY-MM-DD", value: array of history objects
 
     async function fetchHistory() {
         try {
-            const res = await fetch('/api/history');
+            const res = await fetch(safeApiUrl('/api/history'));
             const data = await res.json();
             if(data.status === 'success') {
                 // Group by YYYY-MM-DD

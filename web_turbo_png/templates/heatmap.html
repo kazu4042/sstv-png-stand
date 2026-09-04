@@ -524,13 +524,25 @@
         heatmapLayer = L.featureGroup().addTo(map);
     }
     
+    // URLバーからBasic認証情報の credentials を除去
+    if (window.location.href.includes('@')) {
+        try {
+            const cleanUrl = window.location.protocol + '//' + window.location.host + window.location.pathname + window.location.search;
+            window.history.replaceState(null, '', cleanUrl);
+        } catch (_) {}
+    }
+
+    function safeApiUrl(path) {
+        return window.location.protocol + '//' + window.location.host + path;
+    }
+    
     // ==================== データフェッチと表示 ====================
     async function loadHeatmapData() {
         const loading = document.getElementById('loading');
         loading.classList.add('active');
         
         try {
-            const response = await fetch('/api/heatmap-data');
+            const response = await fetch(safeApiUrl('/api/heatmap-data'));
             const data = await response.json();
             
             if (data.status === 'success') {

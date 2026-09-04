@@ -82,7 +82,7 @@ def ranking():
 @main_bp.route('/result')
 @login_required
 def result():
-    """デコード結果画面を表示"""
+    """デコード結果画面を表示（現在のシステムモードで厳密に分離）"""
     job_id = request.args.get('job_id')
     req_image_id = request.args.get('image_id')
     user_id = session.get('user_id')
@@ -94,35 +94,42 @@ def result():
         if job and "result_data" in job:
             result_data = job.get("result_data", {})
     
+    current_engine_mode = SystemFactory.get_mode()
     from web_turbo_png.routes.api_routes import get_analyzer
-    job_engine_mode = result_data.get('engine_mode')
-    analyzer = get_analyzer(mode=job_engine_mode)
+    analyzer = get_analyzer(mode=current_engine_mode)
     available_ids = analyzer.get_available_image_ids(user_id=None)
 
     target_image_id = req_image_id or result_data.get('current_image_id') or result_data.get('image_id')
     if not target_image_id and available_ids:
         target_image_id = available_ids[0]
 
-    current_engine_mode = job_engine_mode or SystemFactory.get_mode()
+    result_data = dict(result_data)
+    result_data['available_image_ids'] = available_ids
+    result_data['current_engine_mode'] = current_engine_mode
 
     if target_image_id:
         status_info = analyzer.get_image_status(target_image_id, user_id=user_id)
-        result_data = dict(result_data)
+        job_user_img = result_data.get('user_image_url') or result_data.get('user_output_url')
+        
         result_data['current_image_id'] = target_image_id
-        result_data['main_score'] = status_info['user_score']
-        result_data['contribution_score'] = status_info['user_score']
+        result_data['main_score'] = result_data.get('main_score') or status_info['user_score']
+        result_data['contribution_score'] = result_data.get('contribution_score') or status_info['user_score']
         result_data['network_score'] = status_info['network_score']
         result_data['network_received'] = status_info['network_received']
-        result_data['user_has_data'] = status_info['user_has_data']
-        result_data['user_output_url'] = status_info['user_img_url'] or ''
-        result_data['available_image_ids'] = available_ids
-        if status_info.get('engine_mode'):
-            current_engine_mode = status_info['engine_mode']
+        
+        # ジョブ固有の送信画像があれば最優先で採用（送信直後の確実な表示）
+        chosen_user_img = job_user_img or status_info['user_img_url'] or ''
+        result_data['user_output_url'] = chosen_user_img
+        result_data['user_has_data'] = bool(chosen_user_img or status_info['user_has_data'])
+        result_data['network_image_url'] = status_info['restored_img_url'] or result_data.get('network_image_url') or ''
 
     config = SystemFactory.get_config(current_engine_mode)
+    result_data.pop('current_engine_mode', None)
+    result_data.pop('available_image_ids', None)
     return render_template(
         'result.html',
         current_engine_mode=current_engine_mode,
+        available_image_ids=available_ids,
         show_heatmap=getattr(config, 'ENABLE_HEATMAP', False),
         show_ranking=getattr(config, 'ENABLE_RANKING', False),
         **result_data

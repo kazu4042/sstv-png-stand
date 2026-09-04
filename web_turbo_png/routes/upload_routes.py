@@ -71,7 +71,7 @@ def upload_progress():
     if not job_id:
         return jsonify({"error": "Missing job_id"}), 400
         
-    job_data = get_job(job_id)
+    job_data = get_job(job_id, retries=5)
     if job_data:
         return jsonify(job_data)
     else:
@@ -82,10 +82,16 @@ def upload_progress():
 def progress_stream():
     job_id = request.args.get('job_id')
     def generate():
+        import json
+        retry_count = 0
+        max_initial_retries = 30  # 最大3秒初期化待ち
         while True:
-            import json
-            job = get_job(job_id)
+            job = get_job(job_id, retries=2)
             if not job:
+                retry_count += 1
+                if retry_count < max_initial_retries:
+                    time.sleep(0.1)
+                    continue
                 yield f"data: {json.dumps({'error': 'Job not found'})}\n\n"
                 break
                 
@@ -94,7 +100,7 @@ def progress_stream():
             
             if job["progress"] >= 100 or job["error"]:
                 break
-            time.sleep(0.1)
+            time.sleep(0.15)
             
     response = Response(generate(), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
@@ -103,14 +109,14 @@ def progress_stream():
 
 
 def process_upload(filepath, original_filename, job_id, app, user_id):
-    """アップロードされた音声ファイルの処理（バックグラウンド）"""
+    """アップロードされた音声ファイルの処理（現在のシステム稼働中モードで厳密に実行）"""
     try:
-        config = SystemFactory.get_config()
         mode_name = SystemFactory.get_mode()
+        config = SystemFactory.get_config(mode_name)
         update_job(job_id, progress=5, status=f"音声のデコード中 ({mode_name} モード)...")
 
         # ===== Step1: ファクトリからデコーダを取得してデコード =====
-        decoder = SystemFactory.get_decoder(user_id=user_id)
+        decoder = SystemFactory.get_decoder(user_id=user_id, mode=mode_name)
         
         def decode_progress_callback(prog):
             calc_prog = 5 + int(prog * 0.55)
@@ -138,7 +144,7 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
         
         update_job(job_id, progress=70, status="統合処理中 (多数決アグリゲータ)...")
         
-        aggregator = SystemFactory.get_aggregator(log_dir=log_dir_path)
+        aggregator = SystemFactory.get_aggregator(log_dir=log_dir_path, mode=mode_name)
         aggregator.load_all_logs()
         # 全員のパケットで多数決画像を生成
         aggregator.process_and_save_images(min_tile_ratio=0.0, user_id=None)
@@ -218,7 +224,7 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
 
                 # ユーザー受信タイルを描画
                 try:
-                    p_bytes = bits_to_bytearray(user_payload)
+                    p_bytes = bits_to_bytearray(user_payload)[:plen]
                     tile_img = None
                     if hasattr(aggregator, 'decode_tile_bytes_safely'):
                         tile_img = aggregator.decode_tile_bytes_safely(p_bytes, config.TILE_SIZE, config.TILE_SIZE)
@@ -244,12 +250,18 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
             img_ext = ".jpg" if mode_name == "JPEG" else ".png"
             img_fmt = "JPEG" if mode_name == "JPEG" else "PNG"
 
-            # 今回のセッション単体画像を保存 (user_{user_id}_ID_{hex}.{ext})
-            user_img_path = os.path.join(output_dir, f"user_{user_id}_ID_{img_id_hex}{img_ext}")
-            user_image_buffer.save(user_img_path, format=img_fmt)
+            # 1. 今回のセッション固有画像を保存 (キャッシュ回避 & 確実な表示)
+            session_img_fname = f"user_session_{job_id}_ID_{img_id_hex}{img_ext}"
+            session_img_path = os.path.join(output_dir, session_img_fname)
+            user_image_buffer.save(session_img_path, format=img_fmt)
+
+            # 2. ユーザー最新単体画像としても保存 (user_{user_id}_ID_{hex}.{ext})
+            if user_id:
+                user_img_path = os.path.join(output_dir, f"user_{user_id}_ID_{img_id_hex}{img_ext}")
+                user_image_buffer.save(user_img_path, format=img_fmt)
 
             if img_id_hex == current_image_id:
-                user_output_url = f"/static/output/user_{user_id}_ID_{img_id_hex}{img_ext}"
+                user_output_url = f"/static/output/{session_img_fname}"
                 main_score = round((matched_packets / total_required_packets) * 100, 1)
                 if main_score > 100.0:
                     main_score = 100.0

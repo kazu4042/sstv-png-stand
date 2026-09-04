@@ -3,7 +3,9 @@ import json
 import tempfile
 import time
 
-JOB_DIR = os.path.join(tempfile.gettempdir(), 'sstv_turbo_png_jobs')
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, "../../"))
+JOB_DIR = os.path.join(ROOT_DIR, "data", "jobs")
 os.makedirs(JOB_DIR, exist_ok=True)
 
 def _get_job_file(job_id):
@@ -50,29 +52,53 @@ def update_job(job_id, progress=None, status=None, error=None, result_data=None,
     data["updated_at"] = time.time()
     _write_job(job_id, data)
 
-def get_job(job_id):
-    """ジョブの状態を取得"""
+def get_job(job_id, retries=1):
+    """ジョブの状態を取得（書き込み直後の競合に備え最大数回リトライ）"""
     filepath = _get_job_file(job_id)
-    if not os.path.exists(filepath):
-        return None
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception:
-        return None
+    for attempt in range(max(1, retries)):
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                if attempt < retries - 1:
+                    time.sleep(0.05)
+                    continue
+        elif attempt < retries - 1:
+            time.sleep(0.05)
+    return None
 
 def _write_job(job_id, data):
+    """アトミック書き込みで読み込み側のJSONパースエラーを防ぐ"""
     filepath = _get_job_file(job_id)
+    temp_filepath = f"{filepath}.tmp.{time.time()}"
     try:
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(temp_filepath, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False)
+        # Windowsでも上書き可能な安全な置換
+        if os.path.exists(filepath):
+            try:
+                os.replace(temp_filepath, filepath)
+            except OSError:
+                # 代替手法
+                os.remove(filepath)
+                os.rename(temp_filepath, filepath)
+        else:
+            os.rename(temp_filepath, filepath)
     except Exception as e:
         print(f"Error writing job {job_id}: {e}")
+        try:
+            if os.path.exists(temp_filepath):
+                os.remove(temp_filepath)
+        except Exception:
+            pass
 
 def cleanup_old_jobs(max_age_seconds=86400):
     """古いジョブファイルを削除"""
     current_time = time.time()
     try:
+        if not os.path.exists(JOB_DIR):
+            return
         for filename in os.listdir(JOB_DIR):
             if not filename.endswith('.json'):
                 continue

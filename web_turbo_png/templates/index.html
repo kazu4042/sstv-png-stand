@@ -398,6 +398,19 @@
             };
         });
 
+        // URLバーからBasic認証情報の credentials を除去
+        if (window.location.href.includes('@')) {
+            try {
+                const cleanUrl = window.location.protocol + '//' + window.location.host + window.location.pathname + window.location.search;
+                window.history.replaceState(null, '', cleanUrl);
+            } catch (_) {}
+        }
+
+        // 安全なAPI URL生成関数
+        function safeApiUrl(path) {
+            return window.location.protocol + '//' + window.location.host + path;
+        }
+
         // フォーム送信時のプログレス処理（アップロード進捗 ＋ サーバー解析進捗）
         const uploadForm = document.getElementById('upload-form');
         const progressWrapper = document.getElementById('progress-wrapper');
@@ -437,7 +450,7 @@
                             progressText.innerText = 'サーバーで高速デコード解析中...';
                             progressFill.style.width = '35%';
 
-                            const evtSource = new EventSource(`/api/progress-stream?job_id=${data.job_id}`);
+                            const evtSource = new EventSource(safeApiUrl(`/api/progress-stream?job_id=${data.job_id}`));
 
                             evtSource.onmessage = function (event) {
                                 const sseData = JSON.parse(event.data);
@@ -465,7 +478,7 @@
                                         progressFill.style.width = '100%';
                                         evtSource.close();
                                         setTimeout(() => {
-                                            window.location.href = `/result?job_id=${data.job_id}`;
+                                            window.location.href = safeApiUrl(`/result?job_id=${data.job_id}`);
                                         }, 600);
                                     }
                                 }
@@ -505,7 +518,7 @@
                 progressWrapper.classList.remove('active');
             }
 
-            xhr.open('POST', '/api/upload');
+            xhr.open('POST', safeApiUrl('/api/upload'));
             xhr.send(formData);
         });
 

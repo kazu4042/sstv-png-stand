@@ -169,6 +169,7 @@ class TurboPNGAnalyzerService:
                     cursor = agg.db.conn.cursor()
                     cursor.execute("DELETE FROM packets")
                     deleted_packets += cursor.rowcount
+                    cursor.execute("DELETE FROM imported_files")
                 agg.db.close()
             except Exception as e:
                 print(f"Error clearing packets table ({m}): {e}")
@@ -177,6 +178,7 @@ class TurboPNGAnalyzerService:
         deleted_files_count = 0
         directories_to_clean = [
             os.path.join(ROOT_DIR, "data", "images"),
+            os.path.join(ROOT_DIR, "data", "digital_turbo_png", "images"),
             os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images"),
             os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
         ]
@@ -206,54 +208,20 @@ class TurboPNGAnalyzerService:
         }
 
     def detect_image_mode(self, target_image_id_hex):
-        """画像IDがPNGかJPEGか、どちらのモードに属するかを厳密判定"""
-        try:
-            target_id_int = int(target_image_id_hex, 16)
-        except (ValueError, TypeError):
-            return self.current_mode
-
-        # 1. 現在のモードのDBに存在するか
-        cursor = self.aggregator.db.conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM packets WHERE image_id = ?", (target_id_int,))
-        row = cursor.fetchone()
-        if row and row[0] > 0:
-            return self.current_mode
-
-        # 2. もう一方のモードのDBに存在するか
-        other_mode = "JPEG" if self.current_mode == "PNG" else "PNG"
-        try:
-            other_cfg = SystemFactory.get_config(other_mode)
-            ldir = getattr(other_cfg, "TEXT_LOG_DIR", f"data/digital_turbo_{other_mode.lower()}/logs")
-            ldir_path = os.path.join(ROOT_DIR, ldir) if not os.path.isabs(ldir) else ldir
-            other_agg = SystemFactory.get_aggregator(log_dir=ldir_path, mode=other_mode)
-            cur_other = other_agg.db.conn.cursor()
-            cur_other.execute("SELECT COUNT(*) FROM packets WHERE image_id = ?", (target_id_int,))
-            row_other = cur_other.fetchone()
-            other_agg.db.close()
-            if row_other and row_other[0] > 0:
-                return other_mode
-        except Exception:
-            pass
-
-        # 3. ファイル存在で判定 (PNG優先 or JPEG)
-        static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
-        if os.path.exists(os.path.join(static_out, f"restored_ID_{target_image_id_hex}.png")):
-            return "PNG"
-        if os.path.exists(os.path.join(static_out, f"restored_ID_{target_image_id_hex}.jpg")):
-            return "JPEG"
-
+        """現在のシステムモードに厳格固定（PNG/JPEG の完全分離）"""
         return self.current_mode
 
     def get_image_status(self, target_image_id_hex, user_id=None):
-        """指定画像の全体復元状況および特定ユーザーの貢献状況を高速取得（モード食い違い防止完全対応）"""
-        effective_mode = self.detect_image_mode(target_image_id_hex)
+        """指定画像の全体復元状況および特定ユーザーの貢献状況を高速取得（現在のモードのみに完全分離）"""
+        clean_hex = str(target_image_id_hex).strip().upper().zfill(4)
+        effective_mode = self.current_mode
         config = SystemFactory.get_config(effective_mode)
 
         try:
-            target_id_int = int(target_image_id_hex, 16)
+            target_id_int = int(clean_hex, 16)
         except (ValueError, TypeError):
             return {
-                "image_id": target_image_id_hex,
+                "image_id": clean_hex,
                 "engine_mode": effective_mode,
                 "user_has_data": False,
                 "user_packet_count": 0,
@@ -295,10 +263,10 @@ class TurboPNGAnalyzerService:
                 WHERE image_id = ? AND user_id = ?
             """, (target_id_int, user_id))
             row_user = cursor.fetchone()
-            if row_user:
+            if row_user and (row_user[0] or 0) > 0:
                 user_packet_count = row_user[0] or 0
                 user_matched_count = row_user[1] or 0
-                user_has_data = user_packet_count > 0
+                user_has_data = True
                 user_score = round((user_matched_count / total_required) * 100, 1) if total_required > 0 else 0.0
                 if user_score > 100.0:
                     user_score = 100.0
@@ -306,32 +274,46 @@ class TurboPNGAnalyzerService:
         static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
         target_ext = ".jpg" if effective_mode == "JPEG" else ".png"
 
-        # ユーザー単体画像 (特定されたモードの拡張子のみ厳格に探索)
+        # ユーザー単体画像（現在のモードの拡張子のみ）
         user_img_url = None
-        if user_id and user_has_data:
-            fname = f"user_{user_id}_ID_{target_image_id_hex}{target_ext}"
-            if os.path.exists(os.path.join(static_out, fname)):
-                user_img_url = f"/static/output/{fname}"
+        target_uid = user_id or 1
+        fname_u = f"user_{target_uid}_ID_{clean_hex}{target_ext}"
+        if os.path.exists(os.path.join(static_out, fname_u)):
+            user_img_url = f"/static/output/{fname_u}"
+            user_has_data = True
 
-        # ユーザー累積画像 (特定されたモードの拡張子のみ厳格に探索)
+        # ユーザー累積画像（現在のモードの拡張子のみ）
         user_cumulative_url = None
-        if user_id and user_has_data:
-            fname = f"user_cumulative_{user_id}_ID_{target_image_id_hex}{target_ext}"
-            if os.path.exists(os.path.join(static_out, fname)):
-                user_cumulative_url = f"/static/output/{fname}"
+        fname_c = f"user_cumulative_{target_uid}_ID_{clean_hex}{target_ext}"
+        if os.path.exists(os.path.join(static_out, fname_c)):
+            user_cumulative_url = f"/static/output/{fname_c}"
+            user_has_data = True
 
-        # ネットワーク復元画像 (特定されたモードの拡張子のみ厳格に探索)
+        # ネットワーク復元画像（現在のモードの拡張子のみ）
         restored_img_url = None
-        fname = f"restored_ID_{target_image_id_hex}{target_ext}"
-        if os.path.exists(os.path.join(static_out, fname)):
-            restored_img_url = f"/static/output/{fname}"
-        elif effective_mode == "JPEG" and os.path.exists(os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images", fname)):
-            restored_img_url = f"/data/digital_turbo_jpeg/images/{fname}"
-        elif effective_mode == "PNG" and os.path.exists(os.path.join(ROOT_DIR, "data", "images", fname)):
-            restored_img_url = f"/data/images/{fname}"
+        fname_r = f"restored_ID_{clean_hex}{target_ext}"
+        static_file = os.path.join(static_out, fname_r)
+        if os.path.exists(static_file):
+            restored_img_url = f"/static/output/{fname_r}"
+        else:
+            source_dir = os.path.join(ROOT_DIR, "data", f"digital_turbo_{effective_mode.lower()}", "images")
+            source_file = os.path.join(source_dir, fname_r)
+            if os.path.exists(source_file):
+                import shutil
+                try:
+                    shutil.copy2(source_file, static_file)
+                    restored_img_url = f"/static/output/{fname_r}"
+                except Exception:
+                    restored_img_url = f"/data/digital_turbo_{effective_mode.lower()}/images/{fname_r}"
+            elif effective_mode == "PNG" and os.path.exists(os.path.join(ROOT_DIR, "data", "images", fname_r)):
+                restored_img_url = f"/data/images/{fname_r}"
+
+        # フォールバック: もし user_has_data かつ user_img_url がまだ無ければ restored_img_url を流用
+        if user_has_data and not user_img_url:
+            user_img_url = restored_img_url
 
         return {
-            "image_id": target_image_id_hex,
+            "image_id": clean_hex,
             "engine_mode": effective_mode,
             "user_has_data": user_has_data,
             "user_packet_count": user_packet_count,

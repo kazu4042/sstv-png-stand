@@ -404,6 +404,19 @@
 
 
     <script>
+        // URLバーからBasic認証情報の credentials を除去
+        if (window.location.href.includes('@')) {
+            try {
+                const cleanUrl = window.location.protocol + '//' + window.location.host + window.location.pathname + window.location.search;
+                window.history.replaceState(null, '', cleanUrl);
+            } catch (_) {}
+        }
+
+        // 安全なAPI URL生成関数
+        function safeApiUrl(path) {
+            return window.location.protocol + '//' + window.location.host + path;
+        }
+
         window.addEventListener("load", function() {
             const stage = document.getElementById('stage');
             const img = document.getElementById('base-img');
@@ -489,11 +502,18 @@
             function loadImageAndData(imageId) {
                 // onerrorで非表示になっていた場合への対策として明示的に表示状態をリセット
                 img.style.display = 'block';
-                // 対象画像の読み込み（キャッシュ対策付き）
-                img.src = `/static/output/restored_ID_${imageId}.png?t=${new Date().getTime()}`;
+                // 対象画像の読み込み（モードに応じた拡張子判定）
+                const ext = '{{ current_engine_mode }}' === 'JPEG' ? '.jpg' : '.png';
+                img.src = safeApiUrl(`/static/output/restored_ID_${imageId}${ext}?t=${new Date().getTime()}`);
+                img.onerror = function() {
+                    // フォールバックでもう一方の拡張子も試す
+                    const altExt = ext === '.jpg' ? '.png' : '.jpg';
+                    this.onerror = null;
+                    this.src = safeApiUrl(`/static/output/restored_ID_${imageId}${altExt}?t=${new Date().getTime()}`);
+                };
                 
                 // <i data-lucide="radio" class="icon-inline"></i> APIコール（画像IDを指定して信頼度マップを取得）
-                fetch(`/api/reliability?image_id=${imageId}`)
+                fetch(safeApiUrl(`/api/reliability?image_id=${imageId}`))
                     .then(response => response.json())
                     .then(result => {
                         if (result.status === "success") {

@@ -51,7 +51,11 @@ class PacketDatabaseTurboPNG:
 
     def is_file_imported(self, file_name):
         cursor = self.conn.cursor()
-        cursor.execute("SELECT 1 FROM imported_files WHERE file_name = ?", (file_name,))
+        cursor.execute("""
+            SELECT 1 FROM imported_files f 
+            WHERE f.file_name = ? 
+              AND EXISTS (SELECT 1 FROM packets p WHERE p.file_name = f.file_name)
+        """, (file_name,))
         return cursor.fetchone() is not None
 
     def get_user_history(self, user_id):

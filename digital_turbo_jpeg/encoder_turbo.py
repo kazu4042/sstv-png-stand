@@ -149,6 +149,10 @@ class DigitalTurboJPEGEncoder:
         print(f"  -> 全 {len(packet_list)} パケット生成完了！ (総データ量: {total_payload_bytes} Bytes)")
         print(f"  -> 音声伝送時間: {total_time_ms / 1000.0:.2f} 秒 ({total_time_ms / 60000.0:.2f} 分)")
 
+        # タイルの送信順序をランダム化
+        print("  -> タイルの送信順序をランダム化 (シャッフル) しています...")
+        random.shuffle(packet_list)
+
         final_wave = np.concatenate(packet_list)
         final_wave = final_wave / np.max(np.abs(final_wave)) * 0.8
 

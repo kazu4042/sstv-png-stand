@@ -40,13 +40,13 @@ VALID_BAND_MIN = 500
 VALID_BAND_MAX = 9000
 BANDPASS_ENABLE = True  # 受信時のノイズフィルタを有効にするか
 
-# --- ファイル・パス設定 ---
-TEXT_LOG_DIR = "data/logs"
+# --- ファイル・パス設定 (PNG専用ディレクトリへ統一) ---
+TEXT_LOG_DIR = "data/digital_turbo_png/logs"
 TEXT_LOG_PREFIX = "turbo_png_bitstream"
-IMAGE_OUT_DIR = "data/images"
+IMAGE_OUT_DIR = "data/digital_turbo_png/images"
 IMAGE_OUT_NAME = "decoded_result_turbo.png"
 INPUT_IMAGE = "data/input/test.jpg"
-OUTPUT_WAV = "data/audio/turbo_png_256_256.wav"
+OUTPUT_WAV = "data/digital_turbo_png/audio/turbo_png_256_256.wav"
 
 # --- テスト用ノイズ設定 ---
 NOISE_LEVEL = 0
