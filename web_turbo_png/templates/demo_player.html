@@ -409,8 +409,8 @@
         // Audio Player with Mode-Aware Source (PNG / JPEG)
         // ====================================================================
         const audioSources = {
-            'PNG': "{{ url_for('static', filename='audio/turbo_png_256_256.wav') }}",
-            'JPEG': "{{ url_for('static', filename='audio/turbo_256_256.wav') }}"
+            'PNG': "{{ url_for('static', filename='audio/turbo_png_256_256.wav') }}?t=png_" + Date.now(),
+            'JPEG': "{{ url_for('static', filename='audio/turbo_256_256.wav') }}?t=jpeg_" + Date.now()
         };
         let currentMode = "{{ selected_mode or current_engine_mode or 'PNG' }}";
         let audioSrc = audioSources[currentMode] || audioSources['PNG'];

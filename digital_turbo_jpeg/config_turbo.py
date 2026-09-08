@@ -51,7 +51,7 @@ INPUT_IMAGE = "data/input/test.jpg"
 OUTPUT_WAV = "data/digital_turbo_jpeg/audio/turbo_256_256.wav"
 
 # --- テスト用ノイズ設定 ---
-NOISE_LEVEL = 0.5
+NOISE_LEVEL = 0.0
 
 def update_tile_size(new_size):
     global TILE_SIZE, TILE_COUNT_X, TILE_COUNT_Y
