@@ -36,3 +36,7 @@ Thumbs.db
 web_turbo_png/static/uploads/
 web_turbo_png/static/output/
 web_turbo_png/static/audio/
+
+# Local states
+engine_mode.state*
+cookies.txt

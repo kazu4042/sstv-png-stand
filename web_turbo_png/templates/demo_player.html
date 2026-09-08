@@ -290,15 +290,33 @@
         <!-- Player Card -->
         <div class="player-card w-full max-w-lg p-8" id="playerCard">
             <!-- Header -->
-            <div class="flex items-center justify-between mb-6">
+            <div class="flex items-center justify-between mb-4">
                 <div>
-                    <h1 class="text-xl font-bold text-ink mb-1">TurboPNG 音声再生</h1>
-                    <p class="text-xs text-earth tracking-widest uppercase font-medium">SSTV Audio Broadcast</p>
+                    <h1 class="text-xl font-bold text-ink mb-1">SSTV 音声再生</h1>
+                    <p class="text-xs text-earth tracking-widest uppercase font-medium">SSTV Turbo Audio Broadcast</p>
                 </div>
                 <div id="statusBadge" class="status-badge ready">
                     <span class="w-2 h-2 rounded-full bg-current"></span>
                     <span id="statusText">READY</span>
                 </div>
+            </div>
+
+            <!-- エンジン別音声切り替えタブ -->
+            <div class="flex items-center justify-center gap-2 mb-4 bg-forestLight/60 p-1 rounded-xl">
+                <button id="btnModePng" onclick="switchMode('PNG')" class="flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all {% if selected_mode != 'JPEG' %}bg-forest text-white shadow-sm{% else %}text-ink/70 hover:text-ink{% endif %}">
+                    PNG 音声 (多数決)
+                </button>
+                <button id="btnModeJpeg" onclick="switchMode('JPEG')" class="flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all {% if selected_mode == 'JPEG' %}bg-amber-600 text-white shadow-sm{% else %}text-ink/70 hover:text-ink{% endif %}">
+                    JPEG 音声 (段階復元)
+                </button>
+            </div>
+
+            <!-- 現在再生中の音声モードバッジ -->
+            <div class="mb-5 text-center">
+                <span id="currentModeBadge" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold {% if selected_mode == 'JPEG' %}bg-amber-100 text-amber-800 border border-amber-300{% else %}bg-emerald-100 text-emerald-800 border border-emerald-300{% endif %}">
+                    <span class="w-2 h-2 rounded-full {% if selected_mode == 'JPEG' %}bg-amber-500{% else %}bg-emerald-500{% endif %}"></span>
+                    <span id="currentModeLabel">{{ audio_label or 'SSTV テスト音声' }}</span>
+                </span>
             </div>
 
             <!-- Waveform Visualizer -->
@@ -388,9 +406,15 @@
 
     <script>
         // ====================================================================
-        // Audio Player with Random Start Position
+        // Audio Player with Mode-Aware Source (PNG / JPEG)
         // ====================================================================
-        const audioSrc = "{{ url_for('static', filename='audio/turbo_png_256_256.wav') }}";
+        const audioSources = {
+            'PNG': "{{ url_for('static', filename='audio/turbo_png_256_256.wav') }}",
+            'JPEG': "{{ url_for('static', filename='audio/turbo_256_256.wav') }}"
+        };
+        let currentMode = "{{ selected_mode or current_engine_mode or 'PNG' }}";
+        let audioSrc = audioSources[currentMode] || audioSources['PNG'];
+
         // [Audio Player] 音声再生ページ
         let audioContext = null;
         let audioBuffer = null;
@@ -509,14 +533,52 @@
         }
 
         // ====================================================================
-        // Audio Loading
+        // Audio Loading & Mode Switching
         // ====================================================================
+        async function switchMode(mode) {
+            if (mode === currentMode && audioBuffer) return;
+            stopCurrent();
+            currentMode = mode;
+            audioSrc = audioSources[mode] || audioSources['PNG'];
+            audioBuffer = null;
+
+            // UIの切り替え
+            const btnPng = document.getElementById('btnModePng');
+            const btnJpeg = document.getElementById('btnModeJpeg');
+            const modeBadge = document.getElementById('currentModeBadge');
+            const modeLabel = document.getElementById('currentModeLabel');
+
+            if (mode === 'JPEG') {
+                if (btnPng) btnPng.className = 'flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all text-ink/70 hover:text-ink';
+                if (btnJpeg) btnJpeg.className = 'flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all bg-amber-600 text-white shadow-sm';
+                if (modeBadge) modeBadge.className = 'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300';
+                if (modeLabel) modeLabel.textContent = 'JPEG モード (ざらざら感・段階的復元用テスト音声)';
+            } else {
+                if (btnPng) btnPng.className = 'flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all bg-forest text-white shadow-sm';
+                if (btnJpeg) btnJpeg.className = 'flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all text-ink/70 hover:text-ink';
+                if (modeBadge) modeBadge.className = 'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300';
+                if (modeLabel) modeLabel.textContent = 'PNG モード (0/100 多数決復元用テスト音声)';
+            }
+
+            setPlayingUI(false);
+            if (progressFill) progressFill.style.width = '0%';
+            if (currentTimeEl) currentTimeEl.textContent = '0:00';
+            if (startPosEl) startPosEl.textContent = '--:--';
+            if (durationEl) durationEl.textContent = '--:--';
+            if (sampleRateEl) sampleRateEl.textContent = '--';
+            if (totalTimeEl) totalTimeEl.textContent = '--:--';
+
+            await initAudio();
+        }
+
         async function initAudio() {
-            if (audioContext) return;
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            gainNode = audioContext.createGain();
-            gainNode.gain.value = volumeSlider.value / 100;
-            gainNode.connect(audioContext.destination);
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                gainNode = audioContext.createGain();
+                gainNode.gain.value = volumeSlider.value / 100;
+                gainNode.connect(audioContext.destination);
+            }
+            if (audioBuffer) return;
 
             statusText.textContent = 'LOADING...';
 
@@ -531,7 +593,7 @@
                 sampleRateEl.textContent = (audioBuffer.sampleRate / 1000).toFixed(1) + 'k';
                 statusText.textContent = 'READY';
 
-                console.log(`[Audio Player] Audio loaded: ${audioBuffer.duration.toFixed(1)}s, ${audioBuffer.sampleRate}Hz`);
+                console.log(`[Audio Player] [${currentMode}] Audio loaded: ${audioBuffer.duration.toFixed(1)}s, ${audioBuffer.sampleRate}Hz`);
             } catch (e) {
                 console.error('[Audio Player] Audio load error:', e);
                 statusText.textContent = 'ERROR';

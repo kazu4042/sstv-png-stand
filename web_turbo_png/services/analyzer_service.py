@@ -79,13 +79,26 @@ class TurboPNGAnalyzerService:
 
             # 画像プレビューパス（指定モードの拡張子のみを厳格に探索）
             img_filename = f"restored_ID_{img_hex}{target_ext}"
+            thumb_path = None
+            base_url = None
 
             if os.path.exists(os.path.join(static_out, img_filename)):
-                item["thumbnail_url"] = f"/static/output/{img_filename}"
+                thumb_path = os.path.join(static_out, img_filename)
+                base_url = f"/static/output/{img_filename}"
             elif target_mode == "JPEG" and os.path.exists(os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images", img_filename)):
-                item["thumbnail_url"] = f"/data/digital_turbo_jpeg/images/{img_filename}"
+                thumb_path = os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images", img_filename)
+                base_url = f"/data/digital_turbo_jpeg/images/{img_filename}"
             elif target_mode == "PNG" and os.path.exists(os.path.join(ROOT_DIR, "data", "images", img_filename)):
-                item["thumbnail_url"] = f"/data/images/{img_filename}"
+                thumb_path = os.path.join(ROOT_DIR, "data", "images", img_filename)
+                base_url = f"/data/images/{img_filename}"
+
+            if base_url and thumb_path and os.path.exists(thumb_path):
+                # ブラウザキャッシュによるアイコン不一致（古い画像表示）を防止
+                try:
+                    v = int(os.path.getmtime(thumb_path))
+                    item["thumbnail_url"] = f"{base_url}?v={v}"
+                except Exception:
+                    item["thumbnail_url"] = base_url
             else:
                 item["thumbnail_url"] = None
 
@@ -123,17 +136,21 @@ class TurboPNGAnalyzerService:
         deleted_files_count = 0
         directories_to_clean = [
             os.path.join(ROOT_DIR, "data", "images"),
+            os.path.join(ROOT_DIR, "data", "digital_turbo_png", "images"),
             os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images"),
             os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
         ]
 
         for hex_id in image_ids_hex_list:
             clean_hex = str(hex_id).strip().upper().zfill(4)
+            raw_hex = str(hex_id).strip().upper()
             patterns = [
                 f"*ID_{clean_hex}*.png",
                 f"*ID_{clean_hex}*.jpg",
-                f"*ID_{str(hex_id).strip().upper()}*.png",
-                f"*ID_{str(hex_id).strip().upper()}*.jpg"
+                f"*ID_{raw_hex}*.png",
+                f"*ID_{raw_hex}*.jpg",
+                f"*{clean_hex}*.png",
+                f"*{clean_hex}*.jpg"
             ]
             for dir_path in directories_to_clean:
                 if not os.path.exists(dir_path):
@@ -155,10 +172,11 @@ class TurboPNGAnalyzerService:
             "deleted_files": deleted_files_count
         }
 
-    def clear_all_images(self, mode_only=False):
+    def clear_all_images(self, mode_only=False, target_mode=None):
         """データベース内の全画像・パケットおよび復元ファイルをすべて削除・一掃"""
         deleted_packets = 0
-        modes_to_clear = [self.current_mode] if mode_only else ["PNG", "JPEG"]
+        effective_mode = (target_mode or self.current_mode).upper()
+        modes_to_clear = [effective_mode] if mode_only else ["PNG", "JPEG"]
 
         for m in modes_to_clear:
             try:
@@ -171,6 +189,10 @@ class TurboPNGAnalyzerService:
                     cursor.execute("DELETE FROM packets")
                     deleted_packets += cursor.rowcount
                     cursor.execute("DELETE FROM imported_files")
+                    try:
+                        cursor.execute("DELETE FROM finalized_tiles")
+                    except Exception:
+                        pass
                 agg.db.close()
             except Exception as e:
                 print(f"Error clearing packets table ({m}): {e}")
@@ -186,7 +208,7 @@ class TurboPNGAnalyzerService:
         
         target_patterns = ["*.png", "*.jpg", "*.jpeg"]
         if mode_only:
-            target_patterns = ["*.jpg", "*.jpeg"] if self.current_mode == "JPEG" else ["*.png"]
+            target_patterns = ["*.jpg", "*.jpeg"] if effective_mode == "JPEG" else ["*.png"]
 
         for dir_path in directories_to_clean:
             if not os.path.exists(dir_path):

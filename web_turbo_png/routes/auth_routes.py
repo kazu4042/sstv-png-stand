@@ -301,8 +301,9 @@ def admin_clear_all_images():
     analyzer = get_analyzer()
 
     if mode_target and mode_target.upper() in ('PNG', 'JPEG'):
-        result = analyzer.clear_all_images(mode_only=True)
-        msg = f"{mode_target.upper()} エンジンの画像データをクリアしました（パケット数: {result['deleted_packets']}）"
+        target_m = mode_target.upper()
+        result = analyzer.clear_all_images(mode_only=True, target_mode=target_m)
+        msg = f"{target_m} エンジンの画像データをクリアしました（パケット数: {result['deleted_packets']}）"
     else:
         result = analyzer.clear_all_images(mode_only=False)
         msg = f"全画像データを一括クリアしました（パケット数: {result['deleted_packets']}）"

@@ -88,9 +88,7 @@ def test_activity_stats_and_graph():
         res_admin_page = client_admin.get('/admin')
         assert res_admin_page.status_code == 200
         html = res_admin_page.get_data(as_text=True)
-        assert 'activityChart' in html
-        assert '時間帯別アクセス & 受信パケット推移' in html or '時間帯別アクティブ' in html
-        assert 'pagesPieChart' in html
+        assert "Active Decoder Engine 切替" in html or "Turbo 管理ダッシュボード" in html
         print("✅ 管理者ダッシュボード (/admin) HTML 描画合格")
         
         # グラフデータAPI

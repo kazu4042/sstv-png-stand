@@ -636,7 +636,7 @@
 
             try {
                 const reqParam = (activeViewFilter === 'CURRENT') ? currentEngineMode : activeViewFilter;
-                const res = await fetch(safeApiUrl(`/admin/api/images?mode=${reqParam}`));
+                const res = await fetch(safeApiUrl(`/admin/api/images?mode=${reqParam}&_t=${Date.now()}`));
                 const data = await res.json();
 
                 if (data.status === 'success') {

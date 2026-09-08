@@ -1,14 +1,27 @@
 import os
 import threading
 
+STATE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "engine_mode.state")
+
 class SystemFactory:
     """SSTV Turbo プラットフォームのエンジン切り替えファクトリ"""
     _lock = threading.Lock()
-    _mode = os.getenv("ACTIVE_DECODER_MODE", "PNG").upper()
+    _mode = None
 
     @classmethod
     def get_mode(cls):
         with cls._lock:
+            if os.path.exists(STATE_FILE):
+                try:
+                    with open(STATE_FILE, "r", encoding="utf-8") as f:
+                        mode = f.read().strip().upper()
+                        if mode in ("PNG", "JPEG"):
+                            cls._mode = mode
+                            return cls._mode
+                except Exception:
+                    pass
+            if cls._mode is None:
+                cls._mode = os.getenv("ACTIVE_DECODER_MODE", "PNG").upper()
             return cls._mode
 
     @classmethod
@@ -19,6 +32,13 @@ class SystemFactory:
         with cls._lock:
             cls._mode = mode
             os.environ["ACTIVE_DECODER_MODE"] = mode
+            try:
+                tmp_file = STATE_FILE + f".tmp.{os.getpid()}"
+                with open(tmp_file, "w", encoding="utf-8") as f:
+                    f.write(mode)
+                os.replace(tmp_file, STATE_FILE)
+            except Exception:
+                pass
 
     @classmethod
     def get_config(cls, mode=None):

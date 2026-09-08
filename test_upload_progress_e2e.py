@@ -3,10 +3,34 @@ import sys
 import time
 
 ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
-WAV_PATH = os.path.join(ROOT_DIR, "data", "digital_turbo_png", "audio", "test_short.wav")
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+from core.system_factory import SystemFactory
+from digital_turbo_jpeg.encoder_turbo import DigitalTurboJPEGEncoder
+from PIL import Image
+import numpy as np
+
+def ensure_test_wav():
+    SystemFactory.set_mode("JPEG")
+    wav_path = os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "audio", "test_upload_jpeg.wav")
+    if not os.path.exists(wav_path):
+        input_dir = os.path.join(ROOT_DIR, "data", "input")
+        os.makedirs(input_dir, exist_ok=True)
+        img_path = os.path.join(input_dir, "test_upload_sample.jpg")
+        arr = np.zeros((64, 64, 3), dtype=np.uint8)
+        for y in range(64):
+            for x in range(64):
+                arr[y, x] = [x % 256, y % 256, (x + y) % 256]
+        Image.fromarray(arr).save(img_path, format="JPEG", quality=80)
+        os.makedirs(os.path.dirname(wav_path), exist_ok=True)
+        enc = DigitalTurboJPEGEncoder()
+        enc.encode(img_path, wav_path)
+    return wav_path
 
 def test_upload_flow():
     print("=== 音声ファイルアップロード & ジョブ進捗 E2E テスト開始 ===")
+    wav_path = ensure_test_wav()
 
     from web_turbo_png.app import app
     client = app.test_client()
@@ -16,9 +40,9 @@ def test_upload_flow():
         sess['email'] = 'koseikazu@icloud.com'
 
     # 1. アップロード API テスト
-    with open(WAV_PATH, 'rb') as f:
+    with open(wav_path, 'rb') as f:
         upload_res = client.post('/api/upload', data={
-            'audio': (f, 'test_short.wav')
+            'file': (f, 'test_upload_jpeg.wav')
         }, content_type='multipart/form-data')
 
     assert upload_res.status_code == 200, f"Upload failed: {upload_res.status_code}"

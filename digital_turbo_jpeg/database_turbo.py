@@ -41,6 +41,17 @@ class PacketDatabaseTurboJPEG:
                     imported_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS finalized_tiles (
+                    image_id INTEGER,
+                    tile_x INTEGER,
+                    tile_y INTEGER,
+                    tile_data BLOB,
+                    stage TEXT,
+                    finalized_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (image_id, tile_x, tile_y)
+                )
+            """)
             try:
                 self.conn.execute("ALTER TABLE packets ADD COLUMN user_id INTEGER DEFAULT NULL")
             except sqlite3.OperationalError:
@@ -171,8 +182,30 @@ class PacketDatabaseTurboJPEG:
             })
         return results
 
+    def get_finalized_tiles(self, image_id):
+        """完全復元確定済みのタイルバイナリを取得 {(tile_x, tile_y): (tile_bytes, stage)}"""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT tile_x, tile_y, tile_data, stage FROM finalized_tiles WHERE image_id = ?", (image_id,))
+        return {(row[0], row[1]): (bytes(row[2]), row[3]) for row in cursor.fetchall()}
+
+    def save_finalized_tile(self, image_id, tile_x, tile_y, tile_bytes, stage="NO1"):
+        """完全復元確定タイルをDBに永続化 (これ以降の多数決不実施を担保)"""
+        with self.conn:
+            self.conn.execute("""
+                INSERT OR REPLACE INTO finalized_tiles (image_id, tile_x, tile_y, tile_data, stage)
+                VALUES (?, ?, ?, ?, ?)
+            """, (image_id, tile_x, tile_y, sqlite3.Binary(tile_bytes), stage))
+
+    def clear_finalized_tiles(self, image_id=None):
+        """確定タイルを削除（特定画像または全画像）"""
+        with self.conn:
+            if image_id is not None:
+                self.conn.execute("DELETE FROM finalized_tiles WHERE image_id = ?", (image_id,))
+            else:
+                self.conn.execute("DELETE FROM finalized_tiles")
+
     def delete_images_by_ids(self, image_ids_int_list):
-        """指定された画像IDのパケットをDBから完全削除"""
+        """指定された画像IDのパケットおよび確定タイルをDBから完全削除"""
         if not image_ids_int_list:
             return 0
         with self.conn:
@@ -180,6 +213,7 @@ class PacketDatabaseTurboJPEG:
             cursor = self.conn.cursor()
             cursor.execute(f"DELETE FROM packets WHERE image_id IN ({placeholders})", image_ids_int_list)
             deleted_count = cursor.rowcount
+            cursor.execute(f"DELETE FROM finalized_tiles WHERE image_id IN ({placeholders})", image_ids_int_list)
         return deleted_count
 
     def get_snr_analytics(self) -> dict[str, Any]:

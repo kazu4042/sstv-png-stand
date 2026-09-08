@@ -9,7 +9,7 @@ Group=www-data
 
 # プロジェクトのルートディレクトリに書き換えてください（例: /var/www/sstv-png-stand）
 WorkingDirectory=/var/www/sstv-png-stand
-Environment="PATH=/var/www/sstv-png-stand/.venv/bin"
+Environment="PATH=/var/www/sstv-png-stand/.venv/bin" "HOME=/var/www/sstv-png-stand"
 
 # 仮想環境のGunicornへのパス
 ExecStart=/var/www/sstv-png-stand/.venv/bin/gunicorn \
