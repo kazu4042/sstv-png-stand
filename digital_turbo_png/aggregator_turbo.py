@@ -90,7 +90,7 @@ class TurboPNGAggregator(BaseAggregator):
                                 tile_y         = int(parts[2])
                                 payload_length = int(parts[3])
                                 payload_bits   = parts[4]
-                                snr_str        = str(parts[5]).strip()
+                                snr_str        = parts[5].strip()
                                 if all(c in '01' for c in snr_str) and len(snr_str) == 4:
                                     snr_val = float(int(snr_str, 2))
                                 else:

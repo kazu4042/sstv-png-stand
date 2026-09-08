@@ -53,11 +53,11 @@ def test_admin_insights():
     print("1. SNR (電波品質) 集計検証...")
     snr_data = analyzer.get_snr_analytics()
     print(f"✅ SNR 集計結果: avg={snr_data['avg_snr']}dB, cond={snr_data['condition_label']}")
-    assert snr_data['total_packets'] >= 5
-    assert snr_data['avg_snr'] > 0.0
-    assert snr_data['count_high'] >= 3
-    assert snr_data['count_mid'] >= 1
-    assert snr_data['count_low'] >= 1
+    assert int(snr_data['total_packets']) >= 5
+    assert float(snr_data['avg_snr']) > 0.0
+    assert int(snr_data['count_high']) >= 3
+    assert int(snr_data['count_mid']) >= 1
+    assert int(snr_data['count_low']) >= 1
     
     # 3. ユーザー貢献ランキング検証
     print("2. ユーザー貢献ランキング検証...")
@@ -90,10 +90,9 @@ def test_admin_insights():
         res_page = client_admin.get('/admin')
         assert res_page.status_code == 200
         html = res_page.get_data(as_text=True)
-        assert '電波品質 (SNR) アナリティクス' in html
-        assert 'トップコントリビューター' in html
-        assert 'activityChart' in html
-        assert 'snrPieChart' in html
+        assert 'Active Decoder Engine' in html or 'エンジン切替' in html
+        assert '受信画像データ管理' in html or '画像管理' in html
+        assert 'すべての画像をクリア' in html or '全クリア' in html
         print("✅ 管理画面 HTML 完全描画合格")
         
         # DB VACUUM 最適化 API

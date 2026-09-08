@@ -311,7 +311,7 @@
                             <td class="py-3.5 px-4">
                                 <div class="flex items-center gap-2">
                                     <div class="w-24 bg-slate-200 rounded-full h-2 overflow-hidden">
-                                        <div class="{% if (img.engine_mode or current_engine_mode) == 'JPEG' %}bg-amber-600{% else %}bg-emerald-600{% endif %} h-2 rounded-full transition-all duration-500" style="width: {{ img.restoration_score }}%;"></div>
+                                        <div class="{% if (img.engine_mode or current_engine_mode) == 'JPEG' %}bg-amber-600{% else %}bg-emerald-600{% endif %} h-2 rounded-full transition-all duration-500" {{ ('style="width: %s%%;"' % (img.restoration_score or 0)) | safe }}></div>
                                     </div>
                                     <span class="text-xs font-bold font-mono text-slate-800">{{ img.restoration_score }}%</span>
                                 </div>

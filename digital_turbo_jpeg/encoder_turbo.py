@@ -112,7 +112,7 @@ class DigitalTurboJPEGEncoder:
                 tile_img = Image.fromarray(tile_pixels)
                 with io.BytesIO() as bio:
                     restart_int = getattr(config, "JPEG_RESTART_MARKER", 1)
-                    tile_img.save(bio, format="JPEG", quality=config.JPEG_QUALITY, restart_marker=restart_int)
+                    tile_img.save(bio, format="JPEG", quality=config.JPEG_QUALITY, restart_marker_blocks=restart_int, subsampling=0)
                     jpeg_data = bio.getvalue()
                 
                 payload_length = len(jpeg_data)

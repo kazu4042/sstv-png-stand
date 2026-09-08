@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import sys
+from typing import Any
 from collections import defaultdict
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
@@ -184,7 +185,7 @@ class PacketDatabaseTurboPNG:
             deleted_count = cursor.rowcount
         return deleted_count
 
-    def get_snr_analytics(self):
+    def get_snr_analytics(self) -> dict[str, Any]:
         """電波品質（SNR: Signal to Noise Ratio）の統計と分布を取得"""
         try:
             cursor = self.conn.cursor()

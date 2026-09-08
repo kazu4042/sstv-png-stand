@@ -1,5 +1,6 @@
 import os
 import sys
+from typing import Any
 import numpy as np
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -208,13 +209,42 @@ class TurboPNGAnalyzerService:
         }
 
     def detect_image_mode(self, target_image_id_hex):
-        """現在のシステムモードに厳格固定（PNG/JPEG の完全分離）"""
+        """画像IDが PNG / JPEG どちらのDBまたはファイルに存在するかを自動判定"""
+        clean_hex = str(target_image_id_hex).strip().upper().zfill(4)
+        try:
+            target_id_int = int(clean_hex, 16)
+        except (ValueError, TypeError):
+            return self.current_mode
+
+        # 1. 静的出力ファイルの拡張子をチェック
+        static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
+        jpg_exists = any(os.path.exists(os.path.join(static_out, f"{p}_ID_{clean_hex}.jpg")) for p in ("restored", "user_1", "user_cumulative_1"))
+        png_exists = any(os.path.exists(os.path.join(static_out, f"{p}_ID_{clean_hex}.png")) for p in ("restored", "user_1", "user_cumulative_1"))
+        if jpg_exists and not png_exists:
+            return "JPEG"
+        if png_exists and not jpg_exists:
+            return "PNG"
+
+        # 2. DB を確認
+        for check_mode in (self.current_mode, "JPEG" if self.current_mode == "PNG" else "PNG"):
+            try:
+                cfg = SystemFactory.get_config(check_mode)
+                ldir = getattr(cfg, "TEXT_LOG_DIR", f"data/digital_turbo_{check_mode.lower()}/logs")
+                ldir_path = os.path.join(ROOT_DIR, ldir) if not os.path.isabs(ldir) else ldir
+                agg = SystemFactory.get_aggregator(log_dir=ldir_path, mode=check_mode)
+                cur = agg.db.conn.cursor()
+                cur.execute("SELECT 1 FROM packets WHERE image_id = ? LIMIT 1", (target_id_int,))
+                if cur.fetchone():
+                    return check_mode
+            except Exception:
+                pass
+
         return self.current_mode
 
     def get_image_status(self, target_image_id_hex, user_id=None):
-        """指定画像の全体復元状況および特定ユーザーの貢献状況を高速取得（現在のモードのみに完全分離）"""
+        """指定画像の全体復元状況および特定ユーザーの貢献状況を取得"""
         clean_hex = str(target_image_id_hex).strip().upper().zfill(4)
-        effective_mode = self.current_mode
+        effective_mode = self.detect_image_mode(clean_hex)
         config = SystemFactory.get_config(effective_mode)
 
         try:
@@ -383,7 +413,121 @@ class TurboPNGAnalyzerService:
 
         return missing_list
 
-    def get_snr_analytics(self):
+    def calculate_reliability_scores(self, target_image_id_hex: str, current_user_id: int | None = None) -> list[dict[str, Any]]:
+        """各タイルのSNR重み付き信頼度および貢献度情報を計算して返す"""
+        reliability_map: list[dict[str, Any]] = []
+        clean_hex = str(target_image_id_hex).strip().upper().zfill(4)
+        try:
+            target_id_int = int(clean_hex, 16)
+        except (ValueError, TypeError):
+            return reliability_map
+
+        effective_mode = self.detect_image_mode(clean_hex)
+        config = SystemFactory.get_config(effective_mode)
+        ldir = getattr(config, "TEXT_LOG_DIR", f"data/digital_turbo_{effective_mode.lower()}/logs")
+        ldir_path = os.path.join(ROOT_DIR, ldir) if not os.path.isabs(ldir) else ldir
+        agg = SystemFactory.get_aggregator(log_dir=ldir_path, mode=effective_mode)
+
+        tiles_data = agg.db.get_packets_for_image(target_id_int)
+        if not tiles_data:
+            return reliability_map
+
+        from web_turbo_png.services.auth_db import get_auth_db
+        auth_db = get_auth_db()
+        user_info_cache: dict[int, dict[str, Any] | None] = {}
+
+        tile_count_x = config.TILE_COUNT_X
+        tile_count_y = config.TILE_COUNT_Y
+
+        for ty in range(tile_count_y):
+            for tx in range(tile_count_x):
+                if ty not in tiles_data or tx not in tiles_data[ty]:
+                    continue
+
+                len_dict = tiles_data[ty][tx]
+                if not len_dict:
+                    continue
+
+                best_plen = None
+                max_weight_sum = -1.0
+                for plen, pkts in len_dict.items():
+                    w_sum = sum(max(0.1, float(p[1]) + 1.0) for p in pkts)
+                    if w_sum > max_weight_sum:
+                        max_weight_sum = w_sum
+                        best_plen = plen
+
+                if not best_plen:
+                    continue
+
+                packets = len_dict[best_plen]
+                payload_len = best_plen * 8
+                total_files = len(packets)
+                total_weight_sum = sum(max(0.1, float(p[1]) + 1.0) for p in packets)
+
+                score_0 = np.zeros(payload_len, dtype=float)
+                score_1 = np.zeros(payload_len, dtype=float)
+
+                for payload_bits_str, snr, file_name, p_user_id, imported_at in packets:
+                    weight = max(0.1, float(snr) + 1.0)
+                    if len(payload_bits_str) < payload_len:
+                        continue
+                    for i, bit_char in enumerate(payload_bits_str[:payload_len]):
+                        if bit_char == '1':
+                            score_1[i] += weight
+                        elif bit_char == '0':
+                            score_0[i] += weight
+
+                confidences = []
+                for i in range(payload_len):
+                    diff = abs(score_1[i] - score_0[i])
+                    confidence = min(100.0, (diff / max(1.0, total_weight_sum)) * 100.0)
+                    confidences.append(confidence)
+
+                avg_confidence = float(np.mean(confidences)) if confidences else 0.0
+                avg_snr = (sum(float(p[1]) for p in packets) / total_files) if total_files > 0 else 0.0
+
+                sources = []
+                is_contributed = False
+                for payload_bits_str, snr, file_name, p_user_id, imported_at in packets:
+                    if current_user_id is not None and p_user_id == current_user_id:
+                        is_contributed = True
+
+                    sender_name = "ゲスト"
+                    location = "Local"
+                    if p_user_id:
+                        if p_user_id not in user_info_cache:
+                            user_info_cache[p_user_id] = auth_db.get_user_by_id(p_user_id)
+                        u_info = user_info_cache[p_user_id]
+                        if u_info:
+                            callsign = u_info.get("callsign") or ""
+                            disp = u_info.get("display_name") or u_info.get("email", "").split("@")[0]
+                            sender_name = f"{disp} ({callsign})" if callsign else disp
+                            location = u_info.get("location") or "Japan"
+                        else:
+                            sender_name = f"局 #{p_user_id}"
+
+                    sources.append({
+                        "sender": sender_name,
+                        "location": location,
+                        "received_at": str(imported_at) if imported_at else "Now",
+                        "file_name": file_name or f"packet_{len(sources)}",
+                        "snr": round(float(snr), 1)
+                    })
+
+                reliability_map.append({
+                    "line": ty,
+                    "block": tx,
+                    "score": round(avg_confidence, 1),
+                    "avg_snr": round(avg_snr, 1),
+                    "samples": total_files,
+                    "total_weight": int(total_weight_sum),
+                    "is_contributed": is_contributed,
+                    "sources": sources
+                })
+
+        return reliability_map
+
+    def get_snr_analytics(self) -> dict[str, Any]:
         return self.aggregator.db.get_snr_analytics()
 
     def get_top_contributors(self, limit=5):

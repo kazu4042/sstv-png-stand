@@ -22,8 +22,19 @@ if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
 from digital_turbo_jpeg import config_turbo as config
+from dataclasses import dataclass
 from digital_turbo_jpeg.database_turbo import PacketDatabaseTurboJPEG
 from core.base_interfaces import BaseAggregator
+
+
+@dataclass
+class ParsedJPEGPacket:
+    header: bytes
+    segments: list[bytes]
+    markers: list[int]
+    has_eoi: bool
+    snr: float
+    raw_bytes: bytes | bytearray
 
 
 class TurboJPEGAggregator(BaseAggregator):
@@ -132,6 +143,149 @@ class TurboJPEGAggregator(BaseAggregator):
         voted_bits = (vote_sums >= 0).astype(np.uint8)
         return "".join(str(b) for b in voted_bits)
 
+    def split_jpeg_into_segments(self, p_bytes):
+        """JPEGバイト列を解析し、ヘッダ(SOI〜SOS)、各RST区間データ(セグメント)、マーカー、EOI有無に分割"""
+        if not p_bytes or len(p_bytes) < 4:
+            return None
+        raw = bytes(p_bytes)
+        soi_idx = raw.find(b'\xff\xd8')
+        if soi_idx == -1:
+            return None
+        sos_idx = raw.find(b'\xff\xda', soi_idx + 2)
+        if sos_idx == -1 or sos_idx + 4 > len(raw):
+            return None
+        sos_len = (raw[sos_idx + 2] << 8) | raw[sos_idx + 3]
+        header_end = sos_idx + 2 + sos_len
+        if header_end > len(raw):
+            return None
+        header_bytes = raw[soi_idx:header_end]
+
+        segments = []
+        rst_markers = []
+        has_eoi = False
+
+        idx = header_end
+        n = len(raw)
+        seg_start = header_end
+
+        while idx < n:
+            if raw[idx] == 0xFF:
+                if idx + 1 < n:
+                    m = raw[idx + 1]
+                    if m == 0x00:
+                        idx += 2
+                        continue
+                    elif 0xD0 <= m <= 0xD7:
+                        segments.append(raw[seg_start:idx])
+                        rst_markers.append(m)
+                        idx += 2
+                        seg_start = idx
+                        continue
+                    elif m == 0xD9:
+                        segments.append(raw[seg_start:idx])
+                        has_eoi = True
+                        idx += 2
+                        break
+                    else:
+                        idx += 1
+                else:
+                    idx += 1
+            else:
+                idx += 1
+
+        if not has_eoi and seg_start < n:
+            segments.append(raw[seg_start:n])
+
+        return header_bytes, segments, rst_markers, has_eoi
+
+    def rst_aligned_majority_vote(self, packets, best_plen, cur_tile_w, cur_tile_h):
+        """リスタートマーカー (0xFF 0xD0〜0xD7) 単位でセグメント分割し、区間ごとの独立アライメント多数決でJPEGを再構築"""
+        if len(packets) < 2:
+            return None
+
+        parsed_packets: list[ParsedJPEGPacket] = []
+        for row in packets:
+            p_str = row[0]
+            snr = float(row[1])
+            if len(p_str) < best_plen * 8:
+                continue
+            p_bytes = self.bits_to_bytearray(p_str[:best_plen * 8])
+            parsed = self.split_jpeg_into_segments(p_bytes)
+            if parsed is not None:
+                header_bytes, segments, rst_markers, has_eoi = parsed
+                if len(segments) > 1:
+                    parsed_packets.append(ParsedJPEGPacket(
+                        header=header_bytes,
+                        segments=segments,
+                        markers=rst_markers,
+                        has_eoi=has_eoi,
+                        snr=snr,
+                        raw_bytes=bytes(p_bytes)
+                    ))
+
+        if len(parsed_packets) < 2:
+            return None
+
+        # 最頻出のセグメント数を持つグループを抽出
+        seg_count_freq: dict[int, int] = defaultdict(int)
+        for p in parsed_packets:
+            seg_count_freq[len(p.segments)] += 1
+        target_seg_count = max(seg_count_freq.keys(), key=lambda k: seg_count_freq[k])
+        target_packets = [p for p in parsed_packets if len(p.segments) == target_seg_count]
+
+        if not target_packets:
+            return None
+
+        best_header_packet = max(target_packets, key=lambda p: p.snr)
+        rebuilt_segments: list[bytes] = []
+
+        # 各セグメント区間ごとにアライメント多数決 / ベスト選定
+        for seg_idx in range(target_seg_count):
+            candidates: list[tuple[bytes, float]] = []
+            for p in target_packets:
+                candidates.append((p.segments[seg_idx], p.snr))
+
+            # 長さごとの候補グループ
+            len_groups: dict[int, list[tuple[bytes, float]]] = defaultdict(list)
+            for c_bytes, c_snr in candidates:
+                len_groups[len(c_bytes)].append((c_bytes, c_snr))
+
+            best_len = max(len_groups.keys(), key=lambda l: sum(s + 1.0 for _, s in len_groups[l]))
+            same_len_cand = len_groups[best_len]
+
+            if len(same_len_cand) >= 2:
+                # 同一長セグメント間でSNR加重ビット多数決
+                bit_len = best_len * 8
+                vote_sums = np.zeros(bit_len, dtype=np.float64)
+                for c_bytes, c_snr in same_len_cand:
+                    w = c_snr + 1.0
+                    b_bits = np.unpackbits(np.frombuffer(c_bytes, dtype=np.uint8))
+                    vote_sums += (b_bits.astype(np.float64) * 2.0 - 1.0) * w
+                voted_bits = (vote_sums >= 0).astype(np.uint8)
+                voted_seg_bytes = np.packbits(voted_bits).tobytes()
+                rebuilt_segments.append(voted_seg_bytes)
+            else:
+                # 最もSNRの高いセグメントを採用 (スプライシング)
+                best_cand = max(same_len_cand, key=lambda x: x[1])
+                rebuilt_segments.append(best_cand[0])
+
+        # リスタートマーカーを挟みながらJPEGバイナリを再構成
+        rebuilt_data = bytearray(best_header_packet.header)
+        for idx, seg in enumerate(rebuilt_segments):
+            rebuilt_data.extend(seg)
+            if idx < len(best_header_packet.markers):
+                marker_byte = best_header_packet.markers[idx]
+                rebuilt_data.extend(bytes([0xFF, marker_byte]))
+            elif idx < target_seg_count - 1:
+                # 予備のRSTマーカー (0xD0 + idx % 8)
+                rebuilt_data.extend(bytes([0xFF, 0xD0 + (idx % 8)]))
+
+        rebuilt_data.extend(b'\xff\xd9')  # EOI
+
+        # 再構築JPEGが完全無欠であるかを厳密判定
+        perfect_img = self.is_perfect_jpeg_tile(bytes(rebuilt_data), cur_tile_w, cur_tile_h)
+        return perfect_img
+
     def _get_jpeg_header_template(self, tile_w, tile_h):
         """指定タイルサイズ用の正常な JPEG ヘッダテンプレート (SOI〜SOS) をキャッシュ"""
         key = (tile_w, tile_h)
@@ -139,7 +293,7 @@ class TurboJPEGAggregator(BaseAggregator):
             dummy = Image.new("RGB", (tile_w, tile_h), color=(0, 0, 0))
             bio = io.BytesIO()
             restart_int = getattr(config, "JPEG_RESTART_MARKER", 1)
-            dummy.save(bio, format="JPEG", quality=config.JPEG_QUALITY, restart_marker=restart_int)
+            dummy.save(bio, format="JPEG", quality=config.JPEG_QUALITY, restart_marker_blocks=restart_int, subsampling=0)
             raw = bio.getvalue()
             sos_pos = raw.find(b'\xff\xda')
             if sos_pos != -1:
@@ -310,7 +464,7 @@ class TurboJPEGAggregator(BaseAggregator):
                                 p_bytes = self.bits_to_bytearray(p_bits[:plen * 8])
                                 t_img = self.decode_tile_bytes_safely(p_bytes)
                                 if t_img:
-                                    detected_tile_w, detected_tile_h = int(t_img.size[0]), int(t_img.size[1])
+                                    detected_tile_w, detected_tile_h = t_img.size
                                     found_size = True
                                     break
                         if found_size:
@@ -342,26 +496,30 @@ class TurboJPEGAggregator(BaseAggregator):
                         continue
 
                     perfect_img = None
+                    sorted_packets = sorted(packets, key=lambda p: p[1], reverse=True)
+                    payload_bit_len = best_plen * 8
 
-                    # ★ 最適化 1: 複数パケットがある場合、まずビット多数決で「完全無欠JPEG」を試行
-                    if len(packets) > 1:
+                    # ★ 優先度 1: 個別パケットの中にすでに「100%完全な無傷JPEG」があるかを最優先チェック！
+                    # 混ぜ合わせる前に無傷な生データがあれば、多数決による不要な汚染リスクを完全に排除して即座に採用確定
+                    for row in sorted_packets:
+                        payload_bits_str = row[0]
+                        if len(payload_bits_str) >= payload_bit_len:
+                            p_bytes = self.bits_to_bytearray(payload_bits_str[:payload_bit_len])
+                            perfect_img = self.is_perfect_jpeg_tile(p_bytes, cur_tile_w, cur_tile_h)
+                            if perfect_img is not None:
+                                break
+
+                    # ★ 優先度 2: 無傷パケットが単独で存在せず、複数パケットがある場合、「テキスト全体ビット多数決」で修復を試行
+                    if perfect_img is None and len(packets) > 1:
                         voted_bits_str = self.bit_majority_vote(packets, best_plen * 8)
                         v_bytes = self.bits_to_bytearray(voted_bits_str)
                         perfect_img = self.is_perfect_jpeg_tile(v_bytes, cur_tile_w, cur_tile_h)
 
-                    # ★ 最適化 2: 個別パケットの中にすでに「100%完全な無傷JPEG」があるかチェック
-                    if perfect_img is None:
-                        sorted_packets = sorted(packets, key=lambda p: p[1], reverse=True)
-                        for row in sorted_packets:
-                            payload_bits_str = row[0]
-                            payload_bit_len = best_plen * 8
-                            if len(payload_bits_str) >= payload_bit_len:
-                                p_bytes = self.bits_to_bytearray(payload_bits_str[:payload_bit_len])
-                                perfect_img = self.is_perfect_jpeg_tile(p_bytes, cur_tile_w, cur_tile_h)
-                                if perfect_img is not None:
-                                    break
+                    # ★ 優先度 3: 全体多数決でも通らなかった場合、「RSTマーカー同期多数決 (セグメント分割多数決)」を試行
+                    if perfect_img is None and len(packets) > 1:
+                        perfect_img = self.rst_aligned_majority_vote(packets, best_plen, cur_tile_w, cur_tile_h)
 
-                    # ★ 完全なタイルが見つかった場合は、これ以上多数決・平均化を行わず即座に採用確定！
+                    # ★ 完全なタイル（優先度1〜3）が得られた場合は即座に採用確定！
                     if perfect_img is not None:
                         paste_x = tx * detected_tile_w
                         paste_y = ty * detected_tile_h
@@ -375,18 +533,43 @@ class TurboJPEGAggregator(BaseAggregator):
                             rendered_mask[ty, tx] = True
                         continue
 
-                    # ★ 完全なパケットが1つもなかった場合のみ、破損パケット同士のピクセル領域SNR加重平均を実行
+                    # ★ 優先度 4: 単独最高SNRパケットの採用 (濁り・変色を防ぐクリア単体描画)
+                    best_single_img = None
+
+                    for row in sorted_packets:
+                        payload_bits_str = row[0]
+                        if len(payload_bits_str) >= payload_bit_len:
+                            p_bytes = self.bits_to_bytearray(payload_bits_str[:payload_bit_len])
+                            cand_img = self.decode_tile_bytes_safely(p_bytes, cur_tile_w, cur_tile_h)
+                            if cand_img is not None:
+                                cand_arr = np.array(cand_img.resize((cur_tile_w, cur_tile_h)), dtype=np.float32)
+                                # 有効画素率（黒落ちしていない割合）
+                                valid_ratio = np.mean(np.sum(cand_arr, axis=2) > 3.0)
+                                if valid_ratio >= 0.85:
+                                    best_single_img = cand_img
+                                    break
+
+                    if best_single_img is not None:
+                        paste_x = tx * detected_tile_w
+                        paste_y = ty * detected_tile_h
+                        tw, th = best_single_img.size
+                        if paste_x + tw <= canvas_w and paste_y + th <= canvas_h:
+                            canvas.paste(best_single_img, (paste_x, paste_y))
+                            rendered_mask[ty, tx] = True
+                        else:
+                            cropped = best_single_img.crop((0, 0, min(tw, canvas_w - paste_x), min(th, canvas_h - paste_y)))
+                            canvas.paste(cropped, (paste_x, paste_y))
+                            rendered_mask[ty, tx] = True
+                        continue
+
+                    # ★ 優先度 5: 単独パケットすら欠損が大きい場合のみ、複数破損パケットのRGB空間多数決 (ピクセル領域加重平均)
                     pixel_sum = np.zeros((cur_tile_h, cur_tile_w, 3), dtype=np.float64)
                     weight_sum = np.zeros((cur_tile_h, cur_tile_w, 1), dtype=np.float64)
                     decoded_count = 0
 
-                    sorted_packets = sorted(packets, key=lambda p: p[1], reverse=True)
-
                     for row in sorted_packets:
                         payload_bits_str = row[0]
                         snr_val = row[1]
-                        payload_bit_len = best_plen * 8
-
                         if len(payload_bits_str) < payload_bit_len:
                             continue
 
@@ -427,11 +610,11 @@ class TurboJPEGAggregator(BaseAggregator):
                             canvas.paste(cropped, (paste_x, paste_y))
                             rendered_mask[ty, tx] = True
 
-            # 3. 欠損タイルがある場合、スマートインペインティング（周囲補間）を実施
-            if not np.all(rendered_mask):
-                canvas = self.inpaint_missing_tiles(canvas, tile_count_x, tile_count_y, detected_tile_w, detected_tile_h, rendered_mask)
+            # 3. 欠損タイル補間（インペインティング）は周囲の平均色ベタ塗りによる「曇り・モザイク」の原因となるため無効化
+            # if not np.all(rendered_mask):
+            #     canvas = self.inpaint_missing_tiles(canvas, tile_count_x, tile_count_y, detected_tile_w, detected_tile_h, rendered_mask)
 
-            clean_id_str = f"{int(main_id):04X}"
+            clean_id_str = f"{main_id:04X}"
             out_filename = f"restored_ID_{clean_id_str}.jpg" if not user_id else f"user_{user_id}_ID_{clean_id_str}.jpg"
             out_path = os.path.join(output_dir, out_filename)
             canvas.save(out_path, format="JPEG", quality=95)
