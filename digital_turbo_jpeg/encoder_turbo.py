@@ -171,7 +171,9 @@ class DigitalTurboJPEGEncoder:
         if output_wav_path is None:
             output_wav_path = os.path.join(root_dir, config.OUTPUT_WAV)
 
-        os.makedirs(os.path.dirname(output_wav_path), exist_ok=True)
+        out_dir = os.path.dirname(os.path.abspath(output_wav_path))
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
         wavfile.write(output_wav_path, config.SAMPLE_RATE, (final_wave * 32767).astype(np.int16))
         print(f"  -> 音声ファイル保存完了: {output_wav_path}\n")
 

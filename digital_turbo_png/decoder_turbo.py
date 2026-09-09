@@ -168,7 +168,8 @@ def fast_scan_all_packets_png_native(
         sync_power = c * c + s * s
         sync_norm = sync_power / (tot_e * sync_long_samples)
 
-        if sync_power > 0.04 or sync_norm > 0.16:
+        # 1000Hz純度（norm）とエネルギーで同期パルスを検出（スマホ小音量・遠距離録音耐性強化）
+        if (sync_norm > 0.10 and sync_power > 0.003) or (sync_power > 0.04 and sync_norm > 0.05):
             search_ptr = i + int(samples_sync_full * 0.5)
             while search_ptr < total_samples - sync_long_samples:
                 c2 = 0.0
@@ -341,14 +342,14 @@ class DigitalTurboPNGDecoder(BaseDecoder):
                 ).astype(np.float32)
                 rate = config.SAMPLE_RATE
 
-        # 振幅ズレ・スパイク音耐性: DC除去 ＋ 99.5パーセンタイル正規化
+        # 振幅ズレ・スパイク音耐性: DC除去 ＋ ロバスト正規化（小音量ブースト＆突発スパイク除外）
         data = data.astype(np.float32)
         data = data - np.mean(data)
-        q = np.percentile(np.abs(data), 99.5)
-        if q > 1e-5:
-            data = np.clip(data / q, -1.5, 1.5)
-        elif np.max(np.abs(data)) > 0:
-            data = data / np.max(np.abs(data))
+        abs_data = np.abs(data)
+        q = np.percentile(abs_data, 99.0)
+        max_v = np.max(abs_data)
+        norm_factor = q if q > 1e-4 else (max_v if max_v > 0 else 1.0)
+        data = np.clip(data / norm_factor, -2.0, 2.0)
 
         # --- ノイズ耐性向上: バンドパスフィルタ ---
         if getattr(config, "BANDPASS_ENABLE", False):

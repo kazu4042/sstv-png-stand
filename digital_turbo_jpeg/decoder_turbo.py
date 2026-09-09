@@ -246,8 +246,8 @@ def fast_scan_range_native(
     while i < scan_limit:
         p, norm = fast_detect_sync_energy(data, i, sync_long_samples, sync_win, sync_cos, sync_sin)
 
-        # 1000Hz純度（norm）とエネルギーで同期パルスを検出（ノイズによる偽陽性を排除）
-        if (norm > 0.16 and p > 0.01) or (p > 0.2 and norm > 0.08):
+        # 1000Hz純度（norm）とエネルギーで同期パルスを検出（スマホ小音量・遠距離録音耐性強化）
+        if (norm > 0.10 and p > 0.003) or (p > 0.08 and norm > 0.05):
             # 同期パルスの終端（立ち下がり＝データ先頭）をファインステップで探索
             search_ptr = i + int(samples_sync_full * 0.4)
             while search_ptr < total_len - sync_long_samples:
@@ -413,14 +413,14 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
         # スマホマイク録音時の低周波エアコン音、手ブレ雑音、高周波ノイズを一掃
         data = apply_bandpass_filter_np(data, rate, config.VALID_BAND_MIN, config.VALID_BAND_MAX)
 
-        # 振幅ズレ・スパイク音耐性: DC除去 ＋ 99.5パーセンタイル正規化
+        # 振幅ズレ・スパイク音耐性: DC除去 ＋ ロバスト正規化（小音量ブースト＆突発スパイク除外）
         data = data.astype(np.float32)
         data = data - np.mean(data)
-        q = np.percentile(np.abs(data), 99.5)
-        if q > 1e-5:
-            data = np.clip(data / q, -1.5, 1.5)
-        elif np.max(np.abs(data)) > 0:
-            data = data / np.max(np.abs(data))
+        abs_data = np.abs(data)
+        q = np.percentile(abs_data, 99.0)
+        max_v = np.max(abs_data)
+        norm_factor = q if q > 1e-4 else (max_v if max_v > 0 else 1.0)
+        data = np.clip(data / norm_factor, -2.0, 2.0)
 
         samples_sync_full = int(config.SAMPLE_RATE * config.MS_SYNC / 1000)
         info_bits_count = config.BIT_IMAGE_CRC + config.BIT_TILE_X + config.BIT_TILE_Y + config.BIT_PAYLOAD_LENGTH

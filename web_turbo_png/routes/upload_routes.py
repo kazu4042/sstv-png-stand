@@ -158,24 +158,46 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                 return
             decode_target_path = filepath
 
-        update_job(job_id, progress=6, status=f"音声のデコード中 ({mode_name} モード)...")
+        # ===== Step1: デュアルエンジン自動判定（PNG/JPEG 両対応） =====
+        primary_mode = mode_name
+        fallback_mode = "JPEG" if primary_mode == "PNG" else "PNG"
+        modes_to_try = [primary_mode, fallback_mode]
 
-        # ===== Step1: ファクトリからデコーダを取得してデコード =====
-        decoder = SystemFactory.get_decoder(user_id=user_id, mode=mode_name)
-        
-        def decode_progress_callback(prog):
-            calc_prog = 6 + int(prog * 0.54)
-            update_job(job_id, progress=calc_prog, status=f"音声信号の高速デコード中 ({mode_name})... {int(prog)}%")
-                
-        success_count, log_path = decoder.run(decode_target_path, progress_callback=decode_progress_callback)
-
+        detected_mode = None
         decoded_bits_list = []
-        if os.path.exists(log_path):
-            with open(log_path, "r", encoding="utf-8") as f:
-                decoded_bits_list = [line.strip() for line in f if line.strip()]
-        
+        decoder = None
+
+        for try_mode in modes_to_try:
+            update_job(job_id, progress=6, status=f"音声信号を検出中 ({try_mode} モード)...")
+            cur_decoder = SystemFactory.get_decoder(user_id=user_id, mode=try_mode)
+
+            def decode_progress_callback(prog):
+                calc_prog = 6 + int(prog * 0.54)
+                update_job(job_id, progress=calc_prog, status=f"音声信号の高速デコード中 ({try_mode})... {int(prog)}%")
+
+            success_count, log_path = cur_decoder.run(decode_target_path, progress_callback=decode_progress_callback)
+
+            cur_bits_list = []
+            if os.path.exists(log_path):
+                with open(log_path, "r", encoding="utf-8") as f:
+                    cur_bits_list = [line.strip() for line in f if line.strip()]
+
+            if cur_bits_list:
+                detected_mode = try_mode
+                decoded_bits_list = cur_bits_list
+                decoder = cur_decoder
+                mode_name = detected_mode
+                config = SystemFactory.get_config(mode_name)
+                # システム稼働モードを自動的に合致したモードに同期更新
+                SystemFactory.set_mode(mode_name)
+                print(f"[Upload] 🎯 デュアルエンジン自動検出成功: {mode_name} モードの信号を検出 ({len(cur_bits_list)} パケット)")
+                break
+
         if not decoded_bits_list:
-            update_job(job_id, progress=100, status="エラー", error=f"SSTV Turbo ({mode_name}) の信号が検出できませんでした。")
+            update_job(
+                job_id, progress=100, status="エラー",
+                error="SSTV Turbo 信号が検出できませんでした。音声をスピーカーから再生し、スマホのマイクを近づけて最初（1000Hzのピ音）から最後までしっかり録音したファイルを選択してください。"
+            )
             return
             
         update_job(job_id, progress=60, status="データベースへの登録中...")
