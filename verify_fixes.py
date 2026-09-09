@@ -52,22 +52,34 @@ def run_checks():
     print("1. ログイン認証: 成功")
 
     # 2. デモ音声再生ページ (/demo) の検証
-    # (a) デフォルトアクセス
+    # (a) 現在のエンジンモードに応じた音声が配信され、利用者画面での切り替えタブが存在しないことを確認
+    from core.system_factory import SystemFactory
+    saved_mode = SystemFactory.get_mode()
+
+    # JPEGモードでの検証
+    SystemFactory.set_mode("JPEG")
     status, body_bytes, _ = do_req("/demo")
     assert status == 200, f"/demo 取得失敗: {status}"
-    html = body_bytes.decode('utf-8')
-    assert "btnModePng" in html, "btnModePng が HTML に存在しません"
-    assert "btnModeJpeg" in html, "btnModeJpeg が HTML に存在しません"
-    assert "turbo_256_256.wav" in html, "JPEG用音声 turbo_256_256.wav が HTML に含まれていません"
-    assert "turbo_png_256_256.wav" in html, "PNG用音声 turbo_png_256_256.wav が HTML に含まれていません"
-    print("2. /demo ページ: モード別音声切り替え機能の存在を確認（PNG/JPEG両音声定義済み）")
-
-    # (b) JPEGモードクエリでのアクセス (?mode=JPEG)
-    status, body_bytes, _ = do_req("/demo?mode=JPEG")
-    assert status == 200
     html_jpeg = body_bytes.decode('utf-8')
-    assert "段階的復元用テスト音声" in html_jpeg, "JPEGモードのラベルが表示されていません"
-    print("   -> /demo?mode=JPEG: JPEG用テスト音声表示を確認")
+    assert "btnModePng" not in html_jpeg, "利用者画面に btnModePng が存在します（混乱防止のため削除されている必要があります）"
+    assert "btnModeJpeg" not in html_jpeg, "利用者画面に btnModeJpeg が存在します（混乱防止のため削除されている必要があります）"
+    assert "turbo_256_256.wav" in html_jpeg, "JPEGモード時に turbo_256_256.wav が含まれていません"
+    assert "turbo_png_256_256.wav" not in html_jpeg, "JPEGモード時に turbo_png_256_256.wav が含まれています（JPEG音声のみである必要があります）"
+    assert "JPEG モード" in html_jpeg, "JPEGモードの表示がありません"
+    print("2. /demo ページ (JPEGモード): JPEG専用テスト音声 turbo_256_256.wav の配信 & 切替ボタン非表示を確認")
+
+    # PNGモードでの検証
+    SystemFactory.set_mode("PNG")
+    status, body_bytes, _ = do_req("/demo")
+    assert status == 200, f"/demo 取得失敗: {status}"
+    html_png = body_bytes.decode('utf-8')
+    assert "turbo_png_256_256.wav" in html_png, "PNGモード時に turbo_png_256_256.wav が含まれていません"
+    assert "turbo_256_256.wav" not in html_png, "PNGモード時に turbo_256_256.wav が含まれています（PNG音声のみである必要があります）"
+    assert "PNG モード" in html_png, "PNGモードの表示がありません"
+    print("   -> /demo ページ (PNGモード): PNG専用テスト音声 turbo_png_256_256.wav の配信 & 切替ボタン非表示を確認")
+
+    # 元のモードに復帰
+    SystemFactory.set_mode(saved_mode)
 
     # 3. 管理画面 (/admin) および API (/admin/api/images) の検証
     status, body_bytes, _ = do_req("/admin/api/images?mode=ALL")

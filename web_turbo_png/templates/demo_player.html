@@ -301,20 +301,10 @@
                 </div>
             </div>
 
-            <!-- エンジン別音声切り替えタブ -->
-            <div class="flex items-center justify-center gap-2 mb-4 bg-forestLight/60 p-1 rounded-xl">
-                <button id="btnModePng" onclick="switchMode('PNG')" class="flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all {% if selected_mode != 'JPEG' %}bg-forest text-white shadow-sm{% else %}text-ink/70 hover:text-ink{% endif %}">
-                    PNG 音声 (多数決)
-                </button>
-                <button id="btnModeJpeg" onclick="switchMode('JPEG')" class="flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all {% if selected_mode == 'JPEG' %}bg-amber-600 text-white shadow-sm{% else %}text-ink/70 hover:text-ink{% endif %}">
-                    JPEG 音声 (段階復元)
-                </button>
-            </div>
-
-            <!-- 現在再生中の音声モードバッジ -->
+            <!-- 現在再生中の音声モード表示（混乱防止のためシステム稼働エンジンを固定配信） -->
             <div class="mb-5 text-center">
-                <span id="currentModeBadge" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold {% if selected_mode == 'JPEG' %}bg-amber-100 text-amber-800 border border-amber-300{% else %}bg-emerald-100 text-emerald-800 border border-emerald-300{% endif %}">
-                    <span class="w-2 h-2 rounded-full {% if selected_mode == 'JPEG' %}bg-amber-500{% else %}bg-emerald-500{% endif %}"></span>
+                <span id="currentModeBadge" class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold shadow-xs {% if current_engine_mode == 'JPEG' %}bg-amber-100 text-amber-900 border border-amber-300{% else %}bg-emerald-100 text-emerald-900 border border-emerald-300{% endif %}">
+                    <span class="w-2.5 h-2.5 rounded-full {% if current_engine_mode == 'JPEG' %}bg-amber-500 animate-pulse{% else %}bg-emerald-500 animate-pulse{% endif %}"></span>
                     <span id="currentModeLabel">{{ audio_label or 'SSTV テスト音声' }}</span>
                 </span>
             </div>
@@ -406,14 +396,10 @@
 
     <script>
         // ====================================================================
-        // Audio Player with Mode-Aware Source (PNG / JPEG)
+        // Audio Player (システム稼働エンジン音声を固定配信)
         // ====================================================================
-        const audioSources = {
-            'PNG': "{{ url_for('static', filename='audio/turbo_png_256_256.wav') }}?t=png_" + Date.now(),
-            'JPEG': "{{ url_for('static', filename='audio/turbo_256_256.wav') }}?t=jpeg_" + Date.now()
-        };
-        let currentMode = "{{ selected_mode or current_engine_mode or 'PNG' }}";
-        let audioSrc = audioSources[currentMode] || audioSources['PNG'];
+        const currentMode = "{{ current_engine_mode or 'PNG' }}";
+        const audioSrc = "{{ url_for('static', filename=audio_filename) }}?t=" + Date.now();
 
         // [Audio Player] 音声再生ページ
         let audioContext = null;
@@ -533,44 +519,8 @@
         }
 
         // ====================================================================
-        // Audio Loading & Mode Switching
+        // Audio Loading
         // ====================================================================
-        async function switchMode(mode) {
-            if (mode === currentMode && audioBuffer) return;
-            stopCurrent();
-            currentMode = mode;
-            audioSrc = audioSources[mode] || audioSources['PNG'];
-            audioBuffer = null;
-
-            // UIの切り替え
-            const btnPng = document.getElementById('btnModePng');
-            const btnJpeg = document.getElementById('btnModeJpeg');
-            const modeBadge = document.getElementById('currentModeBadge');
-            const modeLabel = document.getElementById('currentModeLabel');
-
-            if (mode === 'JPEG') {
-                if (btnPng) btnPng.className = 'flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all text-ink/70 hover:text-ink';
-                if (btnJpeg) btnJpeg.className = 'flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all bg-amber-600 text-white shadow-sm';
-                if (modeBadge) modeBadge.className = 'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300';
-                if (modeLabel) modeLabel.textContent = 'JPEG モード (ざらざら感・段階的復元用テスト音声)';
-            } else {
-                if (btnPng) btnPng.className = 'flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all bg-forest text-white shadow-sm';
-                if (btnJpeg) btnJpeg.className = 'flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all text-ink/70 hover:text-ink';
-                if (modeBadge) modeBadge.className = 'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300';
-                if (modeLabel) modeLabel.textContent = 'PNG モード (0/100 多数決復元用テスト音声)';
-            }
-
-            setPlayingUI(false);
-            if (progressFill) progressFill.style.width = '0%';
-            if (currentTimeEl) currentTimeEl.textContent = '0:00';
-            if (startPosEl) startPosEl.textContent = '--:--';
-            if (durationEl) durationEl.textContent = '--:--';
-            if (sampleRateEl) sampleRateEl.textContent = '--';
-            if (totalTimeEl) totalTimeEl.textContent = '--:--';
-
-            await initAudio();
-        }
-
         async function initAudio() {
             if (!audioContext) {
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
