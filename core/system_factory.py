@@ -69,3 +69,13 @@ class SystemFactory:
         else:
             from digital_turbo_png.aggregator_turbo import TurboPNGAggregator
             return TurboPNGAggregator(log_dir=log_dir)
+
+    @classmethod
+    def get_encoder(cls, mode=None):
+        target_mode = (mode or cls.get_mode()).upper()
+        if target_mode == "JPEG":
+            from digital_turbo_jpeg.encoder_turbo import DigitalTurboJPEGEncoder
+            return DigitalTurboJPEGEncoder()
+        else:
+            from digital_turbo_png.encoder_turbo import DigitalTurboPNGEncoder
+            return DigitalTurboPNGEncoder()

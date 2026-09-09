@@ -40,3 +40,7 @@ web_turbo_png/static/audio/
 # Local states
 engine_mode.state*
 cookies.txt
+
+# Temporary test media
+test_*.wav
+test_*_orig.png

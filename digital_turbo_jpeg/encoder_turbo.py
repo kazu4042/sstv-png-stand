@@ -23,6 +23,7 @@ class DigitalTurboJPEGEncoder:
     def __init__(self):
         self.current_phase = 0.0
         self.samples_per_symbol = max(1, int(config.SAMPLE_RATE * config.MS_SYMBOL / 1000))
+        self.max_packets: int | None = None
 
     def get_tone_samples(self, freq, num_samples):
         """指定サンプル数で位相連続なサイン波を生成"""
@@ -152,6 +153,10 @@ class DigitalTurboJPEGEncoder:
         # タイルの送信順序をランダム化
         print("  -> タイルの送信順序をランダム化 (シャッフル) しています...")
         random.shuffle(packet_list)
+
+        if getattr(self, 'max_packets', None):
+            packet_list = packet_list[:self.max_packets]
+            print(f"  -> max_packets={self.max_packets} によりパケット数を制限しました")
 
         final_wave = np.concatenate(packet_list)
         final_wave = final_wave / np.max(np.abs(final_wave)) * 0.8

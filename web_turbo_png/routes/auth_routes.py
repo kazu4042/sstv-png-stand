@@ -195,12 +195,14 @@ def admin_engine_mode():
         return jsonify({
             'status': 'success',
             'mode': SystemFactory.get_mode(),
+            'current_mode': SystemFactory.get_mode(),
             'message': f'デコードエンジンを {SystemFactory.get_mode()} モードに変更しました'
         })
 
     return jsonify({
         'status': 'success',
-        'mode': SystemFactory.get_mode()
+        'mode': SystemFactory.get_mode(),
+        'current_mode': SystemFactory.get_mode()
     })
 
 

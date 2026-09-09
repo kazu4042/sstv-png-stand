@@ -42,6 +42,7 @@ def get_available_images():
             "status": "success",
             "total_images": len(image_ids),
             "image_ids": image_ids,
+            "images": image_ids,
             "config": {
                 "width": config.WIDTH,
                 "height": config.HEIGHT,

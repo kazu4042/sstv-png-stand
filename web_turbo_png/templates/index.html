@@ -421,33 +421,135 @@
             return window.location.protocol + '//' + window.location.host + path;
         }
 
+        // 音声バッファから 16bit モノラル PCM WAV Blob を生成する超軽量高速エンコーダ
+        function audioBufferToWavBlob(buffer) {
+            const numChannels = 1;
+            const sampleRate = buffer.sampleRate;
+            const format = 1; // PCM
+            const bitDepth = 16;
+            
+            let channelData;
+            if (buffer.numberOfChannels === 1) {
+                channelData = buffer.getChannelData(0);
+            } else {
+                const ch0 = buffer.getChannelData(0);
+                const ch1 = buffer.getChannelData(1);
+                channelData = new Float32Array(ch0.length);
+                for (let i = 0; i < ch0.length; i++) {
+                    channelData[i] = (ch0[i] + ch1[i]) * 0.5;
+                }
+            }
+            
+            const bytesPerSample = bitDepth / 8;
+            const blockAlign = numChannels * bytesPerSample;
+            const dataByteCount = channelData.length * bytesPerSample;
+            const wavBuffer = new ArrayBuffer(44 + dataByteCount);
+            const view = new DataView(wavBuffer);
+            
+            function writeStr(offset, str) {
+                for (let i = 0; i < str.length; i++) {
+                    view.setUint8(offset + i, str.charCodeAt(i));
+                }
+            }
+            // RIFF チャンク
+            writeStr(0, 'RIFF');
+            view.setUint32(4, 36 + dataByteCount, true);
+            writeStr(8, 'WAVE');
+            
+            // fmt サブチャンク
+            writeStr(12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, format, true);
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * blockAlign, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, bitDepth, true);
+            
+            // data サブチャンク
+            writeStr(36, 'data');
+            view.setUint32(40, dataByteCount, true);
+            
+            let offset = 44;
+            for (let i = 0; i < channelData.length; i++, offset += 2) {
+                let s = Math.max(-1, Math.min(1, channelData[i]));
+                view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+            }
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+        // スマホ録音 (.m4a, .mp3, .aac, etc.) をブラウザ標準の Web Audio API で一瞬で PCM WAV にトランスコード
+        async function convertAudioFileToWav(file, onProgressText) {
+            const ext = (file.name.split('.').pop() || '').toLowerCase();
+            if (ext === 'wav' && (file.type === 'audio/wav' || file.type === 'audio/x-wav')) {
+                return file;
+            }
+            if (onProgressText) onProgressText('スマホ音声を高精度PCM WAVに最適化変換中...');
+            try {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContextClass) return file;
+                const audioCtx = new AudioContextClass();
+                const arrayBuffer = await file.arrayBuffer();
+                const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                const wavBlob = audioBufferToWavBlob(audioBuffer);
+                const newName = file.name.replace(/\.[^/.]+$/, "") + ".wav";
+                return new File([wavBlob], newName, { type: 'audio/wav' });
+            } catch (err) {
+                console.warn('クライアント側自動WAV変換をスキップ (元ファイルで送信):', err);
+                return file;
+            }
+        }
+
         // フォーム送信時のプログレス処理（アップロード進捗 ＋ サーバー解析進捗）
         const uploadForm = document.getElementById('upload-form');
         const progressWrapper = document.getElementById('progress-wrapper');
         const progressFill = document.getElementById('progress-fill');
         const progressText = document.getElementById('progress-text');
 
-        uploadForm.addEventListener('submit', function (e) {
+        uploadForm.addEventListener('submit', async function (e) {
             e.preventDefault();
 
             btnSubmit.disabled = true;
-            btnSubmit.innerHTML = '<i data-lucide="hourglass" class="w-5 h-5"></i> 処理中...';
+            btnSubmit.innerHTML = '<i data-lucide="hourglass" class="w-5 h-5"></i> 準備中...';
             lucide.createIcons();
             progressWrapper.classList.add('active');
             progressFill.style.width = '0%';
+            progressFill.classList.remove('bg-red-500');
+            progressFill.classList.add('bg-forest');
+            progressText.classList.remove('text-red-600');
+            progressText.classList.add('text-earth');
+
+            const fileInput = document.getElementById('audio-file');
+            let uploadFile = fileInput.files && fileInput.files[0];
+            if (!uploadFile) {
+                alert("音声ファイルを選択してください。");
+                resetSubmitBtn();
+                return;
+            }
+
+            // スマホ録音形式（.m4a等）を自動でPCM WAVに変換
+            uploadFile = await convertAudioFileToWav(uploadFile, function(msg) {
+                progressText.innerText = msg;
+                progressFill.style.width = '10%';
+            });
+
+            btnSubmit.innerHTML = '<i data-lucide="hourglass" class="w-5 h-5"></i> 送信中...';
+            lucide.createIcons();
+            progressFill.style.width = '15%';
             progressText.innerText = 'ファイルをサーバーに送信中... 0%';
 
-            const formData = new FormData(uploadForm);
+            const formData = new FormData();
+            formData.append('file', uploadFile, uploadFile.name);
             const xhr = new XMLHttpRequest();
             xhr.withCredentials = true;
 
-            // 1. アップロード送信中の進捗（0%〜100%）
+            // 1. アップロード送信中の進捗（15%〜30%）
             xhr.upload.addEventListener('progress', function (event) {
                 if (event.lengthComputable) {
                     const percent = Math.round((event.loaded / event.total) * 100);
                     const loadedMB = (event.loaded / (1024 * 1024)).toFixed(1);
                     const totalMB = (event.total / (1024 * 1024)).toFixed(1);
-                    progressFill.style.width = (percent * 0.3) + '%'; // 送信フェーズは全体の30%分
+                    progressFill.style.width = (15 + (percent * 0.15)) + '%';
                     progressText.innerText = `ファイルを送信中... ${percent}% (${loadedMB}MB / ${totalMB}MB)`;
                 }
             });
@@ -467,11 +569,15 @@
                                 const sseData = JSON.parse(event.data);
 
                                 if (sseData.error) {
+                                    progressFill.classList.remove('bg-forest');
+                                    progressFill.classList.add('bg-red-500');
+                                    progressText.classList.remove('text-earth');
+                                    progressText.classList.add('text-red-600');
+                                    progressText.innerText = `⚠️ エラー: ${sseData.error}`;
                                     alert(sseData.error);
                                     btnSubmit.disabled = false;
                                     btnSubmit.innerHTML = '<i data-lucide="rocket" class="w-5 h-5"></i> サーバーに送信して解析を開始';
                                     lucide.createIcons();
-                                    progressWrapper.classList.remove('active');
                                     evtSource.close();
                                     return;
                                 }

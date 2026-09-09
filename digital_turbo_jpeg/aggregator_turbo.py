@@ -250,18 +250,20 @@ class TurboJPEGAggregator(BaseAggregator):
             seg_count_freq: dict[int, int] = defaultdict(int)
             for p in parsed_packets:
                 seg_count_freq[len(p.segments)] += 1
-            target_seg_count = max(seg_count_freq.keys(), key=lambda k: seg_count_freq[k])
+            target_seg_count = int(max(seg_count_freq.keys(), key=lambda k: seg_count_freq[k]))
             target_packets = [p for p in parsed_packets if len(p.segments) == target_seg_count]
         else:
-            target_seg_count = expected_seg_count
+            target_seg_count = int(expected_seg_count)
 
-        if not target_packets:
+        if not target_packets or target_seg_count <= 0:
             return None
 
         best_header_packet = max(target_packets, key=lambda p: p.snr)
-        rebuilt_segments: list[bytes] = []
+        
+        # 各セグメント区間ごとに、多数決セグメントおよび各パケットの候補セグメントを収集
+        seg_candidates: list[list[bytes]] = []
+        majority_segments: list[bytes] = []
 
-        # 各セグメント区間ごとにアライメント多数決 / ベスト選定
         for seg_idx in range(target_seg_count):
             candidates: list[tuple[bytes, float]] = []
             for p in target_packets:
@@ -279,8 +281,10 @@ class TurboJPEGAggregator(BaseAggregator):
             best_len = max(len_groups.keys(), key=lambda l: sum(s + 1.0 for _, s in len_groups[l]))
             same_len_cand = len_groups[best_len]
 
+            cur_seg_cand_list: list[bytes] = []
+
+            # 1. 同一長セグメント間でSNR加重ビット多数決
             if len(same_len_cand) >= 2:
-                # 同一長セグメント間でSNR加重ビット多数決
                 bit_len = best_len * 8
                 vote_sums = np.zeros(bit_len, dtype=np.float64)
                 for c_bytes, c_snr in same_len_cand:
@@ -289,31 +293,55 @@ class TurboJPEGAggregator(BaseAggregator):
                     vote_sums += (b_bits.astype(np.float64) * 2.0 - 1.0) * w
                 voted_bits = (vote_sums >= 0).astype(np.uint8)
                 voted_seg_bytes = np.packbits(voted_bits).tobytes()
-                rebuilt_segments.append(voted_seg_bytes)
+                majority_segments.append(voted_seg_bytes)
+                cur_seg_cand_list.append(voted_seg_bytes)
             else:
-                # 最もSNRの高いセグメントを採用 (最良データ抽出)
                 best_cand = max(same_len_cand, key=lambda x: x[1])
-                rebuilt_segments.append(best_cand[0])
+                majority_segments.append(best_cand[0])
+                cur_seg_cand_list.append(best_cand[0])
 
-        # リスタートマーカーを挟みながらJPEGバイナリを再構成 (1枚のJPEGタイルとして合体)
-        rebuilt_data = bytearray(best_header_packet.header)
-        for idx, seg in enumerate(rebuilt_segments):
-            rebuilt_data.extend(seg)
-            if idx < target_seg_count - 1:
-                if idx < len(best_header_packet.markers):
-                    marker_byte = best_header_packet.markers[idx]
-                else:
-                    # 規定のRSTマーカー (0xD0〜0xD7巡回)
-                    marker_byte = 0xD0 + (idx % 8)
-                rebuilt_data.extend(bytes([0xFF, marker_byte]))
+            # 2. 各パケットの生セグメント（SNR順、重複除去）も最良データ候補として追加
+            for c_bytes, _ in sorted(candidates, key=lambda x: x[1], reverse=True):
+                if c_bytes not in cur_seg_cand_list:
+                    cur_seg_cand_list.append(c_bytes)
+                if len(cur_seg_cand_list) >= 3:
+                    break
 
-        rebuilt_data.extend(b'\xff\xd9')  # EOI
+            seg_candidates.append(cur_seg_cand_list)
 
-        # 再構築JPEGタイル全体が完璧に復元できているかを厳密判定
-        rebuilt_bytes = bytes(rebuilt_data)
-        perfect_img = self.is_perfect_jpeg_tile(rebuilt_bytes, cur_tile_w, cur_tile_h)
-        if perfect_img is not None:
-            return perfect_img, rebuilt_bytes
+        # マーカー列の確定
+        markers_to_use = []
+        for idx in range(target_seg_count - 1):
+            if idx < len(best_header_packet.markers):
+                markers_to_use.append(best_header_packet.markers[idx])
+            else:
+                markers_to_use.append(0xD0 + (idx % 8))
+
+        def assemble_tile(segs):
+            buf = bytearray(best_header_packet.header)
+            for i, s in enumerate(segs):
+                buf.extend(s)
+                if i < len(markers_to_use):
+                    buf.extend(bytes([0xFF, markers_to_use[i]]))
+            buf.extend(b'\xff\xd9')
+            return bytes(buf)
+
+        # 試行1: 多数決セグメントでの合体
+        rebuilt_maj_bytes = assemble_tile(majority_segments)
+        perf_img = self.is_perfect_jpeg_tile(rebuilt_maj_bytes, cur_tile_w, cur_tile_h)
+        if perf_img is not None:
+            return perf_img, rebuilt_maj_bytes
+
+        # 試行2: 各区間の最良データ（SNR順）候補の組み合わせ合体探索
+        import itertools
+        for combo in itertools.product(*seg_candidates):
+            rebuilt_combo_bytes = assemble_tile(combo)
+            if rebuilt_combo_bytes == rebuilt_maj_bytes:
+                continue
+            perf_img = self.is_perfect_jpeg_tile(rebuilt_combo_bytes, cur_tile_w, cur_tile_h)
+            if perf_img is not None:
+                return perf_img, rebuilt_combo_bytes
+
         return None
 
     def _get_jpeg_header_template(self, tile_w, tile_h):
@@ -384,42 +412,241 @@ class TurboJPEGAggregator(BaseAggregator):
         """1箇所の破損もなく完全・無傷に開けたJPEGタイルであるかを厳密に判定"""
         if not p_bytes or len(p_bytes) < 4:
             return None
-        raw_bytes = bytes(p_bytes)
+        raw_bytes = bytes(p_bytes).rstrip(b'\x00')
         # SOI (0xFFD8) で始まり EOI (0xFFD9) で終わる完全な構造であるか
         if not (raw_bytes.startswith(b'\xff\xd8') and raw_bytes.endswith(b'\xff\xd9')):
             return None
 
+        sos_idx = raw_bytes.find(b'\xff\xda')
+        if sos_idx == -1:
+            return None
+        sos_len = (raw_bytes[sos_idx+2] << 8) | raw_bytes[sos_idx+3]
+        entropy_start = sos_idx + 2 + sos_len
+        if entropy_start > len(raw_bytes):
+            return None
+
+        # スキャンデータ内の不正マーカー（0xFFスタッフィング違反）を厳密検査
+        idx = entropy_start
+        n = len(raw_bytes)
+        rst_markers = []
+        while idx < n:
+            if raw_bytes[idx] == 0xFF:
+                if idx + 1 >= n:
+                    return None
+                m = raw_bytes[idx+1]
+                if m == 0x00:
+                    idx += 2
+                    continue
+                elif 0xD0 <= m <= 0xD7:
+                    rst_markers.append(m)
+                    idx += 2
+                    continue
+                elif m == 0xD9:
+                    idx += 2
+                    break
+                else:
+                    return None  # ハフマンデータ破損による不正マーカー
+            else:
+                idx += 1
+
         # 16x16 タイル（RSTマーカー3個＝4区間）の場合、マーカー構造の完全性を厳密検証
         if tile_w == 16 and tile_h == 16:
-            parsed = self.split_jpeg_into_segments(raw_bytes, tile_w, tile_h)
-            if not parsed:
-                return None
-            _, segs, markers, has_eoi = parsed
-            if len(segs) != 4 or len(markers) != 3 or not has_eoi:
-                return None
-            if markers != [0xD0, 0xD1, 0xD2]:
+            if rst_markers != [0xD0, 0xD1, 0xD2]:
                 return None
 
-        old_truncated = getattr(ImageFile, 'LOAD_TRUNCATED_IMAGES', True)
+        old_truncated: bool = bool(getattr(ImageFile, 'LOAD_TRUNCATED_IMAGES', True))
         try:
-            # 破損したJPEGで例外を握りつぶさないよう厳格モードで開く
-            ImageFile.LOAD_TRUNCATED_IMAGES = False
+            setattr(ImageFile, 'LOAD_TRUNCATED_IMAGES', False)
             tile_img = Image.open(io.BytesIO(raw_bytes))
-            tile_img.load()  # 構文・マーカー・ハフマン壊れがあれば即座に例外
+            tile_img.load()
             tile_rgb = tile_img.convert("RGB")
             if tile_rgb.size != (tile_w, tile_h):
                 tile_rgb = tile_rgb.resize((tile_w, tile_h))
-            # 途中でデータ破損して真っ黒で打ち切られていないか検証
+
             tile_arr = np.array(tile_rgb, dtype=np.float32)
-            # 画像の最下部8行のピクセルが完全に全画素(0,0,0)なら破損途切れと判定
-            bottom_strip = tile_arr[-min(8, tile_h):, :]
+
+            # 1. 最下部の黒落ち判定
+            bottom_strip = tile_arr[-min(4, tile_h):, :]
             if np.max(bottom_strip) < 3.0 and np.mean(tile_arr) > 10.0:
-                return None  # 上部は描画されたが下部が途切れている
+                return None
+
+            # 2. 未復号グレー落ち (128, 128, 128) の検出
+            gray_pixels = (np.abs(tile_arr[:, :, 0] - 128.0) < 1.0) & \
+                          (np.abs(tile_arr[:, :, 1] - 128.0) < 1.0) & \
+                          (np.abs(tile_arr[:, :, 2] - 128.0) < 1.0)
+            if np.sum(gray_pixels) > 4:
+                return None
+
+            # 3. 極端な高周波チェッカーボード破損ノイズの検出
+            diff_y = np.abs(np.diff(tile_arr, axis=0))
+            diff_x = np.abs(np.diff(tile_arr, axis=1))
+            if np.max(diff_y) > 235.0 or np.max(diff_x) > 235.0:
+                # 隣接画素が0と240等で極端に破綻している
+                return None
+
             return tile_rgb
         except Exception:
             return None
         finally:
-            ImageFile.LOAD_TRUNCATED_IMAGES = old_truncated
+            setattr(ImageFile, 'LOAD_TRUNCATED_IMAGES', old_truncated)
+
+    def resolve_tile(self, packets, best_plen, cur_tile_w, cur_tile_h):
+        """
+        ユーザー要件のフローチャート（No.1〜No.5）に従い、対象座標のタイル画像を多段階復元する。
+
+        No.1 受信タイル単体での無傷チェック・即時採用
+             届いたオリジナルのパケットの中に、最初から100%完全な無傷JPEGがあるかを検査。
+             (完全なパケットが1つでもあれば、他と混ぜずに即座に描画確定して終了。失敗すればNo.2へ)
+
+        No.2 全ビット加重多数決
+             複数タイルのビット列全体で加重多数決を行い、ノイズを相殺して完全なJPEGの復元を試みる。
+             (完璧に復元できれば描画確定して終了。これ以降の同x,y座標では多数決を実施しない。失敗すればNo.3へ)
+
+        No.3 RSTマーカ区間分割による再構築・多数決
+             各パケットをRSTマーカー単位で区間分割し、区間ごとに多数決や最良データを抽出。
+             それらを繋ぎ直して1枚のJPEGタイルを再構築（合体）する。
+             (再構築したタイル全体が完璧に復元できれば描画確定して終了。失敗すればNo.4へ)
+
+             ※No.2およびNo.3は、データベースに対象座標のパケットが複数存在するときのみ実行。
+             　パケットが1つしかない場合は、No.2とNo.3をスキップしてNo.4へ進む。
+
+        No.4 最高SNRタイルのクリア単体採用
+             有効画素率（黒落ちしていない面積）が85%以上のタイルがあれば、変色ノイズを防ぐため他と混ぜずに
+             電波（SNR）が最も良かった1枚をそのまま単体採用して終了。
+             (※ただし100%完全復元ではないため、次回以降に新しいパケットが届いた際は再びNo.1から再挑戦される)
+
+        No.5 RGBピクセル空間での加重平均合成
+             すべてのタイルが有効画素率85%未満（半分以上真っ黒など）の場合、同座標データベースにある各タイルを
+             画像展開し、生き残っているピクセル同士を画面上で半透明合成（SNR加重平均）して合作する。
+             (また、そのタイルのパケットが1つしか存在しない場合(初受信の1枚だけの場合)は、
+              有効画素率にかかわらずここでその1枚を描画して処理を終了する。)
+             (※ただし100%完全復元ではないため、次回以降に新しいパケットが届いた際は再びNo.1から再挑戦される)
+
+        戻り値: (tile_img, final_bytes, stage_name)
+          - tile_img: 復元された PIL Image (RGB)
+          - final_bytes: 完全復元時 (No.1〜No.3) のみ bytes、それ以外 (No.4, No.5) は None
+          - stage_name: "NO1", "NO2", "NO3", "NO4", "NO5"
+        """
+        if not packets:
+            return None, None, None
+
+        payload_bit_len = best_plen * 8
+        sorted_packets = sorted(packets, key=lambda p: p[1], reverse=True)
+
+        # パケットごとのビット列出現頻度（同一パケットの受信重複チェック）
+        bit_counts = defaultdict(int)
+        for row in sorted_packets:
+            bit_counts[row[0][:payload_bit_len]] += 1
+
+        # =========================================================================
+        # No.1 受信タイル単体での無傷チェック・即時採用
+        # 届いたオリジナルのパケットの中に、最初から100%完全な無傷JPEGがあるかを検査。
+        # (完全なパケットが1つでもあれば、他と混ぜずに即座に描画確定して終了。失敗すればNo.2へ)
+        # =========================================================================
+        for row in sorted_packets:
+            payload_bits_str = row[0]
+            if len(payload_bits_str) >= payload_bit_len:
+                p_str = payload_bits_str[:payload_bit_len]
+                p_bytes = self.bits_to_bytearray(p_str)
+                chk_img = self.is_perfect_jpeg_tile(p_bytes, cur_tile_w, cur_tile_h)
+                if chk_img is not None:
+                    return chk_img, bytes(p_bytes), "NO1"
+
+        # ※No.2およびNo.3は、データベースに対象座標のパケットが複数存在するときのみ実行。
+        # 　パケットが1つしかない場合は、No.2とNo.3をスキップしてNo.4へ進む。
+        if len(packets) > 1:
+            # =========================================================================
+            # No.2 全ビット加重多数決
+            # 複数タイルのビット列全体で加重多数決を行い、ノイズを相殺して完全なJPEGの復元を試みる。
+            # (完璧に復元できれば描画確定して終了。これ以降の同x,y座標では多数決を実施しない。失敗すればNo.3へ)
+            # =========================================================================
+            voted_bits_str = self.bit_majority_vote(packets, payload_bit_len)
+            v_bytes = self.bits_to_bytearray(voted_bits_str)
+            chk_img = self.is_perfect_jpeg_tile(v_bytes, cur_tile_w, cur_tile_h)
+            if chk_img is not None:
+                return chk_img, bytes(v_bytes), "NO2"
+
+            # =========================================================================
+            # No.3 RSTマーカ区間分割による再構築・多数決
+            # 各パケットをRSTマーカー単位で区間分割し、区間ごとに多数決や最良データを抽出。
+            # それらを繋ぎ直して1枚のJPEGタイルを再構築（合体）する。
+            # (再構築したタイル全体が完璧に復元できれば描画確定して終了。失敗すればNo.4へ)
+            # =========================================================================
+            rst_res = self.rst_aligned_majority_vote(packets, best_plen, cur_tile_w, cur_tile_h)
+            if rst_res is not None:
+                chk_img, rst_bytes = rst_res
+                return chk_img, rst_bytes, "NO3"
+
+        # =========================================================================
+        # No.4 最高SNRタイルのクリア単体採用
+        # 有効画素率（黒落ちしていない面積）が85%以上のタイルがあれば、変色ノイズを防ぐため
+        # 他と混ぜずに電波（SNR）が最も良かった1枚をそのまま単体採用して終了。
+        # (※ただし100%完全復元ではないため、次回以降に新しいパケットが届いた際は再びNo.1から再挑戦される)
+        # =========================================================================
+        for row in sorted_packets:
+            payload_bits_str = row[0]
+            p_slice = payload_bits_str[:payload_bit_len] if len(payload_bits_str) >= payload_bit_len else payload_bits_str
+            p_bytes = self.bits_to_bytearray(p_slice)
+            cand_img = self.decode_tile_bytes_safely(p_bytes, cur_tile_w, cur_tile_h)
+            if cand_img is not None:
+                cand_arr = np.array(cand_img.resize((cur_tile_w, cur_tile_h)), dtype=np.float32)
+                valid_ratio = np.mean(np.sum(cand_arr, axis=2) > 3.0)
+                if valid_ratio >= 0.85:
+                    return cand_img, None, "NO4"
+
+        # =========================================================================
+        # No.5 RGBピクセル空間での加重平均合成
+        # =========================================================================
+        # また、そのタイルのパケットが1つしか存在しない場合(初受信の1枚だけの場合)は、
+        # 有効画素率にかかわらずここでその1枚を描画して処理を終了する。
+        if len(packets) == 1:
+            p_bits = sorted_packets[0][0]
+            p_slice = p_bits[:payload_bit_len] if len(p_bits) >= payload_bit_len else p_bits
+            p_bytes = self.bits_to_bytearray(p_slice)
+            one_img = self.decode_tile_bytes_safely(p_bytes, cur_tile_w, cur_tile_h)
+            if one_img is not None:
+                return one_img, None, "NO5"
+
+        # すべてのタイルが有効画素率85%未満の場合:
+        # 同座標データベースにある各タイルを画像展開し、生き残っているピクセル同士を画面上で半透明合成（SNR加重平均）
+        pixel_sum = np.zeros((cur_tile_h, cur_tile_w, 3), dtype=np.float64)
+        weight_sum = np.zeros((cur_tile_h, cur_tile_w, 1), dtype=np.float64)
+        decoded_count = 0
+
+        for row in sorted_packets:
+            payload_bits_str = row[0]
+            snr_val = float(row[1])
+            p_slice = payload_bits_str[:payload_bit_len] if len(payload_bits_str) >= payload_bit_len else payload_bits_str
+            p_bytes = self.bits_to_bytearray(p_slice)
+            tile_img = self.decode_tile_bytes_safely(p_bytes, cur_tile_w, cur_tile_h)
+            if tile_img is None:
+                continue
+
+            tile_arr = np.array(tile_img.resize((cur_tile_w, cur_tile_h)), dtype=np.float64)
+            weight = snr_val + 1.0
+
+            # 生き残っているピクセル（黒落ちしていない面積）のみをマスクして加算
+            pixel_brightness = np.sum(tile_arr, axis=2, keepdims=True)
+            valid_mask = (pixel_brightness > 3.0).astype(np.float64)
+
+            pixel_sum += tile_arr * weight * valid_mask
+            weight_sum += weight * valid_mask
+            decoded_count += 1
+
+        if decoded_count > 0:
+            safe_weight = np.where(weight_sum > 0, weight_sum, 1.0)
+            averaged_pixels = (pixel_sum / safe_weight).clip(0, 255).astype(np.uint8)
+            res_img = Image.fromarray(averaged_pixels)
+            return res_img, None, "NO5"
+
+        # フォールバック: 最高SNRタイルの安全デコード
+        for row in sorted_packets:
+            p_bytes = self.bits_to_bytearray(row[0][:payload_bit_len])
+            fallback_img = self.decode_tile_bytes_safely(p_bytes, cur_tile_w, cur_tile_h)
+            if fallback_img is not None:
+                return fallback_img, None, "NO5_FALLBACK"
+
+        return None, None, None
 
     def inpaint_missing_tiles(self, canvas, tile_count_x, tile_count_y, tile_w, tile_h, rendered_mask):
         """受信できなかった欠損タイルを、周囲の正常タイルの色からスマート補間"""
@@ -560,176 +787,29 @@ class TurboJPEGAggregator(BaseAggregator):
 
                     best_plen = max(len_dict.keys(), key=lambda k: sum((p[1] + 1.0) for p in len_dict[k]))
                     packets = len_dict[best_plen]
-                    sorted_packets = sorted(packets, key=lambda p: p[1], reverse=True)
-                    payload_bit_len = best_plen * 8
 
-                    perfect_img = None
-                    final_bytes = None
-                    stage_name = None
+                    # ユーザー要件フローチャート (No.1〜No.5) による多段階復元
+                    tile_img, final_bytes, stage_name = self.resolve_tile(packets, best_plen, cur_tile_w, cur_tile_h)
+                    if tile_img is None:
+                        continue
 
-                    # =========================================================================
-                    # No.1 受信タイル単体での無傷チェック・即時採用
-                    # 届いたオリジナルのパケットの中に、最初から100%完全な無傷JPEGがあるかを検査。
-                    # (完全なパケットが1つでもあれば、他と混ぜずに即座に描画確定して終了。失敗すればNo.2へ)
-                    # =========================================================================
-                    for row in sorted_packets:
-                        payload_bits_str = row[0]
-                        if len(payload_bits_str) >= payload_bit_len:
-                            p_bytes = self.bits_to_bytearray(payload_bits_str[:payload_bit_len])
-                            chk_img = self.is_perfect_jpeg_tile(p_bytes, cur_tile_w, cur_tile_h)
-                            if chk_img is not None:
-                                perfect_img = chk_img
-                                final_bytes = bytes(p_bytes)
-                                stage_name = "NO1"
-                                break
-
-                    # ※No.2およびNo.3は、データベースに対象座標のパケットが複数存在するときのみ実行。
-                    # 　パケットが1つしかない場合は、No.2とNo.3をスキップしてNo.4へ進む。
-                    if perfect_img is None and len(packets) > 1:
-                        # =========================================================================
-                        # No.2 全ビット加重多数決
-                        # 複数タイルのビット列全体で加重多数決を行い、ノイズを相殺して完全なJPEGの復元を試みる。
-                        # (完璧に復元できれば描画確定して終了。これ以降の同x,y座標では多数決を実施しない。失敗すればNo.3へ)
-                        # =========================================================================
-                        voted_bits_str = self.bit_majority_vote(packets, best_plen * 8)
-                        v_bytes = self.bits_to_bytearray(voted_bits_str)
-                        chk_img = self.is_perfect_jpeg_tile(v_bytes, cur_tile_w, cur_tile_h)
-                        if chk_img is not None:
-                            perfect_img = chk_img
-                            final_bytes = bytes(v_bytes)
-                            stage_name = "NO2"
-
-                        # =========================================================================
-                        # No.3 RSTマーカ区間分割による再構築・多数決
-                        # 各パケットをRSTマーカー単位で区間分割し、区間ごとに多数決や最良データを抽出。
-                        # それらを繋ぎ直して1枚のJPEGタイルを再構築（合体）する。
-                        # (再構築したタイル全体が完璧に復元できれば描画確定して終了。失敗すればNo.4へ)
-                        # =========================================================================
-                        if perfect_img is None:
-                            rst_res = self.rst_aligned_majority_vote(packets, best_plen, cur_tile_w, cur_tile_h)
-                            if rst_res is not None:
-                                chk_img, rst_bytes = rst_res
-                                perfect_img = chk_img
-                                final_bytes = rst_bytes
-                                stage_name = "NO3"
-
-                    # ★ 完全なタイル（No.1〜No.3）が得られた場合は即座に描画確定して終了！
-                    # （DBに永続化し、次回以降および同x,y座標での多数決実施をスキップ）
-                    if perfect_img is not None and final_bytes is not None:
+                    # ★ 完全復元 (No.1〜No.3) が達成された場合は、DBに確定保存！
+                    # (これ以降の同x,y座標では多数決を実施せず、次回以降も即座に採用して終了)
+                    # ※No.4およびNo.5の場合は final_bytes が None のため確定保存されず、次回再挑戦される
+                    if final_bytes is not None:
                         if not user_id:
                             self.db.save_finalized_tile(main_id, tx, ty, final_bytes, stage=stage_name)
                             finalized_tiles[(tx, ty)] = (final_bytes, stage_name)
 
-                        paste_x = tx * detected_tile_w
-                        paste_y = ty * detected_tile_h
-                        tw, th = perfect_img.size
-                        if paste_x + tw <= canvas_w and paste_y + th <= canvas_h:
-                            canvas.paste(perfect_img, (paste_x, paste_y))
-                        else:
-                            cropped = perfect_img.crop((0, 0, min(tw, canvas_w - paste_x), min(th, canvas_h - paste_y)))
-                            canvas.paste(cropped, (paste_x, paste_y))
-                        rendered_mask[ty, tx] = True
-                        continue
-
-                    # =========================================================================
-                    # No.4 最高SNRタイルのクリア単体採用
-                    # 有効画素率（黒落ちしていない面積）が85%以上のタイルがあれば、
-                    # 変色ノイズを防ぐため他と混ぜずに電波（SNR）が最も良かった1枚をそのまま単体採用して終了。
-                    # (※ただし100%完全復元ではないため、次回以降に新しいパケットが届いた際は再びNo.1から再挑戦される)
-                    # =========================================================================
-                    best_single_img = None
-                    for row in sorted_packets:
-                        payload_bits_str = row[0]
-                        if len(payload_bits_str) >= payload_bit_len:
-                            p_bytes = self.bits_to_bytearray(payload_bits_str[:payload_bit_len])
-                            cand_img = self.decode_tile_bytes_safely(p_bytes, cur_tile_w, cur_tile_h)
-                            if cand_img is not None:
-                                cand_arr = np.array(cand_img.resize((cur_tile_w, cur_tile_h)), dtype=np.float32)
-                                valid_ratio = np.mean(np.sum(cand_arr, axis=2) > 3.0)
-                                if valid_ratio >= 0.85:
-                                    best_single_img = cand_img
-                                    break
-
-                    if best_single_img is not None:
-                        paste_x = tx * detected_tile_w
-                        paste_y = ty * detected_tile_h
-                        tw, th = best_single_img.size
-                        if paste_x + tw <= canvas_w and paste_y + th <= canvas_h:
-                            canvas.paste(best_single_img, (paste_x, paste_y))
-                        else:
-                            cropped = best_single_img.crop((0, 0, min(tw, canvas_w - paste_x), min(th, canvas_h - paste_y)))
-                            canvas.paste(cropped, (paste_x, paste_y))
-                        rendered_mask[ty, tx] = True
-                        continue
-
-                    # =========================================================================
-                    # No.5 RGBピクセル空間での加重平均合成
-                    # すべてのタイルが有効画素率85%未満（半分以上真っ黒など）の場合、同座標データベースにある
-                    # 各タイルを画像展開し、生き残っているピクセル同士を画面上で半透明合成（SNR加重平均）して合作する。
-                    # (また、そのタイルのパケットが1つしか存在しない場合(初受信の1枚だけの場合)は、
-                    #  有効画素率にかかわらずここでその1枚を描画して処理を終了する。)
-                    # (※ただし100%完全復元ではないため、次回以降に新しいパケットが届いた際は再びNo.1から再挑戦される)
-                    # =========================================================================
-                    if len(packets) == 1:
-                        # 初受信の1枚だけの場合: 有効画素率にかかわらずその1枚を描画して処理を終了
-                        p_bits = sorted_packets[0][0]
-                        if len(p_bits) >= payload_bit_len:
-                            p_bytes = self.bits_to_bytearray(p_bits[:payload_bit_len])
-                            one_img = self.decode_tile_bytes_safely(p_bytes, cur_tile_w, cur_tile_h)
-                            if one_img is not None:
-                                paste_x = tx * detected_tile_w
-                                paste_y = ty * detected_tile_h
-                                tw, th = one_img.size
-                                if paste_x + tw <= canvas_w and paste_y + th <= canvas_h:
-                                    canvas.paste(one_img, (paste_x, paste_y))
-                                else:
-                                    cropped = one_img.crop((0, 0, min(tw, canvas_w - paste_x), min(th, canvas_h - paste_y)))
-                                    canvas.paste(cropped, (paste_x, paste_y))
-                                rendered_mask[ty, tx] = True
-                                continue
-
-                    # 複数破損パケットのRGB空間半透明合成（SNR加重平均）
-                    pixel_sum = np.zeros((cur_tile_h, cur_tile_w, 3), dtype=np.float64)
-                    weight_sum = np.zeros((cur_tile_h, cur_tile_w, 1), dtype=np.float64)
-                    decoded_count = 0
-
-                    for row in sorted_packets:
-                        payload_bits_str = row[0]
-                        snr_val = row[1]
-                        if len(payload_bits_str) < payload_bit_len:
-                            continue
-
-                        p_bytes = self.bits_to_bytearray(payload_bits_str[:payload_bit_len])
-                        tile_img = self.decode_tile_bytes_safely(p_bytes, cur_tile_w, cur_tile_h)
-                        if tile_img is None:
-                            continue
-
-                        tile_arr = np.array(tile_img.resize((cur_tile_w, cur_tile_h)), dtype=np.float64)
-                        weight = snr_val + 1.0
-
-                        if decoded_count > 0:
-                            pixel_brightness = np.sum(tile_arr, axis=2, keepdims=True)
-                            valid_mask = (pixel_brightness > 3.0).astype(np.float64)
-                        else:
-                            valid_mask = np.ones((cur_tile_h, cur_tile_w, 1), dtype=np.float64)
-
-                        pixel_sum += tile_arr * weight * valid_mask
-                        weight_sum += weight * valid_mask
-                        decoded_count += 1
-
-                    if decoded_count > 0:
-                        safe_weight = np.where(weight_sum > 0, weight_sum, 1.0)
-                        averaged_pixels = (pixel_sum / safe_weight).clip(0, 255).astype(np.uint8)
-                        tile_img = Image.fromarray(averaged_pixels)
-                        paste_x = tx * detected_tile_w
-                        paste_y = ty * detected_tile_h
-                        tw, th = tile_img.size
-                        if paste_x + tw <= canvas_w and paste_y + th <= canvas_h:
-                            canvas.paste(tile_img, (paste_x, paste_y))
-                        else:
-                            cropped = tile_img.crop((0, 0, min(tw, canvas_w - paste_x), min(th, canvas_h - paste_y)))
-                            canvas.paste(cropped, (paste_x, paste_y))
-                        rendered_mask[ty, tx] = True
+                    paste_x = tx * detected_tile_w
+                    paste_y = ty * detected_tile_h
+                    tw, th = tile_img.size
+                    if paste_x + tw <= canvas_w and paste_y + th <= canvas_h:
+                        canvas.paste(tile_img, (paste_x, paste_y))
+                    else:
+                        cropped = tile_img.crop((0, 0, min(tw, canvas_w - paste_x), min(th, canvas_h - paste_y)))
+                        canvas.paste(cropped, (paste_x, paste_y))
+                    rendered_mask[ty, tx] = True
 
             # 3. 欠損タイル補間（インペインティング）は周囲の平均色ベタ塗りによる「曇り・モザイク」の原因となるため無効化
             # if not np.all(rendered_mask):

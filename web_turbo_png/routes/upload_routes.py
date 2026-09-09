@@ -148,6 +148,14 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
         if convert_and_normalize_audio(filepath, norm_wav_path) and os.path.exists(norm_wav_path):
             decode_target_path = norm_wav_path
         else:
+            # ffmpeg が無い場合、WAV以外は即座に親切なエラーを返す
+            ext = os.path.splitext(filepath)[1].lower()
+            if ext not in ['.wav', '.wave']:
+                update_job(
+                    job_id, progress=100, status="エラー",
+                    error="サーバーに音声変換ツール(ffmpeg)がありません。ページを再読み込み(リロード)して再度アップロードするか、.wav 形式の音声ファイルを選択してください。"
+                )
+                return
             decode_target_path = filepath
 
         update_job(job_id, progress=6, status=f"音声のデコード中 ({mode_name} モード)...")

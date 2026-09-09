@@ -25,6 +25,33 @@ from digital_turbo_jpeg import config_turbo as config
 from core.base_interfaces import BaseDecoder
 
 
+def apply_bandpass_filter_np(data, sample_rate, low_freq, high_freq, transition_width=100.0):
+    """
+    scipy.signal（DLL依存）を回避し、NumPyのみで動作するゼロ位相バンドパスフィルタ
+    スマホマイク録音時の低周波ハム音・空調音や高周波雑音を一掃して同期精度を劇的に向上させる。
+    """
+    n = len(data)
+    if n == 0:
+        return data
+    freqs = np.fft.rfftfreq(n, d=1.0 / sample_rate)
+    fft_data = np.fft.rfft(data)
+
+    weight = np.zeros_like(freqs, dtype=np.float32)
+    pass_band = (freqs >= low_freq) & (freqs <= high_freq)
+    weight[pass_band] = 1.0
+
+    if transition_width > 0:
+        low_trans = (freqs >= low_freq - transition_width) & (freqs < low_freq)
+        weight[low_trans] = 0.5 * (1.0 + np.cos(np.pi * (low_freq - freqs[low_trans]) / transition_width))
+
+        high_trans = (freqs > high_freq) & (freqs <= high_freq + transition_width)
+        weight[high_trans] = 0.5 * (1.0 + np.cos(np.pi * (freqs[high_trans] - high_freq) / transition_width))
+
+    filtered_fft = fft_data * weight
+    filtered_data = np.fft.irfft(filtered_fft, n=n)
+    return filtered_data.astype(np.float32)
+
+
 # =========================================================================
 # 🚀 Numba JIT 超耐ノイズ・スマート最尤誤り訂正 C レベル演算関数群
 # =========================================================================
@@ -186,16 +213,17 @@ def fast_check_jpeg_soi_fast(data, payload_start, sps, win, cos_mat, sin_mat):
 
 
 @numba.njit(fastmath=True)
-def fast_scan_all_packets_native(
-    data, sps, samples_sync_full, sync_long_samples, sync_win, sync_cos, sync_sin,
+def fast_scan_range_native(
+    data, start_pos, end_pos, sps, samples_sync_full, sync_long_samples, sync_win, sync_cos, sync_sin,
     hamming_win, cos_mat, sin_mat, header_symbols, info_bits_count, header_crc_bits,
     max_packets_cap
 ):
     """
-    全音声データを一括で超耐ノイズ・スマート最尤誤り訂正付き C ループ走査
+    指定区間 [start_pos, end_pos] を超耐ノイズ・スマート最尤誤り訂正付き C ループ走査
     """
     total_len = len(data)
     header_samples = header_symbols * sps
+    scan_limit = min(total_len - samples_sync_full - header_samples, end_pos)
 
     res_img_id = np.zeros(max_packets_cap, dtype=np.int32)
     res_tx = np.zeros(max_packets_cap, dtype=np.int32)
@@ -210,18 +238,26 @@ def fast_scan_all_packets_native(
     rank2 = np.zeros(header_symbols, dtype=np.int32)
     diffs = np.zeros(header_symbols, dtype=np.float64)
 
-    i = 0
+    i = max(0, start_pos)
     coarse_step = max(8, int(samples_sync_full * 0.25))
+    fine_step = max(2, int(sps * 0.25))
+    align_range = max(6, int(sps * 2.0))
 
-    while i < total_len - samples_sync_full - header_samples:
+    while i < scan_limit:
         p, norm = fast_detect_sync_energy(data, i, sync_long_samples, sync_win, sync_cos, sync_sin)
 
-        # 低 SNR でも同期信号を確実に捕捉
-        if p > 0.08 or norm > 0.22:
-            est_data_start = i + samples_sync_full
-            scan_window = max(8, int(sps * 1.5))
-            start_scan = max(0, est_data_start - scan_window)
-            end_scan = min(total_len - header_samples, est_data_start + scan_window)
+        # 1000Hz純度（norm）とエネルギーで同期パルスを検出（ノイズによる偽陽性を排除）
+        if (norm > 0.16 and p > 0.01) or (p > 0.2 and norm > 0.08):
+            # 同期パルスの終端（立ち下がり＝データ先頭）をファインステップで探索
+            search_ptr = i + int(samples_sync_full * 0.4)
+            while search_ptr < total_len - sync_long_samples:
+                p2, norm2 = fast_detect_sync_energy(data, search_ptr, sync_long_samples, sync_win, sync_cos, sync_sin)
+                if norm2 < norm * 0.35 or p2 < p * 0.25:
+                    break
+                search_ptr += fine_step
+
+            start_scan = max(0, search_ptr - align_range)
+            end_scan = min(total_len - header_samples, search_ptr + align_range)
 
             best_pos = -1
             max_snr = -1.0
@@ -230,7 +266,7 @@ def fast_scan_all_packets_native(
             best_y = 0
             best_len = 0
 
-            # 1. 2サンプル刻みで高速スキャン (通常CRC)
+            # 1. 通常CRCスキャン (超高速)
             for pos in range(start_scan, end_scan, 2):
                 ok, cur_img, cur_x, cur_y, cur_len, h_snr = fast_try_header_crc_fast(
                     data, pos, header_symbols, sps, hamming_win, cos_mat, sin_mat,
@@ -244,7 +280,7 @@ def fast_scan_all_packets_native(
                     best_y = cur_y
                     best_len = cur_len
 
-            # 2. 通常CRCで通らなかった場合のみ、最尤誤り訂正を試行
+            # 2. 通常CRCで見つからない場合のみ、最尤誤り訂正スキャン
             if best_pos < 0:
                 for pos in range(start_scan, end_scan, 2):
                     ok, cur_img, cur_x, cur_y, cur_len, h_snr = fast_try_header_crc_fast(
@@ -281,11 +317,24 @@ def fast_scan_all_packets_native(
                         i = payload_start + payload_samples
                         continue
 
-            i += max(8, int(sps * 1.5))
+            # 見つからなかった場合でも、同期パルス終端以降まで確実にスキップ（重複空振りを完全防止）
+            i = search_ptr + max(4, sps)
         else:
             i += coarse_step
 
     return res_img_id[:found_count], res_tx[:found_count], res_ty[:found_count], res_plen[:found_count], res_snr[:found_count], res_start[:found_count], found_count
+
+
+def fast_scan_all_packets_native(
+    data, sps, samples_sync_full, sync_long_samples, sync_win, sync_cos, sync_sin,
+    hamming_win, cos_mat, sin_mat, header_symbols, info_bits_count, header_crc_bits,
+    max_packets_cap
+):
+    return fast_scan_range_native(
+        data, 0, len(data), sps, samples_sync_full, sync_long_samples, sync_win, sync_cos, sync_sin,
+        hamming_win, cos_mat, sin_mat, header_symbols, info_bits_count, header_crc_bits,
+        max_packets_cap
+    )
 
 
 class DigitalTurboJPEGDecoder(BaseDecoder):
@@ -360,6 +409,10 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
                 ).astype(np.float32)
                 rate = config.SAMPLE_RATE
 
+        # 0. ゼロ位相FFTバンドパスフィルタ (500Hz〜2500Hz)
+        # スマホマイク録音時の低周波エアコン音、手ブレ雑音、高周波ノイズを一掃
+        data = apply_bandpass_filter_np(data, rate, config.VALID_BAND_MIN, config.VALID_BAND_MAX)
+
         # 振幅ズレ・スパイク音耐性: DC除去 ＋ 99.5パーセンタイル正規化
         data = data.astype(np.float32)
         data = data - np.mean(data)
@@ -386,15 +439,43 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
             except Exception:
                 pass
 
-        # 🚀 C 言語ネイティブ JIT で一括スキャン＆最尤誤り訂正復号
-        img_ids, txs, tys, plens, snrs, pstarts, count = fast_scan_all_packets_native(
-            data, self.samples_per_symbol, samples_sync_full, self.sync_long_samples,
-            self.sync_win, self.sync_cos, self.sync_sin, self.hamming_win,
-            self.cos_mat, self.sin_mat, header_symbols, info_bits_count,
-            config.BIT_HEADER_CRC, 2048
-        )
+        # 🚀 C 言語ネイティブ JIT でスキャン＆最尤誤り訂正復号 (リアルタイム進捗通知付き)
+        # 短い音声は一括、長い音声は適応的チャンク走査で進捗を滑らかに更新
+        step_samples = max(int(config.SAMPLE_RATE * 5.0), total_samples // 15)
+        overlap_samples = int(config.SAMPLE_RATE * 1.5) # パケット最大長以上のオーバーラップ
+
+        detected_packets = {}  # (img_id, tx, ty) -> (img_id, tx, ty, plen, snr, pstart)
+
+        cur_pos = 0
+        while cur_pos < total_samples - samples_sync_full - (header_symbols * self.samples_per_symbol):
+            chunk_end = min(total_samples, cur_pos + step_samples + overlap_samples)
+            c_img_ids, c_txs, c_tys, c_plens, c_snrs, c_pstarts, c_count = fast_scan_range_native(
+                data, cur_pos, chunk_end, self.samples_per_symbol, samples_sync_full, self.sync_long_samples,
+                self.sync_win, self.sync_cos, self.sync_sin, self.hamming_win,
+                self.cos_mat, self.sin_mat, header_symbols, info_bits_count,
+                config.BIT_HEADER_CRC, 1024
+            )
+
+            for idx in range(c_count):
+                key = (int(c_img_ids[idx]), int(c_txs[idx]), int(c_tys[idx]))
+                snr_v = float(c_snrs[idx])
+                if key not in detected_packets or snr_v > detected_packets[key][4]:
+                    detected_packets[key] = (
+                        int(c_img_ids[idx]), int(c_txs[idx]), int(c_tys[idx]),
+                        int(c_plens[idx]), snr_v, int(c_pstarts[idx])
+                    )
+
+            cur_pos += step_samples
+            if progress_callback:
+                try:
+                    pct = min(49.0, 10.0 + (cur_pos / total_samples) * 40.0)
+                    progress_callback(pct)
+                except Exception:
+                    pass
 
         scan_time = time.time() - t0
+        all_pkts = list(detected_packets.values())
+        count = len(all_pkts)
         print(f"[Decode-JPEG] ネイティブスキャン完了: {count} パケット検出 (所要時間: {scan_time:.2f}秒)")
 
         if progress_callback:
@@ -407,11 +488,7 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
         success_count = 0
         with open(self.output_raw, "w", encoding="utf-8") as f:
             for k in range(count):
-                image_id = int(img_ids[k])
-                tile_x = int(txs[k])
-                tile_y = int(tys[k])
-                payload_length = int(plens[k])
-                p_start = int(pstarts[k])
+                image_id, tile_x, tile_y, payload_length, _, p_start = all_pkts[k]
 
                 payload_symbols = (payload_length * 8) // 2
                 p_buf = np.zeros(payload_length * 8, dtype=np.int8)
@@ -437,6 +514,13 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
 
                 print(f"  ✨ [LOGGED] ID:{image_id:04X} X:{tile_x:2} Y:{tile_y:2} Len:{payload_length:5} B (SNR:{snr_4bit_str})", flush=True)
                 success_count += 1
+
+                if progress_callback and count > 0:
+                    try:
+                        p_prog = min(98.0, 50.0 + ((k + 1) / count) * 48.0)
+                        progress_callback(p_prog)
+                    except Exception:
+                        pass
 
         total_time = time.time() - t0
         if progress_callback:

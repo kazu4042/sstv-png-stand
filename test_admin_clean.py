@@ -13,9 +13,11 @@ from web_turbo_png.services.auth_db import get_auth_db
 from web_turbo_png.routes.api_routes import get_analyzer, invalidate_analyzer_cache
 from digital_turbo_png.database_turbo import PacketDatabaseTurboPNG
 import digital_turbo_png.config_turbo as config
+from core.system_factory import SystemFactory
 
 def test_admin_clean():
     print("=== 管理者画像選択クリーン機能のテスト開始 ===")
+    SystemFactory.set_mode("PNG")
     
     # 1. ユーザー作成 (管理者 & 一般ユーザー)
     auth_db = get_auth_db()

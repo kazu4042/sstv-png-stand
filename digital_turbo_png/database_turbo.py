@@ -52,12 +52,18 @@ class PacketDatabaseTurboPNG:
 
     def is_file_imported(self, file_name):
         cursor = self.conn.cursor()
-        cursor.execute("""
-            SELECT 1 FROM imported_files f 
-            WHERE f.file_name = ? 
-              AND EXISTS (SELECT 1 FROM packets p WHERE p.file_name = f.file_name)
-        """, (file_name,))
+        cursor.execute("SELECT 1 FROM imported_files WHERE file_name = ?", (file_name,))
         return cursor.fetchone() is not None
+
+    def delete_imported_file(self, file_name):
+        """imported_files テーブルから指定されたファイル名の記録を削除"""
+        with self.conn:
+            self.conn.execute("DELETE FROM imported_files WHERE file_name = ?", (file_name,))
+
+    def clear_imported_files(self):
+        """imported_files テーブルをクリア"""
+        with self.conn:
+            self.conn.execute("DELETE FROM imported_files")
 
     def get_user_history(self, user_id):
         """指定したユーザーのアップロード履歴を返す。各アップロード(ファイル単位)のタイムスタンプと画像IDを取得"""

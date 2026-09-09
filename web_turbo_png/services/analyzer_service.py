@@ -69,6 +69,7 @@ class TurboPNGAnalyzerService:
 
         for item in summaries:
             img_hex = item["image_id_hex"]
+            item["image_id"] = img_hex
             item["mode"] = target_mode
             item["format"] = target_mode
             item["engine_mode"] = target_mode
@@ -105,21 +106,40 @@ class TurboPNGAnalyzerService:
         return summaries
 
     def delete_images(self, image_ids_hex_list):
-        """指定された画像IDのDBレコードおよび画像ファイルを一括削除（PNG/JPEG両方のDBから安全に消去）"""
+        """指定された画像IDのDBレコード、ログファイル、および画像ファイルを一括削除（PNG/JPEG両方から安全に消去）"""
         if not image_ids_hex_list:
             return {"deleted_packets": 0, "deleted_images": 0, "deleted_files": 0}
 
-        int_ids = []
+        int_ids = set()
         for hex_id in image_ids_hex_list:
             try:
-                int_ids.append(int(str(hex_id).strip(), 16))
+                int_ids.add(int(str(hex_id).strip(), 16))
             except (ValueError, TypeError):
                 pass
 
         if not int_ids:
             return {"deleted_packets": 0, "deleted_images": 0, "deleted_files": 0}
 
-        # PNG と JPEG 両方のアグリゲータを取得してDBから削除
+        import glob
+
+        def _extract_image_id_from_log_line(line):
+            line = line.strip()
+            if not line:
+                return None
+            if all(c in '01' for c in line) and len(line) >= 16:
+                try:
+                    return int(line[:16], 2)
+                except ValueError:
+                    return None
+            elif ',' in line:
+                parts = line.split(',')
+                try:
+                    return int(parts[0].strip())
+                except ValueError:
+                    return None
+            return None
+
+        # PNG と JPEG 両方のアグリゲータを取得してDBおよびログファイルから削除
         deleted_packets = 0
         for m in ("PNG", "JPEG"):
             try:
@@ -127,12 +147,47 @@ class TurboPNGAnalyzerService:
                 ldir = getattr(cfg, "TEXT_LOG_DIR", f"data/digital_turbo_{m.lower()}/logs")
                 ldir_path = os.path.join(ROOT_DIR, ldir) if not os.path.isabs(ldir) else ldir
                 agg = SystemFactory.get_aggregator(log_dir=ldir_path, mode=m)
-                deleted_packets += agg.db.delete_images_by_ids(int_ids)
+                
+                # 1. DBからパケットを削除
+                deleted_packets += agg.db.delete_images_by_ids(list(int_ids))
+
+                # 2. ディスク上のテキストログファイル内のパケットを削除/クリーンアップ
+                if os.path.exists(ldir_path):
+                    txt_files = glob.glob(os.path.join(ldir_path, f"{getattr(cfg, 'TEXT_LOG_PREFIX', 'turbo')}*.txt"))
+                    for tf in txt_files:
+                        fname = os.path.basename(tf)
+                        try:
+                            with open(tf, "r", encoding="utf-8") as f:
+                                lines = f.readlines()
+                            
+                            remaining_lines = []
+                            file_contained_target = False
+                            for l in lines:
+                                line_id = _extract_image_id_from_log_line(l)
+                                if line_id in int_ids:
+                                    file_contained_target = True
+                                else:
+                                    remaining_lines.append(l)
+
+                            if file_contained_target:
+                                if not remaining_lines:
+                                    # 全パケットが削除対象だった場合、ログファイル自体を削除
+                                    try:
+                                        os.remove(tf)
+                                    except Exception:
+                                        pass
+                                    agg.db.delete_imported_file(fname)
+                                else:
+                                    # 一部パケットが残る場合、削除対象を除外して上書き
+                                    with open(tf, "w", encoding="utf-8") as f:
+                                        f.writelines(remaining_lines)
+                        except Exception as file_err:
+                            print(f"Error processing log file {tf}: {file_err}")
+
                 agg.db.close()
             except Exception as e:
                 print(f"Error deleting from {m} db: {e}")
 
-        import glob
         deleted_files_count = 0
         directories_to_clean = [
             os.path.join(ROOT_DIR, "data", "images"),
@@ -173,7 +228,8 @@ class TurboPNGAnalyzerService:
         }
 
     def clear_all_images(self, mode_only=False, target_mode=None):
-        """データベース内の全画像・パケットおよび復元ファイルをすべて削除・一掃"""
+        """データベース内の全画像・パケット、全テキストログ、および復元ファイルをすべて削除・一掃"""
+        import glob
         deleted_packets = 0
         effective_mode = (target_mode or self.current_mode).upper()
         modes_to_clear = [effective_mode] if mode_only else ["PNG", "JPEG"]
@@ -184,6 +240,8 @@ class TurboPNGAnalyzerService:
                 ldir = getattr(cfg, "TEXT_LOG_DIR", f"data/digital_turbo_{m.lower()}/logs")
                 ldir_path = os.path.join(ROOT_DIR, ldir) if not os.path.isabs(ldir) else ldir
                 agg = SystemFactory.get_aggregator(log_dir=ldir_path, mode=m)
+                
+                # 1. DB内テーブルを全削除
                 with agg.db.conn:
                     cursor = agg.db.conn.cursor()
                     cursor.execute("DELETE FROM packets")
@@ -193,11 +251,19 @@ class TurboPNGAnalyzerService:
                         cursor.execute("DELETE FROM finalized_tiles")
                     except Exception:
                         pass
+
+                # 2. ディスク上のテキストログファイルを一掃
+                if os.path.exists(ldir_path):
+                    for tf in glob.glob(os.path.join(ldir_path, "*.txt")):
+                        try:
+                            os.remove(tf)
+                        except Exception as e:
+                            print(f"Error removing log {tf}: {e}")
+
                 agg.db.close()
             except Exception as e:
                 print(f"Error clearing packets table ({m}): {e}")
 
-        import glob
         deleted_files_count = 0
         directories_to_clean = [
             os.path.join(ROOT_DIR, "data", "images"),
@@ -438,7 +504,7 @@ class TurboPNGAnalyzerService:
     def calculate_reliability_scores(self, target_image_id_hex: str, current_user_id: int | None = None) -> list[dict[str, Any]]:
         """各タイルのSNR重み付き信頼度および貢献度情報を計算して返す"""
         reliability_map: list[dict[str, Any]] = []
-        clean_hex = str(target_image_id_hex).strip().upper().zfill(4)
+        clean_hex = target_image_id_hex.strip().upper().zfill(4)
         try:
             target_id_int = int(clean_hex, 16)
         except (ValueError, TypeError):
