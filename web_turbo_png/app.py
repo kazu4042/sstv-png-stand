@@ -89,7 +89,16 @@ def require_basic_auth_and_login():
     if os.environ.get('DISABLE_BASIC_AUTH') == '1' or request.args.get('bypass_auth') == '123456789':
         session['basic_auth_passed'] = True
 
-    # 3. Basic認証の検証 (1回通過すればセッションに保持)
+    # 3. ログイン・新規登録・ログアウト画面は未ログイン・未Basic認証でも確実に表示可能にする
+    # （Basic認証ポップアップが原因でログイン画面に入れないトラブルを根本防止）
+    if request.path in ['/login', '/register', '/logout']:
+        return
+
+    # 4. 既にログイン済みのユーザーは Basic 認証も自動通過扱いとする
+    if session.get('user_id'):
+        session['basic_auth_passed'] = True
+
+    # 5. Basic認証の検証 (1回通過すればセッションに保持)
     if not session.get('basic_auth_passed'):
         auth = request.authorization
         if auth is not None and auth.username and auth.password:
@@ -103,13 +112,10 @@ def require_basic_auth_and_login():
         else:
             if request.path.startswith('/api/'):
                 return jsonify({'error': 'Basic authentication required', 'status': 'error'}), 401
-            return authenticate()
+            # ブラウザアクセスで未ログインの場合は、Basic認証ポップアップではなく綺麗なログイン画面へ直接案内
+            return redirect(url_for('auth.login', next=request.url))
 
-    # 4. ログイン・新規登録・ログアウト画面は未ログインでも許可
-    if request.path in ['/login', '/register', '/logout']:
-        return
-
-    # 5. 未ログインの場合は最初からログイン画面へ強制誘導（APIなら401）
+    # 6. 未ログインの場合はログイン画面へ強制誘導（APIなら401）
     if not session.get('user_id'):
         if request.path.startswith('/api/'):
             return jsonify({'error': 'Unauthorized', 'status': 'error'}), 401

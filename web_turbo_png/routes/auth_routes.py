@@ -37,17 +37,20 @@ def login():
         user_id = db.verify_user(email, password)
         
         if user_id:
+            user_data = db.get_user_by_id(user_id)
+            effective_email = user_data['email'] if user_data else email
+
             session.permanent = False
             session['user_id'] = user_id
-            session['email'] = email
+            session['email'] = effective_email
             session['basic_auth_passed'] = True  # Basic認証も通過扱いにする
             
             next_url = request.form.get('next')
             go_to_admin = request.form.get('go_to_admin')
             
-            # チェックボックスがオンの場合は管理者画面へ移動
-            if go_to_admin == '1':
-                if is_admin(email):
+            # チェックボックスがオン、または next が /admin の場合は管理者画面へ移動
+            if go_to_admin == '1' or (next_url and next_url.startswith('/admin')):
+                if is_admin(effective_email) or is_admin(email):
                     return redirect(url_for('auth.admin_dashboard'))
             
             # オープンリダイレクト脆弱性・無限ループ対策
