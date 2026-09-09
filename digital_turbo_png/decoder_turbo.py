@@ -159,13 +159,16 @@ def fast_scan_all_packets_png_native(
     while i < total_samples - samples_sync_full - header_samples:
         c = 0.0
         s = 0.0
+        tot_e = 1e-9
         for j in range(sync_long_samples):
             val = data[i + j] * sync_win[j]
             c += val * sync_cos[j]
             s += val * sync_sin[j]
+            tot_e += val * val
         sync_power = c * c + s * s
+        sync_norm = sync_power / (tot_e * sync_long_samples)
 
-        if sync_power > 0.4:
+        if sync_power > 0.04 or sync_norm > 0.16:
             search_ptr = i + int(samples_sync_full * 0.5)
             while search_ptr < total_samples - sync_long_samples:
                 c2 = 0.0
@@ -338,18 +341,23 @@ class DigitalTurboPNGDecoder(BaseDecoder):
                 ).astype(np.float32)
                 rate = config.SAMPLE_RATE
 
-        max_val = np.max(np.abs(data))
-        if max_val > 0:
-            data = data.astype(np.float32) / max_val
+        # 振幅ズレ・スパイク音耐性: DC除去 ＋ 99.5パーセンタイル正規化
+        data = data.astype(np.float32)
+        data = data - np.mean(data)
+        q = np.percentile(np.abs(data), 99.5)
+        if q > 1e-5:
+            data = np.clip(data / q, -1.5, 1.5)
+        elif np.max(np.abs(data)) > 0:
+            data = data / np.max(np.abs(data))
 
         # --- ノイズ耐性向上: バンドパスフィルタ ---
         if getattr(config, "BANDPASS_ENABLE", False):
             print(f"[Decode] バンドパスフィルタ適用 ({config.VALID_BAND_MIN}Hz - {config.VALID_BAND_MAX}Hz)")
             data = apply_bandpass_filter_np(data, rate, config.VALID_BAND_MIN, config.VALID_BAND_MAX)
             # フィルタ後の再正規化
-            max_val = np.max(np.abs(data))
-            if max_val > 0:
-                data = data.astype(np.float32) / max_val
+            q2 = np.percentile(np.abs(data), 99.5)
+            if q2 > 1e-5:
+                data = np.clip(data / q2, -1.5, 1.5)
 
         samples_sync_full = int(config.SAMPLE_RATE * config.MS_SYNC / 1000)
 

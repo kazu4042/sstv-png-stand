@@ -360,9 +360,14 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
                 ).astype(np.float32)
                 rate = config.SAMPLE_RATE
 
-        max_val = np.max(np.abs(data))
-        if max_val > 0:
-            data = data.astype(np.float32) / max_val
+        # 振幅ズレ・スパイク音耐性: DC除去 ＋ 99.5パーセンタイル正規化
+        data = data.astype(np.float32)
+        data = data - np.mean(data)
+        q = np.percentile(np.abs(data), 99.5)
+        if q > 1e-5:
+            data = np.clip(data / q, -1.5, 1.5)
+        elif np.max(np.abs(data)) > 0:
+            data = data / np.max(np.abs(data))
 
         samples_sync_full = int(config.SAMPLE_RATE * config.MS_SYNC / 1000)
         info_bits_count = config.BIT_IMAGE_CRC + config.BIT_TILE_X + config.BIT_TILE_Y + config.BIT_PAYLOAD_LENGTH

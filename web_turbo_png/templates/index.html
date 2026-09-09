@@ -133,13 +133,13 @@
     </style>
 </head>
 
-<body class="flex h-screen overflow-hidden">
+<body class="flex min-h-screen md:h-screen overflow-x-hidden md:overflow-hidden bg-paper text-ink">
     <!-- Sidebar -->
     {% include 'sidebar.html' %}
 
 
     <!-- Main Content -->
-    <main class="flex-1 flex flex-col overflow-hidden bg-paper relative">
+    <main class="flex-1 flex flex-col min-h-screen md:min-h-0 overflow-y-auto bg-paper relative">
 
         <header class="top-nav h-16 px-4 flex items-center shrink-0 bg-white border-b border-gray-100 shadow-sm"
             style="z-index: 30;">
@@ -151,15 +151,15 @@
         </header>
 
 
-        <div class="flex-1 overflow-y-auto p-4 md:p-8 flex justify-center items-start">
+        <div class="flex-1 p-3 sm:p-6 md:p-8 flex justify-center items-start">
             <div
-                class="bg-white p-6 md:p-10 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.04)] w-full max-w-2xl border border-gray-100">
+                class="bg-white p-4 sm:p-7 md:p-10 rounded-2xl shadow-[0_10px_40px_rgba(0,0,0,0.04)] w-full max-w-2xl border border-gray-100">
                 <div class="text-center mb-6">
                     <h1
-                        class="text-2xl md:text-3xl font-bold text-ink tracking-widest flex items-center justify-center gap-3 mb-2">
-                        <i data-lucide="radio" class="text-forest w-8 h-8"></i> SSTV 協調復元エンジン
+                        class="text-xl sm:text-2xl md:text-3xl font-bold text-ink tracking-wide sm:tracking-widest flex items-center justify-center gap-2 sm:gap-3 mb-2 flex-wrap">
+                        <i data-lucide="radio" class="text-forest w-6 h-6 sm:w-8 sm:h-8"></i> SSTV 協調復元エンジン
                     </h1>
-                    <div class="text-sm text-earth font-medium tracking-wider mb-4">4-FSK Audio Signal Aggregator v1.2</div>
+                    <div class="text-xs sm:text-sm text-earth font-medium tracking-wider mb-4">4-FSK Audio Signal Aggregator v1.2</div>
                     
                     <!-- デコードエンジン状態バッジ (表示のみ、切り替えは管理者ダッシュボード) -->
                     <div class="inline-flex items-center gap-2 p-1.5 px-3 rounded-xl bg-gray-50 border border-gray-200">
@@ -174,11 +174,11 @@
                     <!-- File Upload -->
                     <div class="flex flex-col md:flex-row gap-4 mb-4">
                         <div class="relative flex-1">
-                            <div class="flex items-center justify-center w-full p-4 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 hover:bg-forestLight hover:border-forest text-ink/70 hover:text-forest transition-all cursor-pointer font-bold tracking-widest h-full"
+                            <div class="flex items-center justify-center w-full p-4 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 hover:bg-forestLight hover:border-forest text-ink/70 hover:text-forest transition-all cursor-pointer font-bold tracking-wide sm:tracking-widest h-full text-center"
                                 id="upload-btn-text">
-                                <i data-lucide="folder-up" class="w-5 h-5 mr-2"></i> 音声ファイル (.wav) を選択
+                                <i data-lucide="folder-up" class="w-5 h-5 mr-2 shrink-0"></i> 音声ファイルを選択 (.wav, .m4a, .mp3 等)
                             </div>
-                            <input type="file" name="file" id="audio-file" accept=".wav" required
+                            <input type="file" name="file" id="audio-file" accept="audio/*,.wav,.m4a,.mp3,.aac,.ogg,.flac,.webm,.caf,.3gp" required
                                 class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
                         </div>
                         <button type="button" id="btn-preview"
@@ -338,64 +338,74 @@
                 waterfallWrapper.classList.add('active');
             }
 
-            if (!audioContext) {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            }
-
-            const arrayBuffer = await file.arrayBuffer();
-            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-
-            analyser = audioContext.createAnalyser();
-            analyser.fftSize = 2048;
-            analyser.smoothingTimeConstant = 0.2;
-
-            source = audioContext.createBufferSource();
-            source.buffer = audioBuffer;
-
-            source.connect(analyser);
-            analyser.connect(audioContext.destination);
-
-            source.start(0);
-
-            const bufferLength = analyser.frequencyBinCount;
-            const dataArray = new Uint8Array(bufferLength);
-            const nyquist = audioContext.sampleRate / 2;
-            const maxDisplayFreq = 6000;
-            const maxBinIndex = Math.floor((maxDisplayFreq / nyquist) * bufferLength);
-            const imgData = ctx.createImageData(canvas.width, 1);
-
-            function drawWaterfall() {
-                if (!isPlaying) return;
-                animationId = requestAnimationFrame(drawWaterfall);
-
-                analyser.getByteFrequencyData(dataArray);
-
-                ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height - 1, 0, 1, canvas.width, canvas.height - 1);
-
-                for (let x = 0; x < canvas.width; x++) {
-                    const binIndex = Math.floor((x / canvas.width) * maxBinIndex);
-                    const val = dataArray[binIndex];
-
-                    const [r, g, b] = getColor(val);
-                    const pxOffset = x * 4;
-                    imgData.data[pxOffset] = r;
-                    imgData.data[pxOffset + 1] = g;
-                    imgData.data[pxOffset + 2] = b;
-                    imgData.data[pxOffset + 3] = 255;
+            try {
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 }
-                ctx.putImageData(imgData, 0, 0);
-            }
 
-            drawWaterfall();
+                const arrayBuffer = await file.arrayBuffer();
+                const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
-            source.onended = () => {
-                isPlaying = false;
-                cancelAnimationFrame(animationId);
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 2048;
+                analyser.smoothingTimeConstant = 0.2;
+
+                source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+
+                source.connect(analyser);
+                analyser.connect(audioContext.destination);
+
+                source.start(0);
+
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                const nyquist = audioContext.sampleRate / 2;
+                const maxDisplayFreq = 6000;
+                const maxBinIndex = Math.floor((maxDisplayFreq / nyquist) * bufferLength);
+                const imgData = ctx.createImageData(canvas.width, 1);
+
+                function drawWaterfall() {
+                    if (!isPlaying) return;
+                    animationId = requestAnimationFrame(drawWaterfall);
+
+                    analyser.getByteFrequencyData(dataArray);
+
+                    ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height - 1, 0, 1, canvas.width, canvas.height - 1);
+
+                    for (let x = 0; x < canvas.width; x++) {
+                        const binIndex = Math.floor((x / canvas.width) * maxBinIndex);
+                        const val = dataArray[binIndex];
+
+                        const [r, g, b] = getColor(val);
+                        const pxOffset = x * 4;
+                        imgData.data[pxOffset] = r;
+                        imgData.data[pxOffset + 1] = g;
+                        imgData.data[pxOffset + 2] = b;
+                        imgData.data[pxOffset + 3] = 255;
+                    }
+                    ctx.putImageData(imgData, 0, 0);
+                }
+
+                drawWaterfall();
+
+                source.onended = () => {
+                    isPlaying = false;
+                    cancelAnimationFrame(animationId);
+                    btnPreview.innerHTML = '<i data-lucide="play" class="w-5 h-5"></i> プレビュー';
+                    btnPreview.classList.remove('bg-red-50', 'text-red-600', 'hover:bg-red-600', 'hover:text-white');
+                    btnPreview.classList.add('bg-forestLight', 'text-forest', 'hover:bg-forest', 'hover:text-white');
+                    lucide.createIcons();
+                };
+            } catch (err) {
+                console.warn("[Preview] Browser decode failed:", err);
+                alert("お使いの端末ブラウザではプレビュー再生が非対応の形式ですが、サーバーでのデコード・解析には問題なく送信できます。");
                 btnPreview.innerHTML = '<i data-lucide="play" class="w-5 h-5"></i> プレビュー';
                 btnPreview.classList.remove('bg-red-50', 'text-red-600', 'hover:bg-red-600', 'hover:text-white');
                 btnPreview.classList.add('bg-forestLight', 'text-forest', 'hover:bg-forest', 'hover:text-white');
                 lucide.createIcons();
-            };
+                isPlaying = false;
+            }
         });
 
         // URLバーからBasic認証情報の credentials を除去
@@ -429,6 +439,7 @@
 
             const formData = new FormData(uploadForm);
             const xhr = new XMLHttpRequest();
+            xhr.withCredentials = true;
 
             // 1. アップロード送信中の進捗（0%〜100%）
             xhr.upload.addEventListener('progress', function (event) {
@@ -450,7 +461,7 @@
                             progressText.innerText = 'サーバーで高速デコード解析中...';
                             progressFill.style.width = '35%';
 
-                            const evtSource = new EventSource(safeApiUrl(`/api/progress-stream?job_id=${data.job_id}`));
+                            const evtSource = new EventSource(`/api/progress-stream?job_id=${data.job_id}`);
 
                             evtSource.onmessage = function (event) {
                                 const sseData = JSON.parse(event.data);
@@ -478,7 +489,7 @@
                                         progressFill.style.width = '100%';
                                         evtSource.close();
                                         setTimeout(() => {
-                                            window.location.href = safeApiUrl(`/result?job_id=${data.job_id}`);
+                                            window.location.href = `/result?job_id=${data.job_id}`;
                                         }, 600);
                                     }
                                 }
@@ -495,6 +506,12 @@
                         alert("レスポンス解析エラーが発生しました");
                         resetSubmitBtn();
                     }
+                } else if (xhr.status === 401) {
+                    alert("ログイン認証の有効期限が切れました。ページを再読み込みしてログインし直してください。");
+                    resetSubmitBtn();
+                } else if (xhr.status === 413) {
+                    alert("ファイルサイズが上限を超えています (最大 200MB)。短時間の録音でお試しください。");
+                    resetSubmitBtn();
                 } else {
                     let errMsg = "サーバーエラーが発生しました";
                     try {
@@ -507,7 +524,7 @@
             });
 
             xhr.addEventListener('error', function () {
-                alert("通信エラーが発生しました。ネットワーク接続をご確認ください。");
+                alert("通信エラーが発生しました。ネットワーク接続をご確認いただくか、ファイル形式・サイズをお確かめの上もう一度お試しください。");
                 resetSubmitBtn();
             });
 
@@ -518,26 +535,9 @@
                 progressWrapper.classList.remove('active');
             }
 
-            xhr.open('POST', safeApiUrl('/api/upload'));
+            xhr.open('POST', '/api/upload');
             xhr.send(formData);
         });
-
-    </script>
-    <script>
-
-        const _sidebar = document.getElementById('sidebar');
-        const _toggleBtn = document.getElementById('toggle-btn');
-        const _closeBtn = document.getElementById('close-sidebar');
-        if (_toggleBtn && _sidebar) {
-            _toggleBtn.addEventListener('click', function () {
-                _sidebar.classList.toggle('collapsed');
-            });
-        }
-        if (_closeBtn && _sidebar) {
-            _closeBtn.addEventListener('click', function () {
-                _sidebar.classList.add('collapsed');
-            });
-        }
 
     </script>
 </body>

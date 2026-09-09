@@ -97,8 +97,12 @@ def require_basic_auth_and_login():
                 session.permanent = False
                 session['basic_auth_passed'] = True
             else:
+                if request.path.startswith('/api/'):
+                    return jsonify({'error': 'Basic authentication failed', 'status': 'error'}), 401
                 return authenticate()
         else:
+            if request.path.startswith('/api/'):
+                return jsonify({'error': 'Basic authentication required', 'status': 'error'}), 401
             return authenticate()
 
     # 4. ログイン・新規登録・ログアウト画面は未ログインでも許可

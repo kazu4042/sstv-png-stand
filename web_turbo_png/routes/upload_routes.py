@@ -21,11 +21,39 @@ from web_turbo_png.services.job_manager import create_job, update_job, get_job, 
 
 upload_bp = Blueprint('upload', __name__)
 
-ALLOWED_EXTENSIONS = {'wav'}
+ALLOWED_EXTENSIONS = {'wav', 'm4a', 'mp3', 'aac', 'ogg', 'flac', 'webm', 'caf', '3gp'}
 
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def convert_and_normalize_audio(input_path, output_wav_path):
+    """
+    ffmpeg を使用して任意の音声形式（.m4a, .mp3, .aac, .wav等）を
+    44.1kHz モノラル 16bit PCM WAV に変換し、
+    帯域フィルタ (400Hz〜9500Hz) と動的ゲイン正規化 (dynaudnorm) を適用する。
+    これにより、スマホ録音時の音量不足、振幅の揺らぎ、低周波雑音を自動的に補正する。
+    """
+    import subprocess
+    import shutil
+    ffmpeg_bin = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
+    cmd = [
+        ffmpeg_bin, "-y", "-i", input_path,
+        "-af", "highpass=f=400,lowpass=f=9500,dynaudnorm=f=150:g=15:p=0.9",
+        "-ar", "44100",
+        "-ac", "1",
+        "-c:a", "pcm_s16le",
+        output_wav_path
+    ]
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+        if res.returncode != 0:
+            print(f"[Upload] ffmpeg failed (code {res.returncode}): {res.stderr.decode('utf-8', errors='ignore')[:300]}")
+        return res.returncode == 0
+    except Exception as e:
+        print(f"[Upload] ffmpeg conversion error: {e}")
+        return False
 
 
 def parse_turbo_log_line(line, config_module=None):
@@ -113,16 +141,25 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
     try:
         mode_name = SystemFactory.get_mode()
         config = SystemFactory.get_config(mode_name)
-        update_job(job_id, progress=5, status=f"音声のデコード中 ({mode_name} モード)...")
+        update_job(job_id, progress=3, status="音響信号の動的正規化・最適化中...")
+
+        # どんなスマホ録音音声でも 44.1kHz モノラル PCM WAV に自動正規化
+        norm_wav_path = os.path.splitext(filepath)[0] + "_norm.wav"
+        if convert_and_normalize_audio(filepath, norm_wav_path) and os.path.exists(norm_wav_path):
+            decode_target_path = norm_wav_path
+        else:
+            decode_target_path = filepath
+
+        update_job(job_id, progress=6, status=f"音声のデコード中 ({mode_name} モード)...")
 
         # ===== Step1: ファクトリからデコーダを取得してデコード =====
         decoder = SystemFactory.get_decoder(user_id=user_id, mode=mode_name)
         
         def decode_progress_callback(prog):
-            calc_prog = 5 + int(prog * 0.55)
+            calc_prog = 6 + int(prog * 0.54)
             update_job(job_id, progress=calc_prog, status=f"音声信号の高速デコード中 ({mode_name})... {int(prog)}%")
                 
-        success_count, log_path = decoder.run(filepath, progress_callback=decode_progress_callback)
+        success_count, log_path = decoder.run(decode_target_path, progress_callback=decode_progress_callback)
 
         decoded_bits_list = []
         if os.path.exists(log_path):
@@ -350,11 +387,15 @@ def upload_audio():
         return jsonify({"error": "No selected file", "success": False}), 400
 
     if not allowed_file(raw_filename):
-        return jsonify({"error": "Invalid file type. Only .wav is allowed.", "success": False}), 400
+        return jsonify({
+            "error": "対応していないファイル形式です。.wav, .m4a, .mp3 などの音声ファイルを指定してください。",
+            "success": False
+        }), 400
 
-    filename = secure_filename(raw_filename)
-    if not filename:
-        filename = f"upload_{int(time.time())}.wav"
+    ext = raw_filename.rsplit('.', 1)[1].lower() if '.' in raw_filename else 'wav'
+    base_raw = raw_filename.rsplit('.', 1)[0]
+    safe_base = secure_filename(base_raw) or f"upload_{int(time.time())}"
+    filename = f"{safe_base}.{ext}"
         
     upload_folder = current_app.config['UPLOAD_FOLDER']
     os.makedirs(upload_folder, exist_ok=True)

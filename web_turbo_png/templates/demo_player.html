@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -67,9 +68,22 @@
             z-index: 0;
             transition: opacity 0.8s ease;
         }
-        .bg-glow.glow-1 { background: #008d54; top: -200px; left: -150px; }
-        .bg-glow.glow-2 { background: #38bdf8; bottom: -250px; right: -200px; }
-        .bg-glow.playing { opacity: 0.22; }
+
+        .bg-glow.glow-1 {
+            background: #008d54;
+            top: -200px;
+            left: -150px;
+        }
+
+        .bg-glow.glow-2 {
+            background: #38bdf8;
+            bottom: -250px;
+            right: -200px;
+        }
+
+        .bg-glow.playing {
+            opacity: 0.22;
+        }
 
         /* ====== Card ====== */
         .player-card {
@@ -80,6 +94,7 @@
             box-shadow: 0 10px 40px -10px rgba(0, 141, 84, 0.08), 0 2px 10px rgba(0, 0, 0, 0.03);
             transition: box-shadow 0.4s ease, border-color 0.4s ease, transform 0.3s ease;
         }
+
         .player-card.playing {
             border-color: #008d54;
             box-shadow: 0 20px 50px -10px rgba(0, 141, 84, 0.18), 0 0 0 2px rgba(0, 141, 84, 0.12);
@@ -94,6 +109,7 @@
             background: #f8fafc;
             border: 1px solid #e2e8f0;
         }
+
         #waveform-canvas {
             width: 100%;
             height: 100%;
@@ -114,11 +130,16 @@
             transition: transform 0.2s, box-shadow 0.3s;
             box-shadow: 0 8px 24px rgba(0, 141, 84, 0.35);
         }
+
         .play-btn:hover {
             transform: scale(1.06);
             box-shadow: 0 12px 32px rgba(0, 141, 84, 0.45);
         }
-        .play-btn:active { transform: scale(0.96); }
+
+        .play-btn:active {
+            transform: scale(0.96);
+        }
+
         .play-btn.playing {
             animation: pulse-ring 2s ease-in-out infinite;
         }
@@ -128,26 +149,37 @@
             width: 44px;
             height: 44px;
             border-radius: 50%;
-            background: #f1f5f9;
-            border: 1px solid #e2e8f0;
-            color: #8b7d6b;
+            background: #ee0a0aff;
+            border: 1px solid #f70909;
+            color: #f00d0db5;
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
             transition: all 0.2s;
         }
+
         .stop-btn:hover {
             background: #fee2e2;
             border-color: #fca5a5;
             color: #ef4444;
             transform: scale(1.08);
         }
-        .stop-btn:active { transform: scale(0.95); }
+
+        .stop-btn:active {
+            transform: scale(0.95);
+        }
 
         @keyframes pulse-ring {
-            0%, 100% { box-shadow: 0 0 0 0 rgba(0, 141, 84, 0.4), 0 8px 24px rgba(0, 141, 84, 0.35); }
-            50% { box-shadow: 0 0 0 14px rgba(0, 141, 84, 0), 0 8px 24px rgba(0, 141, 84, 0.35); }
+
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(0, 141, 84, 0.4), 0 8px 24px rgba(0, 141, 84, 0.35);
+            }
+
+            50% {
+                box-shadow: 0 0 0 14px rgba(0, 141, 84, 0), 0 8px 24px rgba(0, 141, 84, 0.35);
+            }
         }
 
         /* ====== Progress bar ====== */
@@ -159,6 +191,7 @@
             cursor: pointer;
             position: relative;
         }
+
         .progress-fill {
             height: 100%;
             background: linear-gradient(90deg, #008d54, #00b96b);
@@ -178,11 +211,13 @@
             font-weight: 700;
             letter-spacing: 0.05em;
         }
+
         .status-badge.ready {
             background: #e6f3ec;
             color: #008d54;
             border: 1px solid rgba(0, 141, 84, 0.2);
         }
+
         .status-badge.playing-badge {
             background: #e0f2fe;
             color: #0284c7;
@@ -191,8 +226,15 @@
         }
 
         @keyframes badge-blink {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.65; }
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.65;
+            }
         }
 
         /* ====== Info grid ====== */
@@ -203,6 +245,7 @@
             padding: 16px;
             text-align: center;
         }
+
         .info-cell .label {
             font-size: 11px;
             text-transform: uppercase;
@@ -211,6 +254,7 @@
             font-weight: 600;
             margin-bottom: 6px;
         }
+
         .info-cell .value {
             font-size: 18px;
             font-weight: 700;
@@ -229,7 +273,10 @@
             font-weight: 600;
             transition: color 0.2s;
         }
-        .back-link:hover { color: #008d54; }
+
+        .back-link:hover {
+            color: #008d54;
+        }
 
         /* ====== Volume slider ====== */
         input[type="range"] {
@@ -240,6 +287,7 @@
             border-radius: 2px;
             outline: none;
         }
+
         input[type="range"]::-webkit-slider-thumb {
             -webkit-appearance: none;
             width: 14px;
@@ -258,6 +306,7 @@
             gap: 14px;
             padding: 12px 0;
         }
+
         .step-number {
             width: 28px;
             height: 28px;
@@ -273,6 +322,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="bg-grid"></div>
     <div class="bg-glow glow-1" id="glow1"></div>
@@ -288,12 +338,12 @@
         </div>
 
         <!-- Player Card -->
-        <div class="player-card w-full max-w-lg p-8" id="playerCard">
+        <div class="player-card w-full max-w-lg p-5 sm:p-8" id="playerCard">
             <!-- Header -->
             <div class="flex items-center justify-between mb-4">
                 <div>
-                    <h1 class="text-xl font-bold text-ink mb-1">SSTV 音声再生</h1>
-                    <p class="text-xs text-earth tracking-widest uppercase font-medium">SSTV Turbo Audio Broadcast</p>
+                    <h1 class="text-lg sm:text-xl font-bold text-ink mb-1">SSTV 音声再生</h1>
+                    <p class="text-[10px] sm:text-xs text-earth tracking-widest uppercase font-medium">SSTV Turbo Audio Broadcast</p>
                 </div>
                 <div id="statusBadge" class="status-badge ready">
                     <span class="w-2 h-2 rounded-full bg-current"></span>
@@ -303,8 +353,10 @@
 
             <!-- 現在再生中の音声モード表示（混乱防止のためシステム稼働エンジンを固定配信） -->
             <div class="mb-5 text-center">
-                <span id="currentModeBadge" class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold shadow-xs {% if current_engine_mode == 'JPEG' %}bg-amber-100 text-amber-900 border border-amber-300{% else %}bg-emerald-100 text-emerald-900 border border-emerald-300{% endif %}">
-                    <span class="w-2.5 h-2.5 rounded-full {% if current_engine_mode == 'JPEG' %}bg-amber-500 animate-pulse{% else %}bg-emerald-500 animate-pulse{% endif %}"></span>
+                <span id="currentModeBadge"
+                    class="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 rounded-full text-xs font-bold shadow-xs {% if current_engine_mode == 'JPEG' %}bg-amber-100 text-amber-900 border border-amber-300{% else %}bg-emerald-100 text-emerald-900 border border-emerald-300{% endif %}">
+                    <span
+                        class="w-2.5 h-2.5 rounded-full {% if current_engine_mode == 'JPEG' %}bg-amber-500 animate-pulse{% else %}bg-emerald-500 animate-pulse{% endif %}"></span>
                     <span id="currentModeLabel">{{ audio_label or 'SSTV テスト音声' }}</span>
                 </span>
             </div>
@@ -324,10 +376,10 @@
             </div>
 
             <!-- Controls -->
-            <div class="flex items-center justify-center gap-6 mb-6">
-                <div class="flex items-center gap-2">
+            <div class="flex items-center justify-center gap-3 sm:gap-6 mb-6">
+                <div class="flex items-center gap-1.5 sm:gap-2">
                     <i data-lucide="volume-2" class="w-4 h-4 text-earth"></i>
-                    <input type="range" id="volumeSlider" min="0" max="100" value="80" class="w-20">
+                    <input type="range" id="volumeSlider" min="0" max="100" value="80" class="w-16 sm:w-20">
                 </div>
 
                 <button class="stop-btn" id="stopBtn" title="停止">
@@ -338,24 +390,25 @@
                     <i data-lucide="play" class="w-8 h-8" id="playIcon" style="margin-left: 3px;"></i>
                 </button>
 
-                <button class="text-earth hover:text-forest transition-colors p-2 rounded-full hover:bg-forestLight/50" id="randomBtn" title="ランダム位置から再生">
+                <button class="text-earth hover:text-forest transition-colors p-2 rounded-full hover:bg-forestLight/50"
+                    id="randomBtn" title="ランダム位置から再生">
                     <i data-lucide="shuffle" class="w-5 h-5"></i>
                 </button>
             </div>
 
             <!-- Info Grid -->
-            <div class="grid grid-cols-3 gap-3 mb-6">
-                <div class="info-cell">
-                    <div class="label">開始位置</div>
-                    <div class="value" id="startPos">--:--</div>
+            <div class="grid grid-cols-3 gap-2 sm:gap-3 mb-6">
+                <div class="info-cell !p-2 sm:!p-4">
+                    <div class="label !text-[10px] sm:!text-xs">開始位置</div>
+                    <div class="value !text-sm sm:!text-lg" id="startPos">--:--</div>
                 </div>
-                <div class="info-cell">
-                    <div class="label">総時間</div>
-                    <div class="value" id="duration">--:--</div>
+                <div class="info-cell !p-2 sm:!p-4">
+                    <div class="label !text-[10px] sm:!text-xs">総時間</div>
+                    <div class="value !text-sm sm:!text-lg" id="duration">--:--</div>
                 </div>
-                <div class="info-cell">
-                    <div class="label">サンプルレート</div>
-                    <div class="value" id="sampleRate">--</div>
+                <div class="info-cell !p-2 sm:!p-4">
+                    <div class="label !text-[10px] sm:!text-xs">サンプルレート</div>
+                    <div class="value !text-sm sm:!text-lg" id="sampleRate">--</div>
                 </div>
             </div>
 
@@ -368,21 +421,25 @@
                 <div class="instruction-step">
                     <div class="step-number">1</div>
                     <div>
-                        <p class="text-sm text-ink font-medium">このページの <strong class="text-forest font-bold">再生ボタン</strong> を押して音声を流す</p>
+                        <p class="text-sm text-ink font-medium">このページの <strong
+                                class="text-forest font-bold">再生ボタン</strong> を押して音声を流す</p>
                         <p class="text-xs text-earth mt-1">ランダムな位置から自動再生されます</p>
                     </div>
                 </div>
                 <div class="instruction-step">
                     <div class="step-number">2</div>
                     <div>
-                        <p class="text-sm text-ink font-medium">スマホの <strong class="text-forest font-bold">録音アプリ</strong> で音声を録音する</p>
+                        <p class="text-sm text-ink font-medium">スマホの <strong
+                                class="text-forest font-bold">録音アプリ</strong> で音声を録音する</p>
                     </div>
                 </div>
                 <div class="instruction-step">
                     <div class="step-number">3</div>
                     <div>
-                        <p class="text-sm text-ink font-medium">録音したファイルを <strong class="text-forest font-bold">Webサイトからアップロード</strong> する</p>
-                        <p class="text-xs text-earth mt-1"><a href="/app" class="text-forest font-semibold hover:underline">アップロードページへ →</a></p>
+                        <p class="text-sm text-ink font-medium">録音したファイルを <strong
+                                class="text-forest font-bold">Webサイトからアップロード</strong> する</p>
+                        <p class="text-xs text-earth mt-1"><a href="/app"
+                                class="text-forest font-semibold hover:underline">アップロードページへ →</a></p>
                     </div>
                 </div>
             </div>
@@ -555,7 +612,7 @@
         // ====================================================================
         function stopCurrent() {
             if (sourceNode) {
-                try { sourceNode.stop(); } catch(_) {}
+                try { sourceNode.stop(); } catch (_) { }
                 sourceNode.disconnect();
                 sourceNode = null;
             }
@@ -695,4 +752,5 @@
         });
     </script>
 </body>
+
 </html>

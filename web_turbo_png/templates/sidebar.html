@@ -11,9 +11,26 @@
     white-space: nowrap;
 }
 .sidebar.collapsed { width: 0; padding-left: 0; padding-right: 0; }
-@media (max-width: 768px) {
-    .sidebar { position: fixed; height: 100%; transform: translateX(0); }
-    .sidebar.collapsed { transform: translateX(-100%); width: 280px; }
+@media (max-width: 1024px) {
+    .sidebar { 
+        position: fixed; 
+        top: 0; 
+        left: 0; 
+        bottom: 0;
+        height: 100%; 
+        width: 280px; 
+        max-width: 85vw;
+        transform: translateX(-100%); 
+        z-index: 60;
+        box-shadow: 4px 0 25px rgba(0,0,0,0.15);
+    }
+    .sidebar.mobile-open { 
+        transform: translateX(0) !important; 
+    }
+    .sidebar.collapsed { 
+        transform: translateX(-100%) !important; 
+        width: 280px; 
+    }
 }
 
 .session-item {
@@ -46,6 +63,7 @@
     color: #008d54 !important;
 }
 </style>
+<div id="sidebar-backdrop" class="fixed inset-0 bg-black/40 z-50 transition-opacity hidden" style="backdrop-filter: blur(2px);"></div>
 <aside class="sidebar" id="sidebar">
     <div class="p-6 flex items-center justify-between border-b border-gray-100">
         <h3 class="text-xs font-bold text-earth tracking-widest flex items-center gap-2">
@@ -129,45 +147,101 @@
     </div>
 </aside>
 <script>
-    if(window.innerWidth <= 768) document.getElementById('sidebar').classList.add('collapsed');
-    
-    document.addEventListener("DOMContentLoaded", function() {
-        const imageItems = document.querySelectorAll('.session-img-item');
-        
-        // 初期状態でのアクティブ化 (URLから判定)
-        const urlParams = new URLSearchParams(window.location.search);
-        let activeImageId = urlParams.get('image_id');
-        
-        if (activeImageId) {
-            imageItems.forEach(item => {
-                if (item.dataset.id === activeImageId) {
-                    item.classList.add('active');
-                } else {
-                    item.classList.remove('active');
-                }
-            });
+    (function() {
+        const sidebar = document.getElementById('sidebar');
+        const backdrop = document.getElementById('sidebar-backdrop');
+        const closeBtn = document.getElementById('close-sidebar');
+
+        function closeSidebarMobile() {
+            if (sidebar) {
+                sidebar.classList.remove('mobile-open');
+                sidebar.classList.add('collapsed');
+            }
+            if (backdrop) backdrop.classList.add('hidden');
         }
-        
-        imageItems.forEach(item => {
-            item.addEventListener('click', function(e) {
-                const imageId = this.dataset.id;
-                if (!imageId) return;
-                
-                // サイドバーを閉じる (モバイル時)
-                if (window.innerWidth <= 768) {
-                    document.getElementById('sidebar').classList.add('collapsed');
-                }
-                
-                const currentPath = window.location.pathname;
-                
-                if (currentPath === '/result' && typeof window.updateViewForImageId === 'function') {
-                    window.updateViewForImageId(imageId);
-                } else if (currentPath === '/analytics' && typeof window.switchToImage === 'function') {
-                    window.switchToImage(imageId);
+
+        function openSidebarMobile() {
+            if (sidebar) {
+                sidebar.classList.add('mobile-open');
+                sidebar.classList.remove('collapsed');
+            }
+            if (backdrop) backdrop.classList.remove('hidden');
+        }
+
+        // 初期状態: 1024px未満（スマホ・タブレット）なら必ず閉じる
+        if (window.innerWidth < 1024 && sidebar) {
+            sidebar.classList.add('collapsed');
+        }
+
+        if (backdrop) {
+            backdrop.addEventListener('click', closeSidebarMobile);
+        }
+        if (closeBtn) {
+            closeBtn.addEventListener('click', closeSidebarMobile);
+        }
+
+        // ページ内にあるトグルボタン（#toggle-btnなど）のグローバル監視
+        document.addEventListener('click', function(e) {
+            const btn = e.target.closest('#toggle-btn, .toggle-sidebar-btn');
+            if (btn) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (window.innerWidth < 1024) {
+                    if (sidebar && sidebar.classList.contains('mobile-open')) {
+                        closeSidebarMobile();
+                    } else {
+                        openSidebarMobile();
+                    }
                 } else {
-                    window.location.href = `/result?image_id=${imageId}`;
+                    if (sidebar) sidebar.classList.toggle('collapsed');
                 }
+            }
+        });
+
+        document.addEventListener("DOMContentLoaded", function() {
+            const imageItems = document.querySelectorAll('.session-img-item');
+            
+            // 初期状態でのアクティブ化 (URLから判定)
+            const urlParams = new URLSearchParams(window.location.search);
+            let activeImageId = urlParams.get('image_id');
+            
+            if (activeImageId) {
+                imageItems.forEach(item => {
+                    if (item.dataset.id === activeImageId) {
+                        item.classList.add('active');
+                    } else {
+                        item.classList.remove('active');
+                    }
+                });
+            }
+            
+            imageItems.forEach(item => {
+                item.addEventListener('click', function(e) {
+                    const imageId = this.dataset.id;
+                    if (!imageId) return;
+                    
+                    if (window.innerWidth < 1024) {
+                        closeSidebarMobile();
+                    }
+                    
+                    const currentPath = window.location.pathname;
+                    if (currentPath === '/result' && typeof window.updateViewForImageId === 'function') {
+                        window.updateViewForImageId(imageId);
+                    } else if (currentPath === '/analytics' && typeof window.switchToImage === 'function') {
+                        window.switchToImage(imageId);
+                    } else {
+                        window.location.href = `/result?image_id=${imageId}`;
+                    }
+                });
+            });
+
+            // メニュー項目タップ時もスマホでは閉じる
+            const navLinks = sidebar ? sidebar.querySelectorAll('.session-item') : [];
+            navLinks.forEach(link => {
+                link.addEventListener('click', function() {
+                    if (window.innerWidth < 1024) closeSidebarMobile();
+                });
             });
         });
-    });
+    })();
 </script>
