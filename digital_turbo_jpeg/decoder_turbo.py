@@ -241,7 +241,7 @@ def fast_scan_range_native(
     i = max(0, start_pos)
     coarse_step = max(8, int(samples_sync_full * 0.25))
     fine_step = max(2, int(sps * 0.25))
-    align_range = max(6, int(sps * 2.0))
+    align_range = max(12, int(sps * 4.0))
 
     while i < scan_limit:
         p, norm = fast_detect_sync_energy(data, i, sync_long_samples, sync_win, sync_cos, sync_sin)
@@ -302,20 +302,18 @@ def fast_scan_range_native(
                 payload_start = best_pos + header_samples
 
                 if payload_start + payload_samples <= total_len:
-                    # JPEG SOI マーカー二重検証
-                    if fast_check_jpeg_soi_fast(data, payload_start, sps, hamming_win, cos_mat, sin_mat):
-                        if found_count < max_packets_cap:
-                            res_img_id[found_count] = best_img
-                            res_tx[found_count] = best_x
-                            res_ty[found_count] = best_y
-                            res_plen[found_count] = best_len
-                            res_snr[found_count] = max_snr
-                            res_start[found_count] = payload_start
-                            found_count += 1
+                    if found_count < max_packets_cap:
+                        res_img_id[found_count] = best_img
+                        res_tx[found_count] = best_x
+                        res_ty[found_count] = best_y
+                        res_plen[found_count] = best_len
+                        res_snr[found_count] = max_snr
+                        res_start[found_count] = payload_start
+                        found_count += 1
 
-                        # パケット末尾へジャンプ
-                        i = payload_start + payload_samples
-                        continue
+                    # パケット末尾へジャンプ
+                    i = payload_start + payload_samples
+                    continue
 
             # 見つからなかった場合でも、同期パルス終端以降まで確実にスキップ（重複空振りを完全防止）
             i = search_ptr + max(4, sps)
@@ -439,43 +437,15 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
             except Exception:
                 pass
 
-        # 🚀 C 言語ネイティブ JIT でスキャン＆最尤誤り訂正復号 (リアルタイム進捗通知付き)
-        # 短い音声は一括、長い音声は適応的チャンク走査で進捗を滑らかに更新
-        step_samples = max(int(config.SAMPLE_RATE * 5.0), total_samples // 15)
-        overlap_samples = int(config.SAMPLE_RATE * 1.5) # パケット最大長以上のオーバーラップ
-
-        detected_packets = {}  # (img_id, tx, ty) -> (img_id, tx, ty, plen, snr, pstart)
-
-        cur_pos = 0
-        while cur_pos < total_samples - samples_sync_full - (header_symbols * self.samples_per_symbol):
-            chunk_end = min(total_samples, cur_pos + step_samples + overlap_samples)
-            c_img_ids, c_txs, c_tys, c_plens, c_snrs, c_pstarts, c_count = fast_scan_range_native(
-                data, cur_pos, chunk_end, self.samples_per_symbol, samples_sync_full, self.sync_long_samples,
-                self.sync_win, self.sync_cos, self.sync_sin, self.hamming_win,
-                self.cos_mat, self.sin_mat, header_symbols, info_bits_count,
-                config.BIT_HEADER_CRC, 1024
-            )
-
-            for idx in range(c_count):
-                key = (int(c_img_ids[idx]), int(c_txs[idx]), int(c_tys[idx]))
-                snr_v = float(c_snrs[idx])
-                if key not in detected_packets or snr_v > detected_packets[key][4]:
-                    detected_packets[key] = (
-                        int(c_img_ids[idx]), int(c_txs[idx]), int(c_tys[idx]),
-                        int(c_plens[idx]), snr_v, int(c_pstarts[idx])
-                    )
-
-            cur_pos += step_samples
-            if progress_callback:
-                try:
-                    pct = min(49.0, 10.0 + (cur_pos / total_samples) * 40.0)
-                    progress_callback(pct)
-                except Exception:
-                    pass
+        # 🚀 C 言語ネイティブ JIT で音声全体を一括スキャン＆最尤誤り訂正復号（チャンク分割による境界破断を完全解消）
+        c_img_ids, c_txs, c_tys, c_plens, c_snrs, c_pstarts, count = fast_scan_all_packets_native(
+            data, self.samples_per_symbol, samples_sync_full, self.sync_long_samples,
+            self.sync_win, self.sync_cos, self.sync_sin, self.hamming_win,
+            self.cos_mat, self.sin_mat, header_symbols, info_bits_count,
+            config.BIT_HEADER_CRC, 4096
+        )
 
         scan_time = time.time() - t0
-        all_pkts = list(detected_packets.values())
-        count = len(all_pkts)
         print(f"[Decode-JPEG] ネイティブスキャン完了: {count} パケット検出 (所要時間: {scan_time:.2f}秒)")
 
         if progress_callback:
@@ -488,7 +458,11 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
         success_count = 0
         with open(self.output_raw, "w", encoding="utf-8") as f:
             for k in range(count):
-                image_id, tile_x, tile_y, payload_length, _, p_start = all_pkts[k]
+                image_id = int(c_img_ids[k])
+                tile_x = int(c_txs[k])
+                tile_y = int(c_tys[k])
+                payload_length = int(c_plens[k])
+                p_start = int(c_pstarts[k])
 
                 payload_symbols = (payload_length * 8) // 2
                 p_buf = np.zeros(payload_length * 8, dtype=np.int8)

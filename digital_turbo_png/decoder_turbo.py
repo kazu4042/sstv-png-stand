@@ -153,7 +153,7 @@ def fast_scan_all_packets_png_native(
     header_samples = header_symbols * samples_per_symbol
     step_size = max(1, int(samples_per_symbol * 0.5))
     fine_step = max(1, int(samples_per_symbol * 0.15))
-    align_range = max(5, int(samples_per_symbol * 2.0))
+    align_range = max(10, int(samples_per_symbol * 3.5))
 
     i = 0
     while i < total_samples - samples_sync_full - header_samples:
