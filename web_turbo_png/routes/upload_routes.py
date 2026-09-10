@@ -33,27 +33,58 @@ def convert_and_normalize_audio(input_path, output_wav_path):
     ffmpeg を使用して任意の音声形式（.m4a, .mp3, .aac, .wav等）を
     44.1kHz モノラル 16bit PCM WAV に変換し、
     帯域フィルタ (400Hz〜9500Hz) と動的ゲイン正規化 (dynaudnorm) を適用する。
-    これにより、スマホ録音時の音量不足、振幅の揺らぎ、低周波雑音を自動的に補正する。
+    ffmpeg が無い場合は、WAVファイルに対して scipy/numpy で自動フォールバック正規化を行う。
     """
     import subprocess
     import shutil
-    ffmpeg_bin = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
-    cmd = [
-        ffmpeg_bin, "-y", "-i", input_path,
-        "-af", "highpass=f=400,lowpass=f=9500,dynaudnorm=f=150:g=15:p=0.9",
-        "-ar", "44100",
-        "-ac", "1",
-        "-c:a", "pcm_s16le",
-        output_wav_path
-    ]
-    try:
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
-        if res.returncode != 0:
-            print(f"[Upload] ffmpeg failed (code {res.returncode}): {res.stderr.decode('utf-8', errors='ignore')[:300]}")
-        return res.returncode == 0
-    except Exception as e:
-        print(f"[Upload] ffmpeg conversion error: {e}")
-        return False
+    ffmpeg_bin = shutil.which("ffmpeg") or ("/usr/bin/ffmpeg" if os.path.exists("/usr/bin/ffmpeg") else None)
+    if ffmpeg_bin:
+        cmd = [
+            ffmpeg_bin, "-y", "-i", input_path,
+            "-af", "highpass=f=400,lowpass=f=9500,dynaudnorm=f=150:g=15:p=0.9",
+            "-ar", "44100",
+            "-ac", "1",
+            "-c:a", "pcm_s16le",
+            output_wav_path
+        ]
+        try:
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+            if res.returncode == 0 and os.path.exists(output_wav_path):
+                return True
+        except Exception as e:
+            print(f"[Upload] ffmpeg conversion error: {e}")
+
+    # ===== ffmpeg が無い場合の Python ネイティブフォールバック (WAV専用) =====
+    ext = os.path.splitext(input_path)[1].lower()
+    if ext in ['.wav', '.wave']:
+        try:
+            from scipy.io import wavfile
+            rate, data = wavfile.read(input_path)
+            if data.ndim > 1:
+                data = np.mean(data, axis=1)
+            target_sr = 44100
+            if rate != target_sr:
+                num_target = int(round(len(data) * (target_sr / rate)))
+                data = np.interp(
+                    np.linspace(0, len(data), num_target, endpoint=False),
+                    np.arange(len(data)),
+                    data
+                )
+                rate = target_sr
+            # DCオフセット除去とピーク音量正規化（スマホ小音量対策）
+            data = data.astype(np.float32)
+            data = data - np.mean(data)
+            max_v = np.max(np.abs(data))
+            if max_v > 1e-4:
+                data = (data / max_v) * 28000.0
+            wavfile.write(output_wav_path, rate, np.clip(data, -32767, 32767).astype(np.int16))
+            return os.path.exists(output_wav_path)
+        except Exception as e:
+            print(f"[Upload] Python native WAV fallback error: {e}")
+            return False
+
+    return False
+
 
 
 def parse_turbo_log_line(line, config_module=None):
