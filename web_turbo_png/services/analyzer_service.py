@@ -448,27 +448,21 @@ class TurboPNGAnalyzerService:
     def _get_tiles_data(self, target_id_int):
         return self.aggregator.db.get_packets_for_image(target_id_int)
 
-    def find_missing_packets(self, target_image_id_hex, max_limit=65536, mode=None):
+    def find_missing_packets(self, target_image_id_hex, max_limit=2048):
         missing_list = []
-        clean_hex = str(target_image_id_hex).strip().upper().zfill(4)
         try:
-            target_id_int = int(clean_hex, 16)
+            target_id_int = int(target_image_id_hex, 16)
         except (ValueError, TypeError):
             return missing_list
 
-        effective_mode = mode.upper() if mode else self.detect_image_mode(clean_hex)
-        config = SystemFactory.get_config(effective_mode)
+        config = SystemFactory.get_config()
         tile_count_x = config.TILE_COUNT_X
         tile_count_y = config.TILE_COUNT_Y
         poor_threshold = getattr(config, 'POOR_BLOCK_SNR_THRESHOLD', 5.0)
 
-        ldir = getattr(config, "TEXT_LOG_DIR", f"data/digital_turbo_{effective_mode.lower()}/logs")
-        ldir_path = os.path.join(ROOT_DIR, ldir) if not os.path.isabs(ldir) else ldir
-        agg = SystemFactory.get_aggregator(log_dir=ldir_path, mode=effective_mode)
-
-        cursor = agg.db.conn.cursor()
+        cursor = self.aggregator.db.conn.cursor()
         cursor.execute("""
-            SELECT tile_y, tile_x, COUNT(*), MAX(snr), AVG(snr)
+            SELECT tile_y, tile_x, COUNT(*), MAX(snr)
             FROM packets
             WHERE image_id = ?
             GROUP BY tile_y, tile_x
@@ -476,12 +470,8 @@ class TurboPNGAnalyzerService:
 
         tile_map = {}
         for row in cursor.fetchall():
-            ty, tx, count, max_s, avg_s = row
-            tile_map[(ty, tx)] = {
-                "count": count,
-                "max_snr": max_s or 0.0,
-                "avg_snr": round(avg_s, 2) if avg_s is not None else round(max_s or 0.0, 2)
-            }
+            ty, tx, count, max_s = row
+            tile_map[(ty, tx)] = {"count": count, "max_snr": max_s or 0.0}
 
         for ty in range(tile_count_y):
             for tx in range(tile_count_x):
@@ -492,30 +482,18 @@ class TurboPNGAnalyzerService:
                         "block_id": block_id,
                         "tile_x": tx,
                         "tile_y": ty,
-                        "tx": tx,
-                        "ty": ty,
-                        "row": ty,
-                        "col": tx,
                         "status": "MISSING",
                         "copies": 0,
-                        "max_snr": 0.0,
-                        "avg_snr": 0.0,
-                        "mode": effective_mode
+                        "max_snr": 0.0
                     })
                 elif data["max_snr"] < poor_threshold:
                     missing_list.append({
                         "block_id": block_id,
                         "tile_x": tx,
                         "tile_y": ty,
-                        "tx": tx,
-                        "ty": ty,
-                        "row": ty,
-                        "col": tx,
                         "status": "POOR_QUALITY",
                         "copies": data["count"],
-                        "max_snr": round(data["max_snr"], 1),
-                        "avg_snr": data["avg_snr"],
-                        "mode": effective_mode
+                        "max_snr": round(data["max_snr"], 1)
                     })
 
                 if len(missing_list) >= max_limit:

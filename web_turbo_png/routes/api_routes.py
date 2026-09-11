@@ -85,38 +85,27 @@ def get_image_status_api():
 
 @api_bp.route('/missing', methods=['GET'])
 def get_missing_packets():
-    """不足しているパケットの一覧をJSONデータとしてブラウザに返す（PNG/JPEG完全分離対応）"""
+    """不足しているパケットの一覧をJSONデータとしてブラウザに返す"""
     try:
         image_id = request.args.get('image_id')
-        req_mode = request.args.get('mode')
         if not image_id:
             return jsonify({
                 "status": "error",
                 "message": "リクエストに image_id が含まれていません。"
             }), 400
 
-        clean_hex = str(image_id).strip().upper().zfill(4)
-        analyzer = get_analyzer(mode=req_mode)
-        effective_mode = (req_mode or analyzer.detect_image_mode(clean_hex)).upper()
-        config = SystemFactory.get_config(effective_mode)
-
-        missing_packets = analyzer.find_missing_packets(target_image_id_hex=clean_hex, max_limit=999999, mode=effective_mode)
+        analyzer = get_analyzer()
+        missing_packets = analyzer.find_missing_packets(target_image_id_hex=image_id, max_limit=999999)
+        config = SystemFactory.get_config()
 
         total_blocks = config.TILE_COUNT_X * config.TILE_COUNT_Y
-        true_missing_count = sum(1 for p in missing_packets if p.get('status') == 'MISSING')
-        true_poor_count = sum(1 for p in missing_packets if p.get('status') in ('POOR', 'POOR_QUALITY'))
+        true_missing_count = sum(1 for p in missing_packets if p.get('status', 'MISSING') == 'MISSING')
         overall_score = max(0.0, ((total_blocks - true_missing_count) / total_blocks) * 100.0)
 
         return jsonify({
             "status": "success",
-            "image_id": clean_hex,
-            "mode": effective_mode,
-            "engine_mode": effective_mode,
-            "tile_count_x": config.TILE_COUNT_X,
-            "tile_count_y": config.TILE_COUNT_Y,
-            "tile_size": config.TILE_SIZE,
+            "image_id": image_id,
             "total_missing_found": true_missing_count,
-            "total_poor_found": true_poor_count,
             "total_blocks": total_blocks,
             "overall_score": overall_score,
             "missing_packets": missing_packets[:2048]
