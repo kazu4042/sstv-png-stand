@@ -92,9 +92,10 @@ def fast_detect_sync_energy(data, pos, sync_samples, sync_win, sync_cos, sync_si
     return p, norm
 
 @numba.njit(fastmath=True)
-def fast_decode_symbols_soft(data, start_pos, num_symbols, sps, win, cos_mat, sin_mat, out_bits, rank1_syms, rank2_syms, diff_scores):
+def fast_decode_symbols_soft(data, start_pos, num_symbols, sps, win, cos_mat, sin_mat, eq_weights, out_bits, rank1_syms, rank2_syms, diff_scores):
     """
     シンボルを軟判定（Soft-decision）復号し、第1候補と第2候補、および信頼度（diff_score）を出力
+    スマホマイク・スピーカーの高域減衰を補正するイコライザ (eq_weights) を適用
     """
     snr_sum = 0.0
     valid_syms = 0
@@ -104,13 +105,13 @@ def fast_decode_symbols_soft(data, start_pos, num_symbols, sps, win, cos_mat, si
             break
 
         p0 = (np.dot(data[pos : pos + sps] * win, cos_mat[0]) ** 2 +
-              np.dot(data[pos : pos + sps] * win, sin_mat[0]) ** 2)
+              np.dot(data[pos : pos + sps] * win, sin_mat[0]) ** 2) * eq_weights[0]
         p1 = (np.dot(data[pos : pos + sps] * win, cos_mat[1]) ** 2 +
-              np.dot(data[pos : pos + sps] * win, sin_mat[1]) ** 2)
+              np.dot(data[pos : pos + sps] * win, sin_mat[1]) ** 2) * eq_weights[1]
         p2 = (np.dot(data[pos : pos + sps] * win, cos_mat[2]) ** 2 +
-              np.dot(data[pos : pos + sps] * win, sin_mat[2]) ** 2)
+              np.dot(data[pos : pos + sps] * win, sin_mat[2]) ** 2) * eq_weights[2]
         p3 = (np.dot(data[pos : pos + sps] * win, cos_mat[3]) ** 2 +
-              np.dot(data[pos : pos + sps] * win, sin_mat[3]) ** 2)
+              np.dot(data[pos : pos + sps] * win, sin_mat[3]) ** 2) * eq_weights[3]
 
         # パワートップ2の探索
         powers = np.array([p0, p1, p2, p3], dtype=np.float64)
@@ -145,14 +146,14 @@ def fast_decode_symbols_soft(data, start_pos, num_symbols, sps, win, cos_mat, si
 
 @numba.njit(fastmath=True)
 def fast_try_header_crc_fast(
-    data, pos, header_symbols, sps, hamming_win, cos_mat, sin_mat,
+    data, pos, header_symbols, sps, hamming_win, cos_mat, sin_mat, eq_weights,
     h_buf, rank1, rank2, diffs, info_bits_count, header_crc_bits, do_soft_repair
 ):
     """
     ヘッダをデコードし、まず高速に第1候補でCRC検証。必要時のみ軟判定最尤誤り訂正を行う。
     """
     syms_dec, h_snr = fast_decode_symbols_soft(
-        data, pos, header_symbols, sps, hamming_win, cos_mat, sin_mat,
+        data, pos, header_symbols, sps, hamming_win, cos_mat, sin_mat, eq_weights,
         h_buf, rank1, rank2, diffs
     )
     if syms_dec < header_symbols:
@@ -215,7 +216,7 @@ def fast_check_jpeg_soi_fast(data, payload_start, sps, win, cos_mat, sin_mat):
 @numba.njit(fastmath=True)
 def fast_scan_range_native(
     data, start_pos, end_pos, sps, samples_sync_full, sync_long_samples, sync_win, sync_cos, sync_sin,
-    hamming_win, cos_mat, sin_mat, header_symbols, info_bits_count, header_crc_bits,
+    hamming_win, cos_mat, sin_mat, eq_weights, header_symbols, info_bits_count, header_crc_bits,
     max_packets_cap
 ):
     """
@@ -240,24 +241,17 @@ def fast_scan_range_native(
 
     i = max(0, start_pos)
     coarse_step = max(8, int(samples_sync_full * 0.25))
-    fine_step = max(2, int(sps * 0.25))
-    align_range = max(12, int(sps * 4.0))
+    align_range = max(16, int(sps * 2.5))
 
     while i < scan_limit:
         p, norm = fast_detect_sync_energy(data, i, sync_long_samples, sync_win, sync_cos, sync_sin)
 
         # 1000Hz純度（norm）とエネルギーで同期パルスを検出（スマホ小音量・遠距離録音耐性強化）
-        if (norm > 0.10 and p > 0.003) or (p > 0.08 and norm > 0.05):
-            # 同期パルスの終端（立ち下がり＝データ先頭）をファインステップで探索
-            search_ptr = i + int(samples_sync_full * 0.4)
-            while search_ptr < total_len - sync_long_samples:
-                p2, norm2 = fast_detect_sync_energy(data, search_ptr, sync_long_samples, sync_win, sync_cos, sync_sin)
-                if norm2 < norm * 0.35 or p2 < p * 0.25:
-                    break
-                search_ptr += fine_step
-
-            start_scan = max(0, search_ptr - align_range)
-            end_scan = min(total_len - header_samples, search_ptr + align_range)
+        if (norm > 0.08 and p > 0.002) or (p > 0.05 and norm > 0.04):
+            # 同期パルス開始から「samples_sync_full（同期信号長）」後を基準に探索窓を設定
+            center_ptr = i + samples_sync_full
+            start_scan = max(0, center_ptr - align_range)
+            end_scan = min(total_len - header_samples, center_ptr + align_range)
 
             best_pos = -1
             max_snr = -1.0
@@ -269,7 +263,7 @@ def fast_scan_range_native(
             # 1. 通常CRCスキャン (超高速)
             for pos in range(start_scan, end_scan, 2):
                 ok, cur_img, cur_x, cur_y, cur_len, h_snr = fast_try_header_crc_fast(
-                    data, pos, header_symbols, sps, hamming_win, cos_mat, sin_mat,
+                    data, pos, header_symbols, sps, hamming_win, cos_mat, sin_mat, eq_weights,
                     h_buf, rank1, rank2, diffs, info_bits_count, header_crc_bits, False
                 )
                 if ok and h_snr > max_snr:
@@ -284,7 +278,7 @@ def fast_scan_range_native(
             if best_pos < 0:
                 for pos in range(start_scan, end_scan, 2):
                     ok, cur_img, cur_x, cur_y, cur_len, h_snr = fast_try_header_crc_fast(
-                        data, pos, header_symbols, sps, hamming_win, cos_mat, sin_mat,
+                        data, pos, header_symbols, sps, hamming_win, cos_mat, sin_mat, eq_weights,
                         h_buf, rank1, rank2, diffs, info_bits_count, header_crc_bits, True
                     )
                     if ok and h_snr > max_snr:
@@ -316,7 +310,7 @@ def fast_scan_range_native(
                     continue
 
             # 見つからなかった場合でも、同期パルス終端以降まで確実にスキップ（重複空振りを完全防止）
-            i = search_ptr + max(4, sps)
+            i = center_ptr + max(4, sps)
         else:
             i += coarse_step
 
@@ -325,12 +319,12 @@ def fast_scan_range_native(
 
 def fast_scan_all_packets_native(
     data, sps, samples_sync_full, sync_long_samples, sync_win, sync_cos, sync_sin,
-    hamming_win, cos_mat, sin_mat, header_symbols, info_bits_count, header_crc_bits,
+    hamming_win, cos_mat, sin_mat, eq_weights, header_symbols, info_bits_count, header_crc_bits,
     max_packets_cap
 ):
     return fast_scan_range_native(
         data, 0, len(data), sps, samples_sync_full, sync_long_samples, sync_win, sync_cos, sync_sin,
-        hamming_win, cos_mat, sin_mat, header_symbols, info_bits_count, header_crc_bits,
+        hamming_win, cos_mat, sin_mat, eq_weights, header_symbols, info_bits_count, header_crc_bits,
         max_packets_cap
     )
 
@@ -360,6 +354,9 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
         self.cos_mat = np.cos(target_phases)
         self.sin_mat = np.sin(target_phases)
         self.hamming_win = np.hamming(self.samples_per_symbol)
+
+        # スマホマイク・スピーカーの高域減衰 (8000Hz, 6000Hz) を均等補正する等化器重み
+        self.eq_weights = np.array([3.8, 3.8, 1.0, 1.3], dtype=np.float64)
 
         self.sync_long_samples = max(10, int(config.SAMPLE_RATE * 0.005))
         self.sync_t_arr = np.arange(self.sync_long_samples) / config.SAMPLE_RATE
@@ -395,23 +392,31 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
         if len(data.shape) > 1:
             data = np.mean(data, axis=1)
 
-        # サンプリングレート自動変換
+        # サンプリングレート高品質自動変換 (resample_poly 優先)
         if rate != config.SAMPLE_RATE:
-            print(f"[Decode-JPEG] サンプリングレート変換: {rate} Hz -> {config.SAMPLE_RATE} Hz")
-            num_target_samples = int(round(len(data) * (config.SAMPLE_RATE / rate)))
-            if num_target_samples > 0:
-                data = np.interp(
-                    np.linspace(0, len(data), num_target_samples, endpoint=False),
-                    np.arange(len(data)),
-                    data
-                ).astype(np.float32)
+            print(f"[Decode-JPEG] 高品質サンプリングレート変換: {rate} Hz -> {config.SAMPLE_RATE} Hz")
+            try:
+                from scipy.signal import resample_poly
+                import math
+                gcd = math.gcd(config.SAMPLE_RATE, rate)
+                up = config.SAMPLE_RATE // gcd
+                down = rate // gcd
+                data = resample_poly(data, up, down).astype(np.float32)
                 rate = config.SAMPLE_RATE
+            except Exception:
+                num_target_samples = int(round(len(data) * (config.SAMPLE_RATE / rate)))
+                if num_target_samples > 0:
+                    data = np.interp(
+                        np.linspace(0, len(data), num_target_samples, endpoint=False),
+                        np.arange(len(data)),
+                        data
+                    ).astype(np.float32)
+                    rate = config.SAMPLE_RATE
 
-        # 0. ゼロ位相FFTバンドパスフィルタ (500Hz〜2500Hz)
-        # スマホマイク録音時の低周波エアコン音、手ブレ雑音、高周波ノイズを一掃
+        # 0. ゼロ位相FFTバンドパスフィルタ
         data = apply_bandpass_filter_np(data, rate, config.VALID_BAND_MIN, config.VALID_BAND_MAX)
 
-        # 振幅ズレ・スパイク音耐性: DC除去 ＋ ロバスト正規化（小音量ブースト＆突発スパイク除外）
+        # 振幅ズレ・スパイク音耐性: DC除去 ＋ ロバスト正規化
         data = data.astype(np.float32)
         data = data - np.mean(data)
         abs_data = np.abs(data)
@@ -437,11 +442,11 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
             except Exception:
                 pass
 
-        # 🚀 C 言語ネイティブ JIT で音声全体を一括スキャン＆最尤誤り訂正復号（チャンク分割による境界破断を完全解消）
+        # 🚀 C 言語ネイティブ JIT で音声全体を一括スキャン＆最尤誤り訂正復号
         c_img_ids, c_txs, c_tys, c_plens, c_snrs, c_pstarts, count = fast_scan_all_packets_native(
             data, self.samples_per_symbol, samples_sync_full, self.sync_long_samples,
             self.sync_win, self.sync_cos, self.sync_sin, self.hamming_win,
-            self.cos_mat, self.sin_mat, header_symbols, info_bits_count,
+            self.cos_mat, self.sin_mat, self.eq_weights, header_symbols, info_bits_count,
             config.BIT_HEADER_CRC, 4096
         )
 
@@ -472,7 +477,7 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
 
                 _, p_snr = fast_decode_symbols_soft(
                     data, p_start, payload_symbols, self.samples_per_symbol,
-                    self.hamming_win, self.cos_mat, self.sin_mat,
+                    self.hamming_win, self.cos_mat, self.sin_mat, self.eq_weights,
                     p_buf, r1_dummy, r2_dummy, diff_dummy
                 )
 
