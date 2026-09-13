@@ -64,12 +64,21 @@ def convert_and_normalize_audio(input_path, output_wav_path):
                 data = np.mean(data, axis=1)
             target_sr = 44100
             if rate != target_sr:
-                num_target = int(round(len(data) * (target_sr / rate)))
-                data = np.interp(
-                    np.linspace(0, len(data), num_target, endpoint=False),
-                    np.arange(len(data)),
-                    data
-                )
+                try:
+                    from scipy.signal import resample_poly
+                    import math
+                    gcd_val = math.gcd(target_sr, rate)
+                    up = target_sr // gcd_val
+                    down = rate // gcd_val
+                    data = resample_poly(data, up, down).astype(np.float32)
+                except Exception:
+                    # resample_poly が使えない場合のみ線形補間にフォールバック
+                    num_target = int(round(len(data) * (target_sr / rate)))
+                    data = np.interp(
+                        np.linspace(0, len(data), num_target, endpoint=False),
+                        np.arange(len(data)),
+                        data
+                    ).astype(np.float32)
                 rate = target_sr
             # DCオフセット除去とピーク音量正規化（スマホ小音量対策）
             data = data.astype(np.float32)
