@@ -162,19 +162,20 @@ def heatmap():
 @main_bp.route('/demo')
 @login_required
 def demo_player():
-    """音声再生ページ（システム稼働中エンジンモードに応じた音声固定配信）"""
+    """音声再生ページ（管理者ダッシュボードで指定されたアクティブ音声を固定配信）"""
     current_mode = SystemFactory.get_mode()
 
-    if current_mode == 'JPEG':
-        audio_filename = 'audio/turbo_256_256.wav'
-        audio_label = 'JPEG モード (ざらざら感・段階的復元用テスト音声)'
-    else:
-        audio_filename = 'audio/turbo_png_256_256.wav'
-        audio_label = 'PNG モード (0/100 多数決復元用テスト音声)'
+    from web_turbo_png.services.audio_manager import AudioManager
+    active_track = AudioManager.get_active_track(mode=current_mode)
+
+    audio_filename = f"audio/{active_track.get('filename')}"
+    audio_label = f"{current_mode} モード: {active_track.get('label')}"
 
     return render_template(
         'demo_player.html',
         current_engine_mode=current_mode,
         audio_filename=audio_filename,
-        audio_label=audio_label
+        audio_label=audio_label,
+        selected_track=active_track
     )
+

@@ -2,6 +2,12 @@ from flask import Blueprint, request, jsonify, session, redirect, url_for, rende
 from web_turbo_png.services.auth_db import get_auth_db
 from functools import wraps
 import os
+import sys
+import time
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -123,13 +129,18 @@ def admin_dashboard():
 
     current_images = images_jpeg if current_engine_mode == 'JPEG' else images_png
 
+    from web_turbo_png.services.audio_manager import AudioManager
+    audio_tracks, active_tracks = AudioManager.list_tracks()
+
     return render_template(
         'admin.html',
         images=current_images,
         png_count=len(images_png),
         jpeg_count=len(images_jpeg),
         all_count=len(images_png) + len(images_jpeg),
-        current_engine_mode=current_engine_mode
+        current_engine_mode=current_engine_mode,
+        audio_tracks=audio_tracks,
+        active_tracks=active_tracks
     )
 
 
@@ -379,4 +390,151 @@ def admin_delete_user():
     db.delete_user(int(user_id))
 
     return jsonify({'status': 'success', 'message': f'ユーザー #{user_id} を削除しました'})
+
+
+# ==========================================
+# 音声トラック管理 API (Audio Tracks Manager)
+# ==========================================
+
+@auth_bp.route('/admin/api/audio/list', methods=['GET'])
+@login_required
+def admin_audio_list():
+    current_email = session.get('email')
+    if not is_admin(current_email):
+        return jsonify({'status': 'error', 'message': '権限がありません'}), 403
+
+    from web_turbo_png.services.audio_manager import AudioManager
+    mode = request.args.get('mode')
+    tracks, active_map = AudioManager.list_tracks(mode=mode)
+    return jsonify({
+        'status': 'success',
+        'tracks': tracks,
+        'active': active_map
+    })
+
+
+@auth_bp.route('/admin/api/audio/upload', methods=['POST'])
+@login_required
+def admin_audio_upload():
+    """音声ファイル（.wav 等）の直接アップロード、または画像からの SSTV 自動エンコード"""
+    current_email = session.get('email')
+    if not is_admin(current_email):
+        return jsonify({'status': 'error', 'message': '権限がありません'}), 403
+
+    if 'file' not in request.files:
+        return jsonify({'status': 'error', 'message': 'ファイルが選択されていません'}), 400
+
+    file = request.files['file']
+    if not file or not file.filename:
+        return jsonify({'status': 'error', 'message': 'ファイル名が無効です'}), 400
+
+    label = request.form.get('label', '').strip() or file.filename
+    mode = request.form.get('mode', 'JPEG').upper()
+    upload_type = request.form.get('type', 'auto')  # 'audio', 'image', or 'auto'
+    description = request.form.get('description', '').strip()
+
+    if mode not in ('PNG', 'JPEG'):
+        mode = 'JPEG'
+
+    filename = file.filename
+    ext = os.path.splitext(filename)[1].lower()
+
+    # 一時保存
+    temp_dir = os.path.join(ROOT_DIR, "data", "temp_uploads")
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_path = os.path.join(temp_dir, f"upload_{int(time.time())}_{filename}")
+    file.save(temp_path)
+
+    try:
+        from web_turbo_png.services.audio_manager import AudioManager
+
+        # 画像ファイルの場合 (または type='image') -> 自動エンコード
+        if upload_type == 'image' or ext in ('.jpg', '.jpeg', '.png', '.bmp', '.webp'):
+            track_info = AudioManager.encode_image_to_audio(
+                image_path=temp_path,
+                label=label,
+                mode=mode,
+                description=description
+            )
+            msg = f"画像から {mode} 音声の自動エンコードが完了しました (全{track_info.get('packets')}パケット)"
+        else:
+            # 音声ファイルの場合 -> 44.1kHz WAV 正規化保存
+            track_info = AudioManager.add_audio_file(
+                src_path=temp_path,
+                filename=filename,
+                label=label,
+                mode=mode,
+                description=description
+            )
+            msg = f"音声トラック「{track_info.get('label')}」を登録しました"
+
+        return jsonify({
+            'status': 'success',
+            'message': msg,
+            'track': track_info
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f"アップロード・変換エラー: {str(e)}"
+        }), 500
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+
+
+@auth_bp.route('/admin/api/audio/set_active', methods=['POST'])
+@login_required
+def admin_audio_set_active():
+    """モード別のアクティブ再生トラックを設定"""
+    current_email = session.get('email')
+    if not is_admin(current_email):
+        return jsonify({'status': 'error', 'message': '権限がありません'}), 403
+
+    data = request.get_json(silent=True) or {}
+    filename = data.get('filename') or request.form.get('filename')
+    mode = (data.get('mode') or request.form.get('mode', 'JPEG')).upper()
+
+    if not filename:
+        return jsonify({'status': 'error', 'message': 'トラックが指定されていません'}), 400
+
+    try:
+        from web_turbo_png.services.audio_manager import AudioManager
+        active_map = AudioManager.set_active_track(mode=mode, filename=filename)
+        return jsonify({
+            'status': 'success',
+            'message': f'{mode} モードの再生音声を「{filename}」に設定しました',
+            'active': active_map
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
+
+@auth_bp.route('/admin/api/audio/delete', methods=['POST'])
+@login_required
+def admin_audio_delete():
+    """実験用トラックを削除"""
+    current_email = session.get('email')
+    if not is_admin(current_email):
+        return jsonify({'status': 'error', 'message': '権限がありません'}), 403
+
+    data = request.get_json(silent=True) or {}
+    filename = data.get('filename') or request.form.get('filename')
+
+    if not filename:
+        return jsonify({'status': 'error', 'message': '削除対象のトラックが指定されていません'}), 400
+
+    try:
+        from web_turbo_png.services.audio_manager import AudioManager
+        AudioManager.delete_track(filename)
+        return jsonify({
+            'status': 'success',
+            'message': f'音声トラック「{filename}」を削除しました'
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 400
+
 

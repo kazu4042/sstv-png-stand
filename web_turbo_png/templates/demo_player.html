@@ -351,14 +351,21 @@
                 </div>
             </div>
 
-            <!-- 現在再生中の音声モード表示（混乱防止のためシステム稼働エンジンを固定配信） -->
-            <div class="mb-5 text-center">
-                <span id="currentModeBadge"
-                    class="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 rounded-full text-xs font-bold shadow-xs {% if current_engine_mode == 'JPEG' %}bg-amber-100 text-amber-900 border border-amber-300{% else %}bg-emerald-100 text-emerald-900 border border-emerald-300{% endif %}">
-                    <span
-                        class="w-2.5 h-2.5 rounded-full {% if current_engine_mode == 'JPEG' %}bg-amber-500 animate-pulse{% else %}bg-emerald-500 animate-pulse{% endif %}"></span>
-                    <span id="currentModeLabel">{{ audio_label or 'SSTV テスト音声' }}</span>
-                </span>
+            <!-- 現在再生中の音声モード表示 & 管理者指定トラック情報 -->
+            <div class="mb-5 text-center space-y-2">
+                <div>
+                    <span id="currentModeBadge"
+                        class="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 rounded-full text-xs font-bold shadow-xs {% if current_engine_mode == 'JPEG' %}bg-amber-100 text-amber-900 border border-amber-300{% else %}bg-emerald-100 text-emerald-900 border border-emerald-300{% endif %}">
+                        <span
+                            class="w-2.5 h-2.5 rounded-full {% if current_engine_mode == 'JPEG' %}bg-amber-500 animate-pulse{% else %}bg-emerald-500 animate-pulse{% endif %}"></span>
+                        <span id="currentModeLabel">{{ audio_label or 'SSTV テスト音声' }}</span>
+                    </span>
+                </div>
+                {% if selected_track and selected_track.description %}
+                <p class="text-[11px] text-earth">
+                    {{ selected_track.description }}
+                </p>
+                {% endif %}
             </div>
 
             <!-- Waveform Visualizer -->
@@ -453,7 +460,7 @@
 
     <script>
         // ====================================================================
-        // Audio Player (システム稼働エンジン音声を固定配信)
+        // Audio Player (管理者指定音声を固定配信)
         // ====================================================================
         const currentMode = "{{ current_engine_mode or 'PNG' }}";
         const audioSrc = "{{ url_for('static', filename=audio_filename) }}?t=" + Date.now();

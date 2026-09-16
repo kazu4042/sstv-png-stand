@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SSTV Turbo JPEG 実験スタジオ Pro</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    :root {
+      --bg-base: #090d16;
+      --bg-surface: #111827;
+      --bg-card: #1f293d;
+      --bg-card-sub: #162032;
+      --border: #334155;
+      --border-focus: #38bdf8;
+      --primary: #38bdf8;
+      --primary-glow: rgba(56, 189, 248, 0.25);
+      --accent-green: #10b981;
+      --accent-red: #f43f5e;
+      --accent-purple: #a855f7;
+      --accent-amber: #f59e0b;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Outfit', sans-serif; }
+    body { background-color: var(--bg-base); color: var(--text); min-height: 100vh; padding: 25px 20px; }
+    .container { max-width: 1440px; margin: 0 auto; }
+    
+    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 25px; padding-bottom: 20px; border-bottom: 1px solid var(--border); }
+    .header-title h1 { font-size: 1.8rem; font-weight: 800; background: linear-gradient(135deg, #38bdf8, #818cf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .header-title p { color: var(--text-muted); font-size: 0.9rem; margin-top: 4px; }
+    .header-badges { display: flex; gap: 8px; align-items: center; }
+    .chip { padding: 4px 10px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 20px; font-size: 0.75rem; font-weight: 600; color: var(--primary); font-family: 'JetBrains Mono', monospace; text-decoration: none; }
+    .chip-btn { cursor: pointer; transition: 0.2s; display: inline-flex; align-items: center; gap: 5px; }
+    .chip-btn:hover { border-color: var(--primary); color: #fff; background: var(--primary-glow); transform: translateY(-1px); }
+
+    /* モーダル */
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(6px); z-index: 2000; align-items: center; justify-content: center; padding: 20px; }
+    .modal-content { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 16px; width: 100%; max-width: 900px; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7); }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid var(--border); }
+    .modal-body { padding: 24px; overflow-y: auto; line-height: 1.7; color: #e2e8f0; font-size: 0.9rem; }
+    .modal-body h1, .modal-body h2, .modal-body h3 { color: var(--primary); margin-top: 20px; margin-bottom: 10px; }
+    .modal-body h1 { font-size: 1.35rem; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+    .modal-body h2 { font-size: 1.15rem; color: #38bdf8; }
+    .modal-body h3 { font-size: 1.0rem; color: #a855f7; }
+    .modal-body ul, .modal-body ol { padding-left: 20px; margin-bottom: 12px; }
+    .modal-body li { margin-bottom: 6px; }
+    .modal-body table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 0.85rem; }
+    .modal-body th, .modal-body td { border: 1px solid var(--border); padding: 8px 12px; }
+    .modal-body th { background: var(--bg-card); color: var(--primary); }
+    .modal-body code { font-family: 'JetBrains Mono', monospace; background: var(--bg-card); padding: 2px 6px; border-radius: 4px; color: var(--accent-green); }
+    .modal-body pre { background: var(--bg-card); padding: 12px; border-radius: 8px; overflow-x: auto; margin: 12px 0; }
+    .modal-close-btn { background: transparent; border: none; color: var(--text-muted); font-size: 1.5rem; cursor: pointer; line-height: 1; }
+    .modal-close-btn:hover { color: #fff; }
+
+    .main-grid { display: grid; grid-template-columns: 460px 1fr; gap: 25px; align-items: start; }
+    @media (max-width: 1080px) { .main-grid { grid-template-columns: 1fr; } }
+
+    .card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 18px; padding: 24px; box-shadow: 0 15px 35px -10px rgba(0,0,0,0.5); }
+    .card-title { font-size: 1.15rem; font-weight: 700; color: var(--text); display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+
+    /* プリセットボタン */
+    .presets-bar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 20px; }
+    .btn-preset { padding: 8px 10px; background: var(--bg-card-sub); border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); font-size: 0.8rem; font-weight: 600; cursor: pointer; transition: 0.2s; text-align: left; }
+    .btn-preset:hover { border-color: var(--primary); color: var(--text); background: var(--bg-card); transform: translateY(-1px); }
+
+    /* ドロップゾーン */
+    .dropzone { border: 2px dashed var(--border); border-radius: 12px; padding: 18px; text-align: center; background: var(--bg-card-sub); cursor: pointer; transition: 0.2s; position: relative; margin-bottom: 18px; }
+    .dropzone:hover, .dropzone.dragover { border-color: var(--primary); background: rgba(56, 189, 248, 0.05); }
+    .dropzone-text { font-size: 0.85rem; color: var(--text-muted); }
+    .dropzone-preview { display: flex; align-items: center; gap: 12px; }
+    .dropzone-thumb { width: 48px; height: 48px; border-radius: 8px; object-fit: cover; border: 1px solid var(--border); }
+
+    .form-group { margin-bottom: 18px; }
+    .form-label { display: flex; justify-content: space-between; font-size: 0.85rem; font-weight: 600; color: var(--text-muted); margin-bottom: 8px; }
+    .form-control { width: 100%; padding: 10px 14px; background: var(--bg-card-sub); border: 1px solid var(--border); border-radius: 8px; color: #fff; font-size: 0.9rem; outline: none; transition: 0.2s; }
+    .form-control:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-glow); }
+
+    .slider-row { display: flex; align-items: center; gap: 12px; }
+    input[type="range"] { flex: 1; height: 6px; border-radius: 3px; background: #334155; outline: none; accent-color: var(--primary); cursor: pointer; }
+    .val-badge { font-family: 'JetBrains Mono', monospace; font-size: 0.9rem; font-weight: 700; color: var(--primary); min-width: 50px; text-align: right; }
+
+    /* 各音声スライダーボックス */
+    .sources-scroll { background: var(--bg-card-sub); border: 1px solid var(--border); border-radius: 12px; padding: 12px; max-height: 260px; overflow-y: auto; }
+    .source-row { display: flex; align-items: center; justify-content: space-between; padding: 10px; background: var(--bg-card); border-radius: 8px; margin-bottom: 8px; border: 1px solid rgba(255,255,255,0.04); }
+    .source-row:last-child { margin-bottom: 0; }
+    .source-tag { font-weight: 700; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--primary); width: 75px; }
+
+    .btn-exec { width: 100%; padding: 14px; background: linear-gradient(135deg, #0284c7, #38bdf8); color: #fff; border: none; border-radius: 10px; font-size: 1.05rem; font-weight: 700; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 20px rgba(56, 189, 248, 0.35); display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .btn-exec:hover { transform: translateY(-2px); box-shadow: 0 6px 25px rgba(56, 189, 248, 0.5); }
+    .btn-exec:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+    /* フロー解説ボックス */
+    .workflow-card { background: var(--bg-card-sub); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-top: 18px; font-size: 0.78rem; line-height: 1.5; color: var(--text-muted); }
+    .workflow-card h4 { color: var(--primary); margin-bottom: 6px; font-size: 0.85rem; display: flex; align-items: center; gap: 6px; }
+    .workflow-card ol { padding-left: 18px; }
+    .workflow-card li { margin-bottom: 4px; }
+    .workflow-card li strong { color: var(--text); }
+
+    /* タブ切り替え */
+    .tabs { display: flex; gap: 8px; margin-bottom: 18px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+    .tab-btn { padding: 8px 16px; background: transparent; border: none; border-radius: 8px; color: var(--text-muted); font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: 0.2s; }
+    .tab-btn.active { background: var(--bg-card); color: var(--primary); border: 1px solid var(--border); }
+    .tab-btn:hover:not(.active) { color: #fff; }
+
+    /* 統計グリッド */
+    .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+    @media (max-width: 768px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+    .kpi-card { background: var(--bg-card-sub); border: 1px solid var(--border); border-radius: 12px; padding: 14px; text-align: center; }
+    .kpi-label { font-size: 0.72rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; }
+    .kpi-val { font-size: 1.45rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; margin-top: 4px; }
+
+    .result-view { width: 100%; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 18px; background: #000; }
+    
+    .downloads-bar { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 15px; }
+    .btn-dl { padding: 8px 14px; background: var(--bg-card-sub); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.82rem; font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; transition: 0.2s; }
+    .btn-dl:hover { border-color: var(--primary); color: var(--primary); background: var(--bg-card); }
+
+    /* テーブル */
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 15px; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; }
+    th { color: var(--text-muted); font-weight: 600; background: var(--bg-card-sub); }
+    tr:hover { background: var(--bg-card); }
+
+    .badge { padding: 3px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+    .badge-ok { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+    .badge-warn { background: rgba(244, 63, 94, 0.15); color: #fb7185; }
+    .badge-stage { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
+
+    .loading-box { display: none; text-align: center; padding: 60px 20px; }
+    .spinner { width: 48px; height: 48px; border: 4px solid rgba(56,189,248,0.2); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 15px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-title">
+        <h1>SSTV Turbo JPEG 実験スタジオ Pro</h1>
+        <p>No.1〜No.5 多数決復元ワークフロー対応シミュレータ (JPEG専用)</p>
+      </div>
+      <div class="header-badges">
+        <button class="chip chip-btn" onclick="openGlossaryModal()">📖 用語解説 (Glossary)</button>
+        <span class="chip">JPEG 4-FSK Mode</span>
+        <span class="chip">Workflow No.1〜No.5</span>
+      </div>
+    </header>
+
+    <div class="main-grid">
+      <!-- 左側: 設定エリア -->
+      <div class="card">
+        <div class="card-title">
+          <span>⚙️ 実験パラメータ</span>
+          <span style="font-size: 0.8rem; color: var(--text-muted);">プリセットですぐ開始</span>
+        </div>
+
+        <!-- クイックプリセット -->
+        <div class="presets-bar">
+          <button class="btn-preset" onclick="applyPreset(3, [0.05, 0.02, 0.01])">
+            🌟 リアル微細ノイズ<br><span style="font-size: 0.7rem; color: var(--text-muted);">3本: 0.05% / 0.02% / 0.01%</span>
+          </button>
+          <button class="btn-preset" onclick="applyPreset(5, [0.20, 0.15, 0.10, 0.05, 0.02])">
+            ⚡ 中程度ノイズ (推奨)<br><span style="font-size: 0.7rem; color: var(--text-muted);">5本: 0.20%〜0.02%</span>
+          </button>
+          <button class="btn-preset" onclick="applyMega20Preset()">
+            🔥 20本メガ多数決<br><span style="font-size: 0.7rem; color: var(--primary);">20本: 0.30%〜0.01%段階</span>
+          </button>
+          <button class="btn-preset" onclick="applyPreset(3, [20, 15, 10], 'packet_burst')">
+            📡 パケット欠損バースト<br><span style="font-size: 0.7rem; color: var(--text-muted);">3本: 20% / 15% / 10% 破損</span>
+          </button>
+        </div>
+
+        <!-- 画像ドロップゾーン -->
+        <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+          <input type="file" id="fileInput" accept="image/jpeg,image/png" style="display: none;" onchange="handleFileSelect(event)">
+          <div id="dropzoneDefault">
+            <div style="font-size: 1.8rem; margin-bottom: 6px;">🖼️</div>
+            <div class="dropzone-text"><strong>クリックまたはドラッグして画像を変更</strong></div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">初期: data/input/test.jpg (256×256)</div>
+          </div>
+          <div id="dropzonePreview" class="dropzone-preview" style="display: none;">
+            <img id="imgThumb" class="dropzone-thumb" src="/api/current_image" alt="Thumbnail">
+            <div style="text-align: left;">
+              <div id="imgFileName" style="font-weight: 700; font-size: 0.85rem; color: var(--text);">test.jpg</div>
+              <div style="font-size: 0.75rem; color: var(--accent-green);">✓ 準備完了 (256x256タイル)</div>
+            </div>
+          </div>
+        </div>
+        <input type="hidden" id="imagePath" value="data/input/test.jpg">
+
+        <!-- 音声数スライダー -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>合成音声数 (N個の独立受信データ)</span>
+            <span class="val-badge" id="numSourcesBadge">3 本</span>
+          </div>
+          <div class="slider-row">
+            <input type="range" id="numSources" min="2" max="20" value="3" oninput="onNumSourcesChange()">
+          </div>
+        </div>
+
+        <!-- 各音声のビット反転率設定ボックス -->
+        <div class="form-group">
+          <div class="form-label">
+            <span>各音声のビット反転率 (ノイズ強度)</span>
+            <span style="font-size: 0.75rem; color: var(--text-muted);">個別チューニング可能</span>
+          </div>
+          <div class="sources-scroll" id="sourcesContainer">
+            <!-- JSで動的生成 -->
+          </div>
+        </div>
+
+        <!-- 反転モード -->
+        <div class="form-group">
+          <div class="form-label">反転・伝搬路ノイズモード</div>
+          <select id="flipMode" class="form-control">
+            <option value="random" selected>完全ランダム反転 (BSC伝搬路モデル・各ビット独立)</option>
+            <option value="8000_to_4000">4-FSK周波数歪み (8000Hz↔4000Hz シンボル置換)</option>
+            <option value="packet_burst">パケット分散バースト (局所フェージング・欠損)</option>
+          </select>
+        </div>
+
+        <!-- WAV生成トグル -->
+        <div class="form-group" style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--bg-card-sub); border-radius: 8px; border: 1px solid var(--border);">
+          <span style="font-size: 0.85rem; color: var(--text-muted);">4-FSK 音声 (WAV) も物理生成</span>
+          <input type="checkbox" id="genWav" style="accent-color: var(--primary); width: 18px; height: 18px;">
+        </div>
+
+        <!-- 実行ボタン -->
+        <button class="btn-exec" id="runBtn" onclick="runExperiment()">
+          <span>🚀 実験実行 & 多数決復元</span>
+        </button>
+
+        <!-- No.1〜No.5 ワークフロー解説 -->
+        <div class="workflow-card">
+          <h4>📌 本番 JPEG 多数決復元フロー</h4>
+          <ol>
+            <li><strong>No.1 受信タイル無傷即時採用:</strong> 完全な無傷JPEGなら他と混ぜず即座に確定。</li>
+            <li><strong>No.2 全ビット加重多数決:</strong> 複数パケットのビット多数決で完璧なら確定。</li>
+            <li><strong>No.3 RSTマーカ区間分割合体:</strong> 4区間ごとに多数決・再構築し完璧なら確定。</li>
+            <li><strong>No.4 最高SNR単体採用:</strong> 有効画素率85%以上あれば最高SNRの1枚を採用。</li>
+            <li><strong>No.5 RGBピクセル加重平均合成:</strong> 生き残り画素を半透明合成（1枚のみ時も描画）。</li>
+          </ol>
+        </div>
+      </div>
+
+      <!-- 右側: 結果表示エリア -->
+      <div class="card">
+        <div class="card-title">
+          <span>📊 実験結果 & 復元解析</span>
+          <span id="runStatusBadge" class="chip" style="color: var(--text-muted);">待機中</span>
+        </div>
+
+        <!-- ローディング表示 -->
+        <div class="loading-box" id="loadingBox">
+          <div class="spinner"></div>
+          <h3 style="font-size: 1.1rem; color: var(--primary);">ビット反転 & 多段階多数決復元シミュレーション中...</h3>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 6px;">No.1〜No.5 ワークフロー実行中（数秒かかります）</p>
+        </div>
+
+        <!-- 未実行時の案内 -->
+        <div id="emptyBox" style="text-align: center; padding: 70px 20px; color: var(--text-muted);">
+          <div style="font-size: 3rem; margin-bottom: 12px; opacity: 0.4;">🔬</div>
+          <p style="font-size: 1rem; font-weight: 600;">左側の設定から「実験実行」をクリックしてください。</p>
+          <p style="font-size: 0.8rem; margin-top: 6px;">指定した反転率のノイズデータが生成され、多数決復元の段階比較とグラフが生成されます。</p>
+        </div>
+
+        <!-- 結果コンテンツ -->
+        <div id="resultContent" style="display: none;">
+          <!-- 統計KPIサマリー -->
+          <div class="kpi-grid" id="kpiContainer">
+            <!-- JSで動的生成 -->
+          </div>
+
+          <!-- タブナビゲーション -->
+          <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('gallery', this)">🖼️ 画像復元ギャラリー</button>
+            <button class="tab-btn" onclick="switchTab('benchmark', this)">📈 復元率・PSNR推移グラフ</button>
+            <button class="tab-btn" onclick="switchTab('ber', this)">🎯 ビット誤り率 (BER) 分布</button>
+            <button class="tab-btn" onclick="switchTab('table', this)">📋 詳細データテーブル</button>
+            <button class="tab-btn" onclick="switchTab('glossary', this)">📖 用語解説</button>
+          </div>
+
+          <!-- タブコンテンツ: ギャラリー -->
+          <div class="tab-pane" id="tab_gallery">
+            <img id="galleryImg" class="result-view" src="" alt="Visual Recovery Gallery">
+            <p style="font-size: 0.8rem; color: var(--text-muted);">
+              💡 <strong>原画像（左）</strong>と、受信音声数を増やしながらNo.1〜No.5ワークフローで復元した画像（右）の比較です。<br>
+              ノイズがあるタイルも黒つぶれせず、ざらざらと部分描画・半透明合成された状態から、多数決によって完全復元へと進化します。
+            </p>
+          </div>
+
+          <!-- タブコンテンツ: ベンチマークグラフ -->
+          <div class="tab-pane" id="tab_benchmark" style="display: none;">
+            <img id="benchmarkImg" class="result-view" src="" alt="Benchmark Progression">
+            <p style="font-size: 0.8rem; color: var(--text-muted);">
+              📊 学会発表・論文対応 300DPI レンダリング。合成音声数の増加に伴うタイル復元率（%）、ビット正解率（%）、PSNR（dB）の急峻な改善を示します。
+            </p>
+          </div>
+
+          <!-- タブコンテンツ: BER分布 -->
+          <div class="tab-pane" id="tab_ber" style="display: none;">
+            <img id="errorsImg" class="result-view" src="" alt="Error Distribution">
+          </div>
+
+          <!-- タブコンテンツ: テーブル -->
+          <div class="tab-pane" id="tab_table" style="display: none;">
+            <table>
+              <thead>
+                <tr>
+                  <th>ステージ</th>
+                  <th>合成音声セット</th>
+                  <th>タイル復元率</th>
+                  <th>ビット正解率</th>
+                  <th>PSNR</th>
+                  <th>SSIM</th>
+                  <th>復元内訳 (No.1〜5)</th>
+                  <th>判定</th>
+                </tr>
+              </thead>
+              <tbody id="evalTableBody">
+                <!-- JSで動的生成 -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- タブコンテンツ: 用語解説 -->
+          <div class="tab-pane" id="tab_glossary" style="display: none;">
+            <div id="inlineGlossaryBody" class="modal-body" style="background: var(--bg-card-sub); border: 1px solid var(--border); border-radius: 12px; padding: 20px; max-height: 550px; overflow-y: auto;">
+              <p style="color: var(--text-muted);">用語集を読み込み中...</p>
+            </div>
+          </div>
+
+          <!-- ダウンロードエリア -->
+          <div class="downloads-bar">
+            <a id="dlBenchmark" class="btn-dl" href="/output/graph2_majority_recovery_benchmark_300dpi.png" download>
+              📥 推移グラフ (300DPI PNG)
+            </a>
+            <a id="dlGallery" class="btn-dl" href="/output/graph2_visual_recovery_gallery.png" download>
+              📥 比較ギャラリー (PNG)
+            </a>
+            <a id="dlBER" class="btn-dl" href="/output/comparison_audio_ber.png" download>
+              📥 BER分布グラフ (PNG)
+            </a>
+            <a class="btn-dl" href="/output/ground_truth_bitstream.txt" download>
+              📄 正解テキスト (TXT)
+            </a>
+            <a class="btn-dl" href="javascript:void(0)" onclick="openGlossaryModal()">
+              📖 用語集ポップアップ
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 用語解説モーダル -->
+  <div class="modal-overlay" id="glossaryModal" onclick="if(event.target === this) closeGlossaryModal()">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 1.2rem;">📖</span>
+          <h2 style="font-size: 1.15rem; font-weight: 700; color: #fff;">SSTV Turbo JPEG 実験用語解説 (GLOSSARY.md)</h2>
+        </div>
+        <button class="modal-close-btn" onclick="closeGlossaryModal()">&times;</button>
+      </div>
+      <div class="modal-body" id="modalGlossaryBody">
+        <p style="color: var(--text-muted);">読み込み中...</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentRates = [
+      0.30, 0.25, 0.20, 0.18, 0.15, 0.12, 0.10, 0.08, 0.07, 0.06,
+      0.05, 0.04, 0.03, 0.03, 0.02, 0.02, 0.01, 0.01, 0.008, 0.005
+    ];
+
+    function onNumSourcesChange() {
+      const n = parseInt(document.getElementById('numSources').value);
+      document.getElementById('numSourcesBadge').innerText = n + ' 本';
+      renderSources(n);
+    }
+
+    function renderSources(n) {
+      const container = document.getElementById('sourcesContainer');
+      container.innerHTML = '';
+
+      for (let i = 0; i < n; i++) {
+        const letter = i < 26 ? String.fromCharCode(65 + i) : `${i + 1}`;
+        const rate = currentRates[i] !== undefined ? currentRates[i] : Math.max(0.01, (0.20 - i * 0.01));
+        const row = document.createElement('div');
+        row.className = 'source-row';
+        row.innerHTML = `
+          <span class="source-tag">音声 ${letter}</span>
+          <div class="slider-row" style="flex: 1; margin: 0 10px;">
+            <input type="range" id="rate_${i}" min="0.01" max="25" step="0.01" value="${rate.toFixed(2)}" oninput="onRateInput(${i}, this.value)">
+          </div>
+          <span class="val-badge" id="rate_val_${i}">${rate.toFixed(2)}%</span>
+        `;
+        container.appendChild(row);
+      }
+    }
+
+    function onRateInput(idx, val) {
+      currentRates[idx] = parseFloat(val);
+      document.getElementById('rate_val_' + idx).innerText = parseFloat(val).toFixed(2) + '%';
+    }
+
+    function applyPreset(n, rates, mode) {
+      document.getElementById('numSources').value = n;
+      document.getElementById('numSourcesBadge').innerText = n + ' 本';
+      if (mode) {
+        document.getElementById('flipMode').value = mode;
+      }
+      for (let i = 0; i < rates.length; i++) {
+        currentRates[i] = rates[i];
+      }
+      renderSources(n);
+    }
+
+    function applyMega20Preset() {
+      const megaRates = [
+        0.30, 0.25, 0.20, 0.18, 0.15, 0.12, 0.10, 0.08, 0.07, 0.06,
+        0.05, 0.04, 0.03, 0.03, 0.02, 0.02, 0.01, 0.01, 0.008, 0.005
+      ];
+      applyPreset(20, megaRates, 'random');
+    }
+
+    let glossaryCache = null;
+
+    async function loadGlossaryHtml() {
+      if (glossaryCache) return glossaryCache;
+      try {
+        const res = await fetch('/api/glossary');
+        const data = await res.json();
+        if (data.status === 'ok') {
+          glossaryCache = marked.parse(data.content);
+          return glossaryCache;
+        }
+      } catch (e) {
+        console.error('Failed to load glossary:', e);
+      }
+      return '<p style="color: var(--accent-red);">用語集の読み込みに失敗しました。</p>';
+    }
+
+    async function openGlossaryModal() {
+      const modal = document.getElementById('glossaryModal');
+      const body = document.getElementById('modalGlossaryBody');
+      modal.style.display = 'flex';
+      if (!glossaryCache) {
+        body.innerHTML = '<p style="color: var(--text-muted);">読み込み中...</p>';
+      }
+      body.innerHTML = await loadGlossaryHtml();
+    }
+
+    function closeGlossaryModal() {
+      document.getElementById('glossaryModal').style.display = 'none';
+    }
+
+    function switchTab(tabKey, targetBtn) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+      if (targetBtn) {
+        targetBtn.classList.add('active');
+      } else if (window.event && window.event.target) {
+        window.event.target.classList.add('active');
+      }
+      const pane = document.getElementById('tab_' + tabKey);
+      if (pane) pane.style.display = 'block';
+
+      if (tabKey === 'glossary') {
+        const inlineBody = document.getElementById('inlineGlossaryBody');
+        loadGlossaryHtml().then(html => {
+          inlineBody.innerHTML = html;
+        });
+      }
+    }
+
+    function handleFileSelect(evt) {
+      const file = evt.target.files[0];
+      if (!file) return;
+      uploadImage(file);
+    }
+
+    // ドラッグ＆ドロップ対応
+    const dropzone = document.getElementById('dropzone');
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      if (e.dataTransfer.files.length > 0) {
+        uploadImage(e.dataTransfer.files[0]);
+      }
+    });
+
+    async function uploadImage(file) {
+      const formData = new FormData();
+      formData.append('image', file);
+      try {
+        const res = await fetch('/api/upload_image', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          document.getElementById('imagePath').value = data.path;
+          document.getElementById('imgFileName').innerText = data.filename;
+          document.getElementById('imgThumb').src = '/api/current_image?t=' + new Date().getTime();
+          document.getElementById('dropzoneDefault').style.display = 'none';
+          document.getElementById('dropzonePreview').style.display = 'flex';
+        }
+      } catch (err) { alert('画像アップロードに失敗しました: ' + err); }
+    }
+
+    async function runExperiment() {
+      const n = parseInt(document.getElementById('numSources').value);
+      const rates = [];
+      for (let i = 0; i < n; i++) {
+        rates.push(parseFloat(document.getElementById('rate_' + i).value));
+      }
+
+      const payload = {
+        image_path: document.getElementById('imagePath').value,
+        num_sources: n,
+        error_rates: rates,
+        mode: document.getElementById('flipMode').value,
+        generate_wav: document.getElementById('genWav').checked
+      };
+
+      document.getElementById('runBtn').disabled = true;
+      document.getElementById('emptyBox').style.display = 'none';
+      document.getElementById('resultContent').style.display = 'none';
+      document.getElementById('loadingBox').style.display = 'block';
+      document.getElementById('runStatusBadge').innerText = 'シミュレーション中...';
+      document.getElementById('runStatusBadge').style.color = 'var(--primary)';
+
+      try {
+        const res = await fetch('/api/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          renderResults(data);
+          document.getElementById('runStatusBadge').innerText = '完了 (成功)';
+          document.getElementById('runStatusBadge').style.color = 'var(--accent-green)';
+        } else {
+          alert('エラー: ' + data.message);
+          document.getElementById('runStatusBadge').innerText = 'エラー';
+          document.getElementById('runStatusBadge').style.color = 'var(--accent-red)';
+        }
+      } catch (err) {
+        alert('実行失敗: ' + err);
+        document.getElementById('runStatusBadge').innerText = '失敗';
+        document.getElementById('runStatusBadge').style.color = 'var(--accent-red)';
+      } finally {
+        document.getElementById('loadingBox').style.display = 'none';
+        document.getElementById('runBtn').disabled = false;
+      }
+    }
+
+    function renderResults(data) {
+      document.getElementById('resultContent').style.display = 'block';
+      const ts = new Date().getTime();
+
+      document.getElementById('benchmarkImg').src = '/output/graph2_majority_recovery_benchmark_300dpi.png?t=' + ts;
+      document.getElementById('galleryImg').src = '/output/graph2_visual_recovery_gallery.png?t=' + ts;
+      document.getElementById('errorsImg').src = '/output/comparison_audio_ber.png?t=' + ts;
+
+      const last = data.progression[data.progression.length - 1];
+      const kpis = document.getElementById('kpiContainer');
+      kpis.innerHTML = `
+        <div class="kpi-card">
+          <div class="kpi-label">合成データ数</div>
+          <div class="kpi-val" style="color: var(--primary);">${data.progression.length} 本</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">最終タイル復元率</div>
+          <div class="kpi-val" style="color: var(--accent-green);">${last.tile_rate.toFixed(1)}%</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">最終ビット正解率</div>
+          <div class="kpi-val" style="color: var(--primary);">${last.bit_acc.toFixed(2)}%</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">最終 PSNR</div>
+          <div class="kpi-val" style="color: var(--accent-purple);">${last.psnr >= 99 ? '100dB' : last.psnr.toFixed(1) + 'dB'}</div>
+        </div>
+      `;
+
+      const tbody = document.getElementById('evalTableBody');
+      tbody.innerHTML = '';
+      data.progression.forEach((row, i) => {
+        const isOk = row.tile_rate >= 99.9;
+        const stages = row.stage_breakdown || {};
+        const breakdownStr = `No.1: ${stages.NO1||0}, No.2: ${stages.NO2||0}, No.3: ${stages.NO3||0}, No.4: ${stages.NO4||0}, No.5: ${stages.NO5||0}`;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><strong>Stage ${i + 1}</strong></td>
+          <td><code style="color: var(--primary);">${row.label}</code></td>
+          <td><strong style="color: ${isOk ? '#34d399' : '#fb7185'}">${row.tile_rate.toFixed(1)}%</strong></td>
+          <td>${row.bit_acc.toFixed(2)}%</td>
+          <td>${row.psnr >= 99 ? '100.0 dB (完全)' : row.psnr.toFixed(2) + ' dB'}</td>
+          <td>${row.ssim.toFixed(4)}</td>
+          <td><span class="badge badge-stage">${breakdownStr}</span></td>
+          <td><span class="badge ${isOk ? 'badge-ok' : 'badge-warn'}">${isOk ? '100% 達成' : '部分欠損/復元'}</span></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    window.onload = () => {
+      onNumSourcesChange();
+      fetch('/api/current_image').then(res => {
+        if (res.ok) {
+          document.getElementById('dropzoneDefault').style.display = 'none';
+          document.getElementById('dropzonePreview').style.display = 'flex';
+        }
+      });
+    };
+  </script>
+</body>
+</html>

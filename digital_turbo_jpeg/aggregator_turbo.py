@@ -366,15 +366,37 @@ class TurboJPEGAggregator(BaseAggregator):
         if not p_bytes or len(p_bytes) < 4:
             return None
 
+        tile_w = tile_w or getattr(config, "TILE_SIZE", 16)
+        tile_h = tile_h or getattr(config, "TILE_SIZE", 16)
+        hdr_tmpl, sos_off = self._get_jpeg_header_template(tile_w, tile_h)
+
         # 1. そのまま一度デコードを試みる
         try:
             tile_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
             tile_img.load()
-            return tile_img
+            # LOAD_TRUNCATED_IMAGES=True の場合、DHTやDQT破損で例外を出さず真っ黒([0,0,0])になる
+            # 真っ黒（平均輝度 < 2.0）でかつヘッダ差し替えが可能な場合は、ヘッダ差し替えを優先する
+            arr = np.array(tile_img)
+            if np.mean(arr) > 2.0 or not hdr_tmpl or len(p_bytes) <= sos_off:
+                return tile_img
         except Exception:
             pass
 
-        # 2. SOI (0xFF 0xD8) の位置を探索して位置補正 ＋ 末尾 (EOI: 0xFF 0xD9) 修復
+        # 2. 高度な修復: ヘッダ破損時、正常な JPEG 構造テンプレート (DQT/DHT/SOF/SOS) で差し替え
+        if hdr_tmpl and len(p_bytes) > sos_off:
+            try:
+                repaired_bytes = bytearray(hdr_tmpl + p_bytes[sos_off:])
+                if not repaired_bytes.endswith(b'\xff\xd9'):
+                    repaired_bytes.extend(b'\xff\xd9')
+                tile_img = Image.open(io.BytesIO(repaired_bytes)).convert("RGB")
+                tile_img.load()
+                arr = np.array(tile_img)
+                if np.mean(arr) > 2.0:
+                    return tile_img
+            except Exception:
+                pass
+
+        # 3. SOI (0xFF 0xD8) の位置を探索して位置補正 ＋ 末尾 (EOI: 0xFF 0xD9) 修復
         raw_bytes = bytes(p_bytes)
         soi_idx = raw_bytes.find(b'\xff\xd8')
         if soi_idx != -1:
@@ -391,20 +413,6 @@ class TurboJPEGAggregator(BaseAggregator):
             return tile_img
         except Exception:
             pass
-
-        # 3. 高度な修復: ヘッダ全壊時、正常な JPEG 構造テンプレート (DQT/DHT/SOF/SOS) で差し替え
-        if tile_w and tile_h:
-            try:
-                hdr_tmpl, sos_off = self._get_jpeg_header_template(tile_w, tile_h)
-                if hdr_tmpl and len(p_bytes) > sos_off:
-                    repaired_bytes = bytearray(hdr_tmpl + p_bytes[sos_off:])
-                    if not repaired_bytes.endswith(b'\xff\xd9'):
-                        repaired_bytes.extend(b'\xff\xd9')
-                    tile_img = Image.open(io.BytesIO(repaired_bytes)).convert("RGB")
-                    tile_img.load()
-                    return tile_img
-            except Exception:
-                pass
 
         return None
 

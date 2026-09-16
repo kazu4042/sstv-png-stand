@@ -189,7 +189,149 @@
 
 
         <!-- ========================================== -->
-        <!-- 2. 受信画像管理 & クリーンアップ セクション -->
+        <!-- 2. 実験用テスト音声トラック管理 セクション -->
+        <!-- ========================================== -->
+        <section class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden space-y-0">
+            
+            <!-- ツールバー -->
+            <div class="p-6 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-50/50">
+                <div>
+                    <div class="flex items-center gap-2.5">
+                        <div class="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600">
+                            <i data-lucide="music" class="w-4 h-4"></i>
+                        </div>
+                        <h2 class="text-lg md:text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                            実験用テスト音声（Audio Tracks）管理
+                            <span id="badge-audio-count" class="px-2.5 py-0.5 text-xs font-mono font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                {{ audio_tracks|length if audio_tracks is defined else 0 }} 件
+                            </span>
+                        </h2>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-1">
+                        デモ再生・実験用の音声を管理します。直接の音声アップロードや、画像からのSSTV自動音声化が可能です。
+                    </p>
+                </div>
+
+                <!-- アクションボタン -->
+                <div class="flex flex-wrap items-center gap-2.5">
+                    <button onclick="reloadAudioTracks()" id="btn-refresh-audio" class="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5" title="音声一覧を更新">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5" id="refresh-audio-icon"></i>
+                        <span>更新</span>
+                    </button>
+                    <a href="/demo" target="_blank" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5">
+                        <i data-lucide="radio" class="w-3.5 h-3.5 text-emerald-600"></i>
+                        <span>再生ページを開く</span>
+                    </a>
+                    <button onclick="openAudioUploadModal()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm shadow-emerald-600/20 flex items-center gap-1.5">
+                        <i data-lucide="plus-circle" class="w-4 h-4"></i>
+                        <span>新規音声を追加 / 画像から生成</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- トラック一覧テーブル -->
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-slate-100/70 border-b border-slate-200 text-xs font-bold text-slate-600 tracking-wider">
+                            <th class="py-3.5 px-4 w-12 text-center">試聴</th>
+                            <th class="py-3.5 px-4">トラック名 / 説明</th>
+                            <th class="py-3.5 px-4">モード</th>
+                            <th class="py-3.5 px-4">Image ID</th>
+                            <th class="py-3.5 px-4">ファイルサイズ</th>
+                            <th class="py-3.5 px-4">登録日時</th>
+                            <th class="py-3.5 px-4 text-center w-36">ステータス / 操作</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 text-sm" id="audio-tracks-tbody">
+                        {% if audio_tracks %}
+                            {% for track in audio_tracks %}
+                            <tr class="hover:bg-slate-50/80 transition-colors" data-track-id="{{ track.filename }}">
+                                <!-- 試聴ボタン -->
+                                <td class="py-3.5 px-4 text-center">
+                                    <button onclick="toggleAudioPreview('{{ url_for('static', filename='audio/' + track.filename) }}', this)" class="audio-play-btn w-8 h-8 rounded-full bg-slate-100 hover:bg-emerald-600 hover:text-white text-slate-600 flex items-center justify-center transition-all" title="試聴再生">
+                                        <i data-lucide="play" class="w-4 h-4 ml-0.5"></i>
+                                    </button>
+                                </td>
+
+                                <!-- トラック名 / 説明 -->
+                                <td class="py-3.5 px-4">
+                                    <div class="font-bold text-slate-900 flex items-center gap-2">
+                                        <span>{{ track.label }}</span>
+                                        {% if track.is_system %}
+                                        <span class="px-1.5 py-0.5 text-[9px] font-bold rounded bg-slate-100 text-slate-500 border border-slate-200">System</span>
+                                        {% endif %}
+                                    </div>
+                                    <div class="text-xs text-slate-500 font-mono mt-0.5">
+                                        {{ track.filename }}
+                                        {% if track.description %}
+                                        <span class="text-slate-400 font-sans ml-1">・ {{ track.description }}</span>
+                                        {% endif %}
+                                    </div>
+                                </td>
+
+                                <!-- モード -->
+                                <td class="py-3.5 px-4">
+                                    {% if track.mode == 'JPEG' %}
+                                    <span class="px-2.5 py-0.5 text-xs font-bold rounded-full bg-amber-100 text-amber-800 border border-amber-300">JPEG</span>
+                                    {% else %}
+                                    <span class="px-2.5 py-0.5 text-xs font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">PNG</span>
+                                    {% endif %}
+                                </td>
+
+                                <!-- Image ID -->
+                                <td class="py-3.5 px-4 font-mono font-bold text-slate-700 text-xs">
+                                    {{ track.image_id }}
+                                </td>
+
+                                <!-- ファイルサイズ -->
+                                <td class="py-3.5 px-4 font-mono text-xs text-slate-600">
+                                    {{ track.size_mb }} MB
+                                </td>
+
+                                <!-- 登録日時 -->
+                                <td class="py-3.5 px-4 text-xs font-mono text-slate-500">
+                                    {{ track.created_at or '---' }}
+                                </td>
+
+                                <!-- ステータス / 操作 -->
+                                <td class="py-3.5 px-4 text-center">
+                                    <div class="flex items-center justify-center gap-1.5">
+                                        {% if track.is_active %}
+                                        <span class="px-2.5 py-1 text-xs font-bold rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-300 flex items-center gap-1">
+                                            <i data-lucide="check-circle" class="w-3.5 h-3.5"></i> デフォルト
+                                        </span>
+                                        {% else %}
+                                        <button onclick="setActiveAudioTrack('{{ track.mode }}', '{{ track.filename }}')" class="px-2.5 py-1 text-xs font-bold rounded-lg bg-slate-100 hover:bg-emerald-600 hover:text-white text-slate-700 border border-slate-200 transition-colors" title="このモードのデフォルト再生音声に指定">
+                                            指定
+                                        </button>
+                                        {% endif %}
+
+                                        {% if not track.is_system %}
+                                        <button onclick="deleteAudioTrack('{{ track.filename }}')" class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors" title="削除">
+                                            <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                        </button>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                        <tr id="audio-empty-state-row">
+                            <td colspan="7" class="p-8 text-center text-slate-400">
+                                登録された音声トラックはありません。
+                            </td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+
+        </section>
+
+
+        <!-- ========================================== -->
+        <!-- 3. 受信画像データ管理 & クリーンアップ セクション -->
         <!-- ========================================== -->
         <section class="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden space-y-0">
             
@@ -439,6 +581,152 @@
                 <button onclick="executeDelete()" id="btn-confirm-delete" type="button" class="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-rose-600/20 flex items-center gap-1.5">
                     <i data-lucide="trash-2" class="w-4 h-4"></i>
                     <span id="btn-confirm-delete-text">削除を実行する</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ========================================== -->
+    <!-- モーダル: 音声トラック追加 / 画像から生成   -->
+    <!-- ========================================== -->
+    <div id="audio-upload-modal" class="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm hidden items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 relative">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
+                        <i data-lucide="upload-cloud" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-bold text-slate-900">実験用テスト音声の追加</h3>
+                        <p class="text-xs text-slate-500">WAVファイルの直接登録、または画像から即時自動エンコード</p>
+                    </div>
+                </div>
+                <button onclick="closeAudioUploadModal()" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <!-- タブ切り替え -->
+            <div class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold">
+                <button type="button" onclick="switchAudioUploadTab('image')" id="tab-audio-type-image" class="flex-1 py-2 rounded-lg transition-all bg-white text-emerald-700 shadow-sm flex items-center justify-center gap-1.5">
+                    <i data-lucide="image" class="w-3.5 h-3.5"></i>
+                    <span>画像から自動エンコード生成 (推奨)</span>
+                </button>
+                <button type="button" onclick="switchAudioUploadTab('audio')" id="tab-audio-type-audio" class="flex-1 py-2 rounded-lg transition-all text-slate-600 hover:text-slate-900 flex items-center justify-center gap-1.5">
+                    <i data-lucide="file-audio" class="w-3.5 h-3.5"></i>
+                    <span>音声ファイルを直接UP</span>
+                </button>
+            </div>
+
+            <form id="audio-upload-form" onsubmit="submitAudioUpload(event)" class="space-y-4">
+                <input type="hidden" id="audio-upload-type" name="type" value="image">
+
+                <!-- 対象エンジンモード -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1.5">対象エンジンモード:</label>
+                    <div class="grid grid-cols-2 gap-3 text-xs">
+                        <label class="relative flex items-center gap-2 p-3 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50 has-[:checked]:border-amber-500 has-[:checked]:bg-amber-50/50">
+                            <input type="radio" name="mode" value="JPEG" checked class="text-amber-600 focus:ring-amber-500">
+                            <div>
+                                <div class="font-bold text-slate-900">JPEG モード</div>
+                                <div class="text-[10px] text-slate-500">ざらざら感・段階的復元</div>
+                            </div>
+                        </label>
+                        <label class="relative flex items-center gap-2 p-3 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50/50">
+                            <input type="radio" name="mode" value="PNG" class="text-emerald-600 focus:ring-emerald-500">
+                            <div>
+                                <div class="font-bold text-slate-900">PNG モード</div>
+                                <div class="text-[10px] text-slate-500">0/100 多数決無劣化復元</div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- ファイル選択エリア -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1.5" id="audio-file-input-label">
+                        画像ファイルを選択 (.jpg, .png 等):
+                    </label>
+                    <div class="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:border-emerald-500 transition-colors bg-slate-50/50 relative cursor-pointer" onclick="document.getElementById('audio-upload-file').click()">
+                        <input type="file" id="audio-upload-file" name="file" accept="image/*" required class="hidden" onchange="handleAudioFileSelected(this)">
+                        <div id="audio-file-placeholder" class="space-y-1">
+                            <i data-lucide="upload" class="w-6 h-6 mx-auto text-slate-400"></i>
+                            <p class="text-xs font-bold text-slate-700" id="audio-drop-text">クリックしてファイルを選択</p>
+                            <p class="text-[10px] text-slate-400" id="audio-drop-subtext">JPG, PNG 形式 (自動で 256x256 にリサイズ・変調されます)</p>
+                        </div>
+                        <div id="audio-file-preview-info" class="hidden text-xs font-bold text-emerald-700 flex items-center justify-center gap-1.5">
+                            <i data-lucide="check-circle" class="w-4 h-4"></i>
+                            <span id="audio-selected-filename">filename.jpg</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- トラック表示名 -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">トラック表示ラベル (日本語可):</label>
+                    <input type="text" name="label" id="audio-upload-label" placeholder="例: 宇宙画像 (JPEG実験用)" class="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+
+                <!-- 説明文 -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">説明・実験メモ (任意):</label>
+                    <input type="text" name="description" id="audio-upload-desc" placeholder="例: SNR 5dB環境での復元テスト用" class="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+
+                <!-- 送信プログレス -->
+                <div id="audio-upload-progress-container" class="hidden space-y-2 pt-2">
+                    <div class="flex justify-between text-xs text-slate-600 font-bold">
+                        <span id="audio-upload-status-text">エンコード中・アップロード中...</span>
+                        <span id="audio-upload-progress-pct">0%</span>
+                    </div>
+                    <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                        <div id="audio-upload-progress-bar" class="bg-emerald-600 h-2 rounded-full transition-all duration-300 w-0"></div>
+                    </div>
+                </div>
+
+                <!-- フッターボタン -->
+                <div class="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+                    <button onclick="closeAudioUploadModal()" type="button" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors">
+                        キャンセル
+                    </button>
+                    <button type="submit" id="btn-submit-audio-upload" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-emerald-600/20 flex items-center gap-1.5">
+                        <i data-lucide="sparkles" class="w-4 h-4"></i>
+                        <span id="btn-submit-audio-text">エンコード & 登録を実行</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+
+    <!-- ========================================== -->
+    <!-- モーダル: 音声トラック削除確認              -->
+    <!-- ========================================== -->
+    <div id="audio-delete-modal" class="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm hidden items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 relative">
+            <div class="flex items-center gap-3">
+                <div class="w-12 h-12 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                    <i data-lucide="trash-2" class="w-6 h-6"></i>
+                </div>
+                <div>
+                    <h3 class="text-lg font-bold text-slate-900">音声トラックの削除</h3>
+                    <p class="text-xs text-slate-500 mt-0.5">サーバーから音声ファイルを完全に削除します</p>
+                </div>
+            </div>
+
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200/80 text-xs text-slate-700 space-y-1 leading-relaxed">
+                <p>以下の音声トラックを削除しますか？</p>
+                <p class="font-mono font-bold text-slate-900 mt-1" id="delete-audio-target-name"></p>
+            </div>
+
+            <div class="flex items-center justify-end gap-2.5 pt-2">
+                <button onclick="closeAudioDeleteModal()" type="button" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors">
+                    キャンセル
+                </button>
+                <button onclick="executeAudioDelete()" id="btn-confirm-audio-delete" type="button" class="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-rose-600/20 flex items-center gap-1.5">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    <span>削除する</span>
                 </button>
             </div>
         </div>
@@ -961,6 +1249,354 @@
             } finally {
                 btn.disabled = false;
                 btnText.textContent = originalText;
+            }
+        }
+
+
+        // ====================================================================
+        // 🎙️ 実験用テスト音声管理（Audio Tracks）JavaScript
+        // ====================================================================
+        let currentAudioPreview = null;
+        let currentPreviewBtn = null;
+        let deleteAudioTargetFilename = null;
+
+        // 音声トラック一覧の再読み込み
+        async function reloadAudioTracks(notify = true) {
+            const refreshIcon = document.getElementById('refresh-audio-icon');
+            if (refreshIcon) refreshIcon.classList.add('animate-spin');
+
+            try {
+                const res = await fetch(safeApiUrl(`/admin/api/audio/list?_t=${Date.now()}`));
+                const data = await res.json();
+                if (data.status === 'success') {
+                    renderAudioTracksTable(data.tracks, data.active);
+                    if (notify) showToast('音声トラック一覧を更新しました');
+                } else {
+                    if (notify) showToast('音声一覧の取得に失敗しました', 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                if (notify) showToast('通信エラーが発生しました', 'error');
+            } finally {
+                if (refreshIcon) refreshIcon.classList.remove('animate-spin');
+            }
+        }
+
+        // テーブルの動的描画
+        function renderAudioTracksTable(tracks, activeMap) {
+            const tbody = document.getElementById('audio-tracks-tbody');
+            const badgeCount = document.getElementById('badge-audio-count');
+            if (badgeCount) badgeCount.textContent = `${tracks.length} 件`;
+
+            if (!tracks || tracks.length === 0) {
+                tbody.innerHTML = `
+                    <tr id="audio-empty-state-row">
+                        <td colspan="7" class="p-8 text-center text-slate-400">
+                            登録された音声トラックはありません。
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            let html = '';
+            tracks.forEach(track => {
+                const isJpeg = (track.mode === 'JPEG');
+                const badgeMode = isJpeg
+                    ? `<span class="px-2.5 py-0.5 text-xs font-bold rounded-full bg-amber-100 text-amber-800 border border-amber-300">JPEG</span>`
+                    : `<span class="px-2.5 py-0.5 text-xs font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">PNG</span>`;
+
+                const systemTag = track.is_system
+                    ? `<span class="px-1.5 py-0.5 text-[9px] font-bold rounded bg-slate-100 text-slate-500 border border-slate-200">System</span>`
+                    : '';
+
+                const descText = track.description
+                    ? `<span class="text-slate-400 font-sans ml-1">・ ${track.description}</span>`
+                    : '';
+
+                const actionHtml = track.is_active
+                    ? `<span class="px-2.5 py-1 text-xs font-bold rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-300 flex items-center gap-1"><i data-lucide="check-circle" class="w-3.5 h-3.5"></i> デフォルト</span>`
+                    : `<button onclick="setActiveAudioTrack('${track.mode}', '${track.filename}')" class="px-2.5 py-1 text-xs font-bold rounded-lg bg-slate-100 hover:bg-emerald-600 hover:text-white text-slate-700 border border-slate-200 transition-colors" title="このモードのデフォルト再生音声に指定">指定</button>`;
+
+                const deleteBtn = !track.is_system
+                    ? `<button onclick="deleteAudioTrack('${track.filename}')" class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors" title="削除"><i data-lucide="trash-2" class="w-4 h-4"></i></button>`
+                    : '';
+
+                html += `
+                <tr class="hover:bg-slate-50/80 transition-colors" data-track-id="${track.filename}">
+                    <td class="py-3.5 px-4 text-center">
+                        <button onclick="toggleAudioPreview('/static/audio/${track.filename}', this)" class="audio-play-btn w-8 h-8 rounded-full bg-slate-100 hover:bg-emerald-600 hover:text-white text-slate-600 flex items-center justify-center transition-all" title="試聴再生">
+                            <i data-lucide="play" class="w-4 h-4 ml-0.5"></i>
+                        </button>
+                    </td>
+                    <td class="py-3.5 px-4">
+                        <div class="font-bold text-slate-900 flex items-center gap-2">
+                            <span>${track.label}</span>
+                            ${systemTag}
+                        </div>
+                        <div class="text-xs text-slate-500 font-mono mt-0.5">
+                            ${track.filename} ${descText}
+                        </div>
+                    </td>
+                    <td class="py-3.5 px-4">
+                        ${badgeMode}
+                    </td>
+                    <td class="py-3.5 px-4 font-mono font-bold text-slate-700 text-xs">
+                        ${track.image_id || '---'}
+                    </td>
+                    <td class="py-3.5 px-4 font-mono text-xs text-slate-600">
+                        ${track.size_mb || 0} MB
+                    </td>
+                    <td class="py-3.5 px-4 text-xs font-mono text-slate-500">
+                        ${track.created_at || '---'}
+                    </td>
+                    <td class="py-3.5 px-4 text-center">
+                        <div class="flex items-center justify-center gap-1.5">
+                            ${actionHtml}
+                            ${deleteBtn}
+                        </div>
+                    </td>
+                </tr>
+                `;
+            });
+
+            tbody.innerHTML = html;
+            lucide.createIcons();
+        }
+
+        // インライン試聴再生・停止
+        function toggleAudioPreview(audioUrl, btn) {
+            if (currentAudioPreview && !currentAudioPreview.paused) {
+                currentAudioPreview.pause();
+                if (currentPreviewBtn) {
+                    currentPreviewBtn.innerHTML = '<i data-lucide="play" class="w-4 h-4 ml-0.5"></i>';
+                    currentPreviewBtn.classList.remove('bg-emerald-600', 'text-white');
+                    currentPreviewBtn.classList.add('bg-slate-100', 'text-slate-600');
+                }
+                if (currentPreviewBtn === btn) {
+                    currentAudioPreview = null;
+                    currentPreviewBtn = null;
+                    lucide.createIcons();
+                    return;
+                }
+            }
+
+            currentAudioPreview = new Audio(audioUrl);
+            currentPreviewBtn = btn;
+            btn.innerHTML = '<i data-lucide="square" class="w-3.5 h-3.5"></i>';
+            btn.classList.add('bg-emerald-600', 'text-white');
+            btn.classList.remove('bg-slate-100', 'text-slate-600');
+            lucide.createIcons();
+
+            currentAudioPreview.onended = () => {
+                btn.innerHTML = '<i data-lucide="play" class="w-4 h-4 ml-0.5"></i>';
+                btn.classList.remove('bg-emerald-600', 'text-white');
+                btn.classList.add('bg-slate-100', 'text-slate-600');
+                lucide.createIcons();
+                currentAudioPreview = null;
+                currentPreviewBtn = null;
+            };
+
+            currentAudioPreview.play().catch(e => {
+                console.error("Preview play failed:", e);
+                showToast('音声の再生に失敗しました', 'error');
+                btn.innerHTML = '<i data-lucide="play" class="w-4 h-4 ml-0.5"></i>';
+                btn.classList.remove('bg-emerald-600', 'text-white');
+                btn.classList.add('bg-slate-100', 'text-slate-600');
+                lucide.createIcons();
+            });
+        }
+
+        // デフォルトアクティブ設定
+        async function setActiveAudioTrack(mode, filename) {
+            try {
+                const res = await fetch(safeApiUrl('/admin/api/audio/set_active'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: mode, filename: filename })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    showToast(data.message || 'デフォルト音声を変更しました');
+                    reloadAudioTracks(false);
+                } else {
+                    showToast(data.message || '設定に失敗しました', 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                showToast('通信エラーが発生しました', 'error');
+            }
+        }
+
+        // 音声追加モーダル
+        function openAudioUploadModal() {
+            const modal = document.getElementById('audio-upload-modal');
+            const form = document.getElementById('audio-upload-form');
+            if (form) form.reset();
+            switchAudioUploadTab('image');
+            resetAudioFileInputUI();
+            const prog = document.getElementById('audio-upload-progress-container');
+            if (prog) prog.classList.add('hidden');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            lucide.createIcons();
+        }
+
+        function closeAudioUploadModal() {
+            const modal = document.getElementById('audio-upload-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function switchAudioUploadTab(type) {
+            const typeInput = document.getElementById('audio-upload-type');
+            const tabImg = document.getElementById('tab-audio-type-image');
+            const tabAud = document.getElementById('tab-audio-type-audio');
+            const fileInput = document.getElementById('audio-upload-file');
+            const inputLabel = document.getElementById('audio-file-input-label');
+            const dropSubtext = document.getElementById('audio-drop-subtext');
+            const submitBtnText = document.getElementById('btn-submit-audio-text');
+
+            typeInput.value = type;
+            if (type === 'image') {
+                tabImg.className = 'flex-1 py-2 rounded-lg transition-all bg-white text-emerald-700 shadow-sm flex items-center justify-center gap-1.5';
+                tabAud.className = 'flex-1 py-2 rounded-lg transition-all text-slate-600 hover:text-slate-900 flex items-center justify-center gap-1.5';
+                fileInput.accept = 'image/*';
+                inputLabel.textContent = '画像ファイルを選択 (.jpg, .png 等):';
+                dropSubtext.textContent = 'JPG, PNG 形式 (自動で 256x256 にリサイズ・変調されます)';
+                submitBtnText.textContent = 'エンコード & 登録を実行';
+            } else {
+                tabAud.className = 'flex-1 py-2 rounded-lg transition-all bg-white text-emerald-700 shadow-sm flex items-center justify-center gap-1.5';
+                tabImg.className = 'flex-1 py-2 rounded-lg transition-all text-slate-600 hover:text-slate-900 flex items-center justify-center gap-1.5';
+                fileInput.accept = 'audio/*,.wav,.m4a,.mp3';
+                inputLabel.textContent = '音声ファイルを選択 (.wav, .mp3, .m4a 等):';
+                dropSubtext.textContent = 'WAV, MP3, M4A 形式 (44.1kHz PCM に自動正規化)';
+                submitBtnText.textContent = '音声ファイルを登録';
+            }
+            resetAudioFileInputUI();
+            lucide.createIcons();
+        }
+
+        function resetAudioFileInputUI() {
+            const previewInfo = document.getElementById('audio-file-preview-info');
+            const placeholder = document.getElementById('audio-file-placeholder');
+            if (previewInfo) previewInfo.classList.add('hidden');
+            if (placeholder) placeholder.classList.remove('hidden');
+        }
+
+        function handleAudioFileSelected(input) {
+            if (input.files && input.files[0]) {
+                const f = input.files[0];
+                const previewInfo = document.getElementById('audio-file-preview-info');
+                const placeholder = document.getElementById('audio-file-placeholder');
+                const filenameSpan = document.getElementById('audio-selected-filename');
+                const labelInput = document.getElementById('audio-upload-label');
+
+                if (previewInfo) previewInfo.classList.remove('hidden');
+                if (placeholder) placeholder.classList.add('hidden');
+                if (filenameSpan) filenameSpan.textContent = `${f.name} (${(f.size / (1024 * 1024)).toFixed(2)} MB)`;
+                if (labelInput && !labelInput.value) {
+                    labelInput.value = f.name.replace(/\.[^/.]+$/, "");
+                }
+                lucide.createIcons();
+            }
+        }
+
+        // アップロード実行
+        async function submitAudioUpload(e) {
+            e.preventDefault();
+            const form = document.getElementById('audio-upload-form');
+            const fileInput = document.getElementById('audio-upload-file');
+            if (!fileInput.files || !fileInput.files[0]) {
+                showToast('ファイルを選択してください', 'error');
+                return;
+            }
+
+            const formData = new FormData(form);
+            const submitBtn = document.getElementById('btn-submit-audio-upload');
+            const progContainer = document.getElementById('audio-upload-progress-container');
+            const statusText = document.getElementById('audio-upload-status-text');
+            const progressBar = document.getElementById('audio-upload-progress-bar');
+            const progressPct = document.getElementById('audio-upload-progress-pct');
+
+            submitBtn.disabled = true;
+            progContainer.classList.remove('hidden');
+            progressBar.style.width = '35%';
+            progressPct.textContent = '35%';
+            statusText.textContent = 'アップロード・処理中 (画像エンコードには少し時間がかかります)...';
+
+            try {
+                const res = await fetch(safeApiUrl('/admin/api/audio/upload'), {
+                    method: 'POST',
+                    body: formData
+                });
+                progressBar.style.width = '90%';
+                progressPct.textContent = '90%';
+
+                const data = await res.json();
+                if (data.status === 'success') {
+                    progressBar.style.width = '100%';
+                    progressPct.textContent = '100%';
+                    statusText.textContent = '完了！';
+                    showToast(data.message || '音声を登録しました！');
+                    setTimeout(() => {
+                        closeAudioUploadModal();
+                        reloadAudioTracks(false);
+                    }, 600);
+                } else {
+                    showToast(data.message || 'アップロードに失敗しました', 'error');
+                    statusText.textContent = 'エラーが発生しました';
+                }
+            } catch (err) {
+                console.error(err);
+                showToast('通信エラーが発生しました', 'error');
+                statusText.textContent = '通信エラー';
+            } finally {
+                submitBtn.disabled = false;
+            }
+        }
+
+        // 音声削除ダイアログ
+        function deleteAudioTrack(filename) {
+            deleteAudioTargetFilename = filename;
+            const modal = document.getElementById('audio-delete-modal');
+            const targetName = document.getElementById('delete-audio-target-name');
+            if (targetName) targetName.textContent = filename;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            lucide.createIcons();
+        }
+
+        function closeAudioDeleteModal() {
+            const modal = document.getElementById('audio-delete-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            deleteAudioTargetFilename = null;
+        }
+
+        async function executeAudioDelete() {
+            if (!deleteAudioTargetFilename) return;
+            const btn = document.getElementById('btn-confirm-audio-delete');
+            btn.disabled = true;
+            try {
+                const res = await fetch(safeApiUrl('/admin/api/audio/delete'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: deleteAudioTargetFilename })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    closeAudioDeleteModal();
+                    showToast(data.message || '音声トラックを削除しました');
+                    reloadAudioTracks(false);
+                } else {
+                    showToast(data.message || '削除に失敗しました', 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                showToast('通信エラーが発生しました', 'error');
+            } finally {
+                btn.disabled = false;
             }
         }
     </script>

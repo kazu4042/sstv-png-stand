@@ -44,3 +44,7 @@ cookies.txt
 # Temporary test media
 test_*.wav
 test_*_orig.png
+
+# Experiment outputs (prevents pushing 100MB+ WAV files to GitHub)
+experiment/output/*
+!experiment/output/.gitkeep
