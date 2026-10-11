@@ -132,6 +132,9 @@ def admin_dashboard():
     from web_turbo_png.services.audio_manager import AudioManager
     audio_tracks, active_tracks = AudioManager.list_tracks()
 
+    # ユーザー音声投稿 & 画像復元ログの取得
+    submissions, users_list, sub_stats = get_admin_submissions(limit=50)
+
     return render_template(
         'admin.html',
         images=current_images,
@@ -140,8 +143,204 @@ def admin_dashboard():
         all_count=len(images_png) + len(images_jpeg),
         current_engine_mode=current_engine_mode,
         audio_tracks=audio_tracks,
-        active_tracks=active_tracks
+        active_tracks=active_tracks,
+        submissions=submissions,
+        users_list=users_list,
+        sub_stats=sub_stats
     )
+
+
+def get_admin_submissions(filter_mode=None, filter_user_id=None, search_keyword=None, limit=200):
+    """
+    管理者ダッシュボード用:
+    各ユーザーの音声投稿セッション（どのログ/セッションか、どの画像IDか、何パケットか、何%復元されたか）
+    を集計して返す。PNGとJPEGの両方のパケットDBから情報を統合。
+    """
+    import sqlite3
+    import re
+
+    auth_db_obj = get_auth_db()
+    users_dict = {}
+    users_list = []
+    try:
+        cursor_u = auth_db_obj.conn.cursor()
+        cursor_u.execute("SELECT id, email, created_at FROM users ORDER BY id ASC")
+        for uid, uemail, ucreated in cursor_u.fetchall():
+            users_dict[uid] = uemail
+            users_list.append({"id": uid, "email": uemail})
+    except Exception as e:
+        print(f"[Admin Submissions] User query error: {e}")
+
+    submissions = []
+    modes_to_query = []
+    if filter_mode and filter_mode.upper() in ('PNG', 'JPEG'):
+        modes_to_query = [filter_mode.upper()]
+    else:
+        modes_to_query = ['PNG', 'JPEG']
+
+    static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
+
+    for mode in modes_to_query:
+        if mode == 'JPEG':
+            db_path = os.path.join(ROOT_DIR, "data/digital_turbo_jpeg/logs/sstv_packets_turbo_jpeg.db")
+            conf_tiles = 256
+            ext = ".jpg"
+        else:
+            db_path = os.path.join(ROOT_DIR, "data/digital_turbo_png/logs/sstv_packets_turbo_png.db")
+            conf_tiles = 100
+            ext = ".png"
+
+        if not os.path.exists(db_path):
+            continue
+
+        try:
+            conn = sqlite3.connect(db_path, timeout=10.0)
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='packets'")
+            if not cur.fetchone():
+                conn.close()
+                continue
+
+            query = """
+                SELECT file_name, user_id, image_id, COUNT(*) as pkt_count,
+                       COUNT(DISTINCT tile_y || '_' || tile_x) as tile_count,
+                       AVG(snr) as avg_snr, MIN(imported_at) as first_imp, MAX(imported_at) as last_imp
+                FROM packets
+            """
+            params = []
+            where_clauses = []
+
+            if filter_user_id is not None:
+                if str(filter_user_id).lower() == 'guest':
+                    where_clauses.append("user_id IS NULL")
+                elif str(filter_user_id).isdigit():
+                    where_clauses.append("user_id = ?")
+                    params.append(int(filter_user_id))
+
+            if where_clauses:
+                query += " WHERE " + " AND ".join(where_clauses)
+
+            query += " GROUP BY file_name, user_id, image_id ORDER BY MAX(imported_at) DESC LIMIT ?"
+            params.append(limit * 2)
+
+            cur.execute(query, params)
+            rows = cur.fetchall()
+            conn.close()
+
+            for r in rows:
+                fn, uid, img_id, pkts, tiles, snr, f_imp, l_imp = r
+                m = re.search(r'_(\d{8})_(\d{6})', fn or '')
+                if m:
+                    d_str, t_str = m.group(1), m.group(2)
+                    timestamp = f"{d_str[:4]}-{d_str[4:6]}-{d_str[6:8]} {t_str[:2]}:{t_str[2:4]}:{t_str[4:6]}"
+                else:
+                    timestamp = l_imp or f_imp or "---"
+
+                img_hex = f"{img_id:04X}" if img_id is not None else "UNKNOWN"
+                score = min(100.0, round((tiles / conf_tiles) * 100, 1)) if conf_tiles > 0 else 0.0
+
+                user_email = users_dict.get(uid) if uid else "ゲスト局 (未ログイン)"
+                is_guest = (uid is None)
+
+                thumbnail_url = None
+                cand_files = []
+                if uid:
+                    cand_files.append(f"user_{uid}_ID_{img_hex}{ext}")
+                    cand_files.append(f"user_cumulative_{uid}_ID_{img_hex}{ext}")
+                cand_files.append(f"restored_ID_{img_hex}{ext}")
+
+                for cf in cand_files:
+                    full_p = os.path.join(static_out, cf)
+                    if os.path.exists(full_p):
+                        try:
+                            v = int(os.path.getmtime(full_p))
+                            thumbnail_url = f"/static/output/{cf}?v={v}"
+                        except Exception:
+                            thumbnail_url = f"/static/output/{cf}"
+                        break
+
+                submissions.append({
+                    "id": f"{mode}_{fn}_{img_hex}_{uid}",
+                    "mode": mode,
+                    "file_name": fn,
+                    "user_id": uid,
+                    "email": user_email,
+                    "is_guest": is_guest,
+                    "image_id_hex": img_hex,
+                    "packet_count": pkts,
+                    "tile_count": tiles,
+                    "total_tiles": conf_tiles,
+                    "restoration_score": score,
+                    "avg_snr": round(snr or 0.0, 1),
+                    "timestamp": timestamp,
+                    "thumbnail_url": thumbnail_url
+                })
+        except Exception as e:
+            print(f"[Admin Submissions] Query {mode} error: {e}")
+
+    submissions.sort(key=lambda s: s["timestamp"], reverse=True)
+
+    if search_keyword:
+        kw = str(search_keyword).strip().lower()
+        submissions = [
+            s for s in submissions
+            if kw in str(s.get("email") or "").lower()
+            or kw in str(s.get("image_id_hex") or "").lower()
+            or kw in str(s.get("file_name") or "").lower()
+        ]
+
+    total_submissions_count = len(submissions)
+    if limit and limit > 0:
+        submissions = submissions[:limit]
+
+    total_pkts = sum(s["packet_count"] for s in submissions)
+    avg_score = round(sum(s["restoration_score"] for s in submissions) / len(submissions), 1) if submissions else 0.0
+    unique_users = len(set(s["user_id"] for s in submissions if s["user_id"] is not None))
+    if any(s["is_guest"] for s in submissions):
+        unique_users += 1
+
+    stats = {
+        "total_submissions": total_submissions_count,
+        "unique_users": unique_users,
+        "total_packets": total_pkts,
+        "avg_score": avg_score
+    }
+
+    return submissions, users_list, stats
+
+
+@auth_bp.route('/admin/api/submissions', methods=['GET'])
+@login_required
+def admin_get_submissions():
+    """管理者ダッシュボード用: アカウント別音声投稿・画像復元履歴API"""
+    current_email = session.get('email')
+    if not is_admin(current_email):
+        return jsonify({'status': 'error', 'message': '権限がありません'}), 403
+
+    mode = request.args.get('mode', 'ALL').upper()
+    user_id = request.args.get('user_id')
+    search = request.args.get('q') or request.args.get('search')
+    limit = request.args.get('limit', 200, type=int)
+
+    filter_mode = mode if mode in ('PNG', 'JPEG') else None
+    filter_user_id = None
+    if user_id and user_id.lower() != 'all':
+        filter_user_id = user_id
+
+    submissions, users_list, stats = get_admin_submissions(
+        filter_mode=filter_mode,
+        filter_user_id=filter_user_id,
+        search_keyword=search,
+        limit=limit
+    )
+
+    return jsonify({
+        'status': 'success',
+        'submissions': submissions,
+        'count': len(submissions),
+        'users': users_list,
+        'stats': stats
+    })
 
 
 @auth_bp.route('/admin/api/images', methods=['GET'])
