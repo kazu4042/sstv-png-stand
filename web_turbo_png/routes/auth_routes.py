@@ -633,7 +633,7 @@ def admin_audio_upload():
     upload_type = request.form.get('type', 'auto')  # 'audio', 'image', or 'auto'
     description = request.form.get('description', '').strip()
 
-    if mode not in ('PNG', 'JPEG'):
+    if mode not in ('PNG', 'JPEG', 'FEC'):
         mode = 'JPEG'
 
     filename = file.filename

@@ -27,7 +27,7 @@ class AudioManager:
     def get_manifest(cls) -> Dict[str, Any]:
         """マニフェストを取得し、存在しない既存ファイルを自動同期して返す"""
         os.makedirs(AUDIO_DIR, exist_ok=True)
-        manifest: Dict[str, Any] = {"active": {"JPEG": "turbo_256_256.wav", "PNG": "turbo_png_256_256.wav"}, "tracks": {}}
+        manifest: Dict[str, Any] = {"active": {"JPEG": "turbo_256_256.wav", "PNG": "turbo_png_256_256.wav", "FEC": "turbo_fec_256_256.wav"}, "tracks": {}}
 
         if os.path.exists(MANIFEST_PATH):
             try:
@@ -66,6 +66,15 @@ class AudioManager:
                 "description": "システム初期搭載の PNG 多数決復元テスト音声",
                 "is_system": True
             },
+            "turbo_fec_256_256.wav": {
+                "id": "turbo_fec_256_256.wav",
+                "filename": "turbo_fec_256_256.wav",
+                "label": "標準 FEC テスト音声 (デフォルト)",
+                "mode": "FEC",
+                "image_id": "0x0001",
+                "description": "システム初期搭載の FEC (Raptor+RS) 復元テスト音声",
+                "is_system": True
+            },
             "space_jpeg_test.wav": {
                 "id": "space_jpeg_test.wav",
                 "filename": "space_jpeg_test.wav",
@@ -86,11 +95,12 @@ class AudioManager:
                     mtime = os.path.getmtime(full_path)
 
                     if fname not in tracks:
+                        inferred_mode = "FEC" if "fec" in fname.lower() else ("JPEG" if "jpeg" in fname.lower() else "PNG")
                         base_info: Dict[str, Any] = dict(default_defs.get(fname, {
                             "id": fname,
                             "filename": fname,
                             "label": fname,
-                            "mode": "JPEG" if "jpeg" in fname.lower() else "PNG",
+                            "mode": inferred_mode,
                             "image_id": "---",
                             "description": "アップロードされた音声",
                             "is_system": False
@@ -117,7 +127,7 @@ class AudioManager:
             updated = True
 
         # active が無効ならフォールバック
-        for mode, default_fname in [("JPEG", "turbo_256_256.wav"), ("PNG", "turbo_png_256_256.wav")]:
+        for mode, default_fname in [("JPEG", "turbo_256_256.wav"), ("PNG", "turbo_png_256_256.wav"), ("FEC", "turbo_fec_256_256.wav")]:
             if active.get(mode) not in tracks:
                 mode_tracks = [t for t in tracks.values() if isinstance(t, dict) and t.get("mode") == mode]
                 if mode_tracks:
@@ -179,7 +189,12 @@ class AudioManager:
             if tracks_list:
                 return tracks_list[0]
             # フォールバック
-            fname = "turbo_256_256.wav" if mode == "JPEG" else "turbo_png_256_256.wav"
+            if mode == "JPEG":
+                fname = "turbo_256_256.wav"
+            elif mode == "FEC":
+                fname = "turbo_fec_256_256.wav"
+            else:
+                fname = "turbo_png_256_256.wav"
             return {"filename": fname, "label": f"{mode} デフォルト音声", "mode": mode}
         result = tracks_dict[active_filename]
         return result if isinstance(result, dict) else {"filename": active_filename, "label": active_filename, "mode": mode}
@@ -244,6 +259,9 @@ class AudioManager:
         if mode == "JPEG":
             from digital_turbo_jpeg.encoder_turbo import DigitalTurboJPEGEncoder
             encoder = DigitalTurboJPEGEncoder()
+        elif mode == "FEC":
+            from digital_turbo_fec.encoder_turbo import DigitalTurboFECEncoder
+            encoder = DigitalTurboFECEncoder()
         else:
             from digital_turbo_png.encoder_turbo import DigitalTurboPNGEncoder
             encoder = DigitalTurboPNGEncoder()
