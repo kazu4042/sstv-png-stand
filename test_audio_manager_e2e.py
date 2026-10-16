@@ -84,7 +84,7 @@ class TestAudioManagerE2E(unittest.TestCase):
         res = self.client.get('/demo')
         self.assertEqual(res.status_code, 200)
         html = res.get_data(as_text=True)
-        self.assertIn('modeTracks', html)
+        self.assertIn('audioSrc', html)
         self.assertIn('currentModeBadge', html)
         print("[Test 4] Demo page rendered with admin-configured active audio successfully.")
 

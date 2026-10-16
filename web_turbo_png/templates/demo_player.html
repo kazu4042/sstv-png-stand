@@ -340,39 +340,15 @@
         <!-- Player Card -->
         <div class="player-card w-full max-w-lg p-5 sm:p-8" id="playerCard">
             <!-- Header -->
-            <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center justify-between mb-4">
                 <div>
-                    <h1 class="text-lg sm:text-xl font-bold text-ink mb-0.5">SSTV 音声再生</h1>
+                    <h1 class="text-lg sm:text-xl font-bold text-ink mb-1">SSTV 音声再生</h1>
                     <p class="text-[10px] sm:text-xs text-earth tracking-widest uppercase font-medium">SSTV Turbo Audio Broadcast</p>
                 </div>
-                <div class="flex items-center gap-2">
-                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200" title="サーバーの現在のデフォルトエンジン">
-                        ⚙️ 稼働: {{ system_engine_mode or 'FEC' }}
-                    </span>
-                    <div id="statusBadge" class="status-badge ready">
-                        <span class="w-2 h-2 rounded-full bg-current"></span>
-                        <span id="statusText">READY</span>
-                    </div>
+                <div id="statusBadge" class="status-badge ready">
+                    <span class="w-2 h-2 rounded-full bg-current"></span>
+                    <span id="statusText">READY</span>
                 </div>
-            </div>
-
-            <!-- モード切り替えタブ (FEC / JPEG / PNG) -->
-            <div class="grid grid-cols-3 gap-1.5 p-1 bg-slate-100/80 rounded-xl mb-4 border border-slate-200">
-                <button type="button" onclick="switchAudioMode('FEC')" id="tab-btn-FEC"
-                    class="py-2 px-1 text-center rounded-lg font-bold text-xs transition-all flex flex-col items-center justify-center {% if current_engine_mode == 'FEC' %}bg-white text-purple-700 shadow-sm border border-purple-200 ring-2 ring-purple-500/20{% else %}text-slate-600 hover:text-slate-900 hover:bg-white/50{% endif %}">
-                    <span class="flex items-center gap-1">🟣 FEC</span>
-                    <span class="text-[9px] font-normal text-slate-400">約11分 (Raptor)</span>
-                </button>
-                <button type="button" onclick="switchAudioMode('JPEG')" id="tab-btn-JPEG"
-                    class="py-2 px-1 text-center rounded-lg font-bold text-xs transition-all flex flex-col items-center justify-center {% if current_engine_mode == 'JPEG' %}bg-white text-amber-700 shadow-sm border border-amber-200 ring-2 ring-amber-500/20{% else %}text-slate-600 hover:text-slate-900 hover:bg-white/50{% endif %}">
-                    <span class="flex items-center gap-1">🟡 JPEG</span>
-                    <span class="text-[9px] font-normal text-slate-400">約2分 (段階復元)</span>
-                </button>
-                <button type="button" onclick="switchAudioMode('PNG')" id="tab-btn-PNG"
-                    class="py-2 px-1 text-center rounded-lg font-bold text-xs transition-all flex flex-col items-center justify-center {% if current_engine_mode == 'PNG' %}bg-white text-emerald-700 shadow-sm border border-emerald-200 ring-2 ring-emerald-500/20{% else %}text-slate-600 hover:text-slate-900 hover:bg-white/50{% endif %}">
-                    <span class="flex items-center gap-1">🟢 PNG</span>
-                    <span class="text-[9px] font-normal text-slate-400">約20分 (多数決)</span>
-                </button>
             </div>
 
             <!-- 現在再生中の音声モード表示 & 管理者指定トラック情報 -->
@@ -380,14 +356,16 @@
                 <div>
                     <span id="currentModeBadge"
                         class="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 rounded-full text-xs font-bold shadow-xs {% if current_engine_mode == 'JPEG' %}bg-amber-100 text-amber-900 border border-amber-300{% elif current_engine_mode == 'FEC' %}bg-purple-100 text-purple-900 border border-purple-300{% else %}bg-emerald-100 text-emerald-900 border border-emerald-300{% endif %}">
-                        <span id="modeDot"
+                        <span
                             class="w-2.5 h-2.5 rounded-full {% if current_engine_mode == 'JPEG' %}bg-amber-500 animate-pulse{% elif current_engine_mode == 'FEC' %}bg-purple-500 animate-pulse{% else %}bg-emerald-500 animate-pulse{% endif %}"></span>
                         <span id="currentModeLabel">{{ audio_label or 'SSTV テスト音声' }}</span>
                     </span>
                 </div>
-                <p id="trackDescription" class="text-[11px] text-earth">
-                    {{ (selected_track.description if selected_track else '') or 'モードに応じたテスト音声を再生します' }}
+                {% if selected_track and selected_track.description %}
+                <p class="text-[11px] text-earth">
+                    {{ selected_track.description }}
                 </p>
+                {% endif %}
             </div>
 
             <!-- Waveform Visualizer -->
@@ -482,11 +460,10 @@
 
     <script>
         // ====================================================================
-        // Audio Player (FEC / JPEG / PNG モード別動的切り替え)
+        // Audio Player (管理者指定音声を固定配信)
         // ====================================================================
-        const modeTracks = {{ (mode_tracks or {}) | tojson | safe }};
-        let currentMode = "{{ current_engine_mode or 'FEC' }}";
-        let currentAudioSrc = "{{ url_for('static', filename=audio_filename) }}?t=" + Date.now();
+        const currentMode = "{{ current_engine_mode or 'PNG' }}";
+        const audioSrc = "{{ url_for('static', filename=audio_filename) }}?t=" + Date.now();
 
         // [Audio Player] 音声再生ページ
         let audioContext = null;
@@ -499,71 +476,6 @@
         let pausedAt = 0;
         let randomStartSec = 0;
         let animFrameId = null;
-
-        // モード動的切り替え
-        async function switchAudioMode(mode) {
-            if (currentMode === mode && audioBuffer) return;
-            mode = mode.toUpperCase();
-            if (!modeTracks[mode]) return;
-
-            // 再生中の場合は停止
-            stopCurrent();
-            setPlayingUI(false);
-            pausedAt = 0;
-            progressFill.style.width = '0%';
-            currentTimeEl.textContent = '0:00';
-            startPosEl.textContent = '--:--';
-            audioBuffer = null;
-
-            currentMode = mode;
-            const trackInfo = modeTracks[mode];
-            currentAudioSrc = trackInfo.audio_url + '?t=' + Date.now();
-
-            // UIタブのアクティブ状態更新
-            ['FEC', 'JPEG', 'PNG'].forEach(m => {
-                const btn = document.getElementById(`tab-btn-${m}`);
-                if (!btn) return;
-                if (m === mode) {
-                    if (m === 'FEC') {
-                        btn.className = 'py-2 px-1 text-center rounded-lg font-bold text-xs transition-all flex flex-col items-center justify-center bg-white text-purple-700 shadow-sm border border-purple-200 ring-2 ring-purple-500/20';
-                    } else if (m === 'JPEG') {
-                        btn.className = 'py-2 px-1 text-center rounded-lg font-bold text-xs transition-all flex flex-col items-center justify-center bg-white text-amber-700 shadow-sm border border-amber-200 ring-2 ring-amber-500/20';
-                    } else {
-                        btn.className = 'py-2 px-1 text-center rounded-lg font-bold text-xs transition-all flex flex-col items-center justify-center bg-white text-emerald-700 shadow-sm border border-emerald-200 ring-2 ring-emerald-500/20';
-                    }
-                } else {
-                    btn.className = 'py-2 px-1 text-center rounded-lg font-bold text-xs transition-all flex flex-col items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-white/50';
-                }
-            });
-
-            // バッジ更新
-            const badge = document.getElementById('currentModeBadge');
-            const dot = document.getElementById('modeDot');
-            const label = document.getElementById('currentModeLabel');
-            const desc = document.getElementById('trackDescription');
-
-            if (mode === 'FEC') {
-                badge.className = 'inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 rounded-full text-xs font-bold shadow-xs bg-purple-100 text-purple-900 border border-purple-300';
-                dot.className = 'w-2.5 h-2.5 rounded-full bg-purple-500 animate-pulse';
-            } else if (mode === 'JPEG') {
-                badge.className = 'inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 rounded-full text-xs font-bold shadow-xs bg-amber-100 text-amber-900 border border-amber-300';
-                dot.className = 'w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse';
-            } else {
-                badge.className = 'inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 rounded-full text-xs font-bold shadow-xs bg-emerald-100 text-emerald-900 border border-emerald-300';
-                dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse';
-            }
-
-            label.textContent = `${mode} モード: ${trackInfo.track.label || trackInfo.track.filename}`;
-            desc.textContent = trackInfo.track.description || '';
-
-            // URLクエリを更新 (履歴に残さず置換)
-            const newUrl = new URL(window.location);
-            newUrl.searchParams.set('mode', mode);
-            window.history.replaceState({}, '', newUrl);
-
-            // 音声ロード
-            await initAudio();
-        }
 
         // DOM
         const playBtn = document.getElementById('playBtn');
@@ -685,7 +597,7 @@
             statusText.textContent = 'LOADING...';
 
             try {
-                const response = await fetch(currentAudioSrc);
+                const response = await fetch(audioSrc);
                 const arrayBuffer = await response.arrayBuffer();
                 audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 

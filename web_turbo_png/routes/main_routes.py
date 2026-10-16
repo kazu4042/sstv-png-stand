@@ -162,34 +162,21 @@ def heatmap():
 @main_bp.route('/demo')
 @login_required
 def demo_player():
-    """音声再生ページ（FEC / JPEG / PNG の各モードの音声を試聴・選択可能）"""
-    system_mode = SystemFactory.get_mode()
-    requested_mode = request.args.get('mode', '').upper().strip()
-    target_mode = requested_mode if requested_mode in ('FEC', 'JPEG', 'PNG') else system_mode
+    """音声再生ページ（管理者ダッシュボードで指定されたアクティブ音声を固定配信）"""
+    current_mode = SystemFactory.get_mode()
 
     from web_turbo_png.services.audio_manager import AudioManager
-    active_track = AudioManager.get_active_track(mode=target_mode)
+    active_track = AudioManager.get_active_track(mode=current_mode)
 
     audio_filename = f"audio/{active_track.get('filename')}"
-    audio_label = f"{target_mode} モード: {active_track.get('label')}"
-
-    # 全3モードのトラック情報（クライアント側でのワンタップ切り替え用）
-    mode_tracks = {
-        m: {
-            "track": AudioManager.get_active_track(mode=m),
-            "audio_url": url_for('static', filename=f"audio/{AudioManager.get_active_track(mode=m).get('filename')}")
-        }
-        for m in ('FEC', 'JPEG', 'PNG')
-    }
+    audio_label = f"{current_mode} モード: {active_track.get('label')}"
 
     return render_template(
         'demo_player.html',
-        system_engine_mode=system_mode,
-        current_engine_mode=target_mode,
+        current_engine_mode=current_mode,
         audio_filename=audio_filename,
         audio_label=audio_label,
-        selected_track=active_track,
-        mode_tracks=mode_tracks
+        selected_track=active_track
     )
 
 
