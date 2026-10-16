@@ -727,7 +727,7 @@
                     const cacheBuster = new Date().getTime();
                     let targetUserUrl = "";
                     const imgEngineMode = (currentUserStatus && currentUserStatus.engine_mode) ? currentUserStatus.engine_mode : "{{ current_engine_mode or 'PNG' }}";
-                    const expectedExt = (imgEngineMode === 'JPEG') ? '.jpg' : '.png';
+                    const expectedExt = (imgEngineMode === 'JPEG' || imgEngineMode === 'FEC') ? '.jpg' : '.png';
 
                     if (userImgMode === 'session') {
                         if (initialUserImgUrl && initialUserImgUrl.includes(`ID_${activeImageId}`)) {
