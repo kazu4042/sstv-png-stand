@@ -63,10 +63,10 @@ class SystemConfig:
     enable_doppler_compensation: bool = True
 
     freq_map: Dict[int, int] = field(default_factory=lambda: {
-        0b00: 1000,
-        0b01: 1400,
-        0b10: 1800,
-        0b11: 2200
+        0b00: 8000,
+        0b01: 6000,
+        0b10: 4000,
+        0b11: 2000
     })
 
     # 6. 地上局伝送路シミュレーション設定
