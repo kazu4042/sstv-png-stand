@@ -92,16 +92,6 @@
         <a href="/demo" class="session-item {% if request.path == '/demo' %}active{% endif %} flex items-center gap-3 px-4 py-3 rounded-lg mb-2 text-ink/70" style="text-decoration:none;">
             <i data-lucide="radio" class="w-5 h-5"></i> 音声再生
         </a>
-        {% if show_heatmap %}
-        <a href="/heatmap" class="session-item {% if request.path == '/heatmap' %}active{% endif %} flex items-center gap-3 px-4 py-3 rounded-lg mb-2 text-ink/70" style="text-decoration:none;">
-            <i data-lucide="map" class="w-5 h-5"></i> ヒートマップ
-        </a>
-        {% endif %}
-        {% if show_ranking %}
-        <a href="/ranking" class="session-item {% if request.path == '/ranking' %}active{% endif %} flex items-center gap-3 px-4 py-3 rounded-lg mb-2 text-ink/70" style="text-decoration:none;">
-            <i data-lucide="award" class="w-5 h-5"></i> ランキング
-        </a>
-        {% endif %}
         
         <div class="mt-6 mb-2 px-4">
             <h3 class="text-xs font-bold text-earth tracking-widest flex items-center gap-2">

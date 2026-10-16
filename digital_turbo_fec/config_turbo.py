@@ -78,12 +78,8 @@ IMAGE_OUT_NAME = "decoded_result_fec.jpg"
 INPUT_IMAGE = "data/input/test.jpg"
 OUTPUT_WAV = "data/digital_turbo_fec/audio/turbo_fec_256_256.wav"
 
-# --- Web UI / アナリティクス機能フラグ ---
-ENABLE_HEATMAP = True     # SNRヒートマップ表示
-ENABLE_RANKING = True     # 受信者ランキング表示
-SNR_MAX_THRESH = 14       # SNR良好閾値 (dB)
-SNR_MIN_THRESH = 0        # SNR下限閾値 (dB)
-NOISE_LEVEL = 0.0         # テスト用ノイズ設定
+# --- テスト用ノイズ設定 ---
+NOISE_LEVEL = 0.0
 
 
 def update_tile_size(new_size: int):
