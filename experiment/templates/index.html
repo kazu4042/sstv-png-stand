@@ -569,6 +569,13 @@
       document.getElementById('errorsImg').src = '/output/comparison_audio_ber.png?t=' + ts;
 
       const last = data.progression[data.progression.length - 1];
+      const isLastPerfect = last.tile_rate >= 100.0;
+      const formatBitAccStr = (acc, errs) => {
+        if (errs === 0) return '100.00%';
+        if (acc >= 99.995) return `99.99% (${errs} bit誤り)`;
+        return `${acc.toFixed(2)}% (${errs} bit誤り)`;
+      };
+
       const kpis = document.getElementById('kpiContainer');
       kpis.innerHTML = `
         <div class="kpi-card">
@@ -576,35 +583,37 @@
           <div class="kpi-val" style="color: var(--primary);">${data.progression.length} 本</div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-label">最終タイル復元率</div>
-          <div class="kpi-val" style="color: var(--accent-green);">${last.tile_rate.toFixed(1)}%</div>
+          <div class="kpi-label">最終タイル完全復元率</div>
+          <div class="kpi-val" style="color: ${isLastPerfect ? 'var(--accent-green)' : 'var(--accent-amber)'};">${last.tile_rate.toFixed(1)}%</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">最終ビット正解率</div>
-          <div class="kpi-val" style="color: var(--primary);">${last.bit_acc.toFixed(2)}%</div>
+          <div class="kpi-val" style="color: var(--primary); font-size: 1.15rem;">${formatBitAccStr(last.bit_acc, last.bit_errors || 0)}</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">最終 PSNR</div>
-          <div class="kpi-val" style="color: var(--accent-purple);">${last.psnr >= 99 ? '100dB' : last.psnr.toFixed(1) + 'dB'}</div>
+          <div class="kpi-val" style="color: var(--accent-purple);">${last.psnr >= 99.9 ? '100dB (完全一致)' : last.psnr.toFixed(1) + 'dB'}</div>
         </div>
       `;
 
       const tbody = document.getElementById('evalTableBody');
       tbody.innerHTML = '';
       data.progression.forEach((row, i) => {
-        const isOk = row.tile_rate >= 99.9;
+        const isOk = row.tile_rate >= 100.0;
         const stages = row.stage_breakdown || {};
         const breakdownStr = `No.1: ${stages.NO1||0}, No.2: ${stages.NO2||0}, No.3: ${stages.NO3||0}, No.4: ${stages.NO4||0}, No.5: ${stages.NO5||0}`;
+        const statusLabel = isOk ? '100% 完全復元' : `ノイズ残存 (${(100 - row.tile_rate).toFixed(1)}% 破損)`;
+        const bitAccDisplay = formatBitAccStr(row.bit_acc, row.bit_errors || 0);
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td><strong>Stage ${i + 1}</strong></td>
           <td><code style="color: var(--primary);">${row.label}</code></td>
           <td><strong style="color: ${isOk ? '#34d399' : '#fb7185'}">${row.tile_rate.toFixed(1)}%</strong></td>
-          <td>${row.bit_acc.toFixed(2)}%</td>
-          <td>${row.psnr >= 99 ? '100.0 dB (完全)' : row.psnr.toFixed(2) + ' dB'}</td>
+          <td>${bitAccDisplay}</td>
+          <td>${row.psnr >= 99.9 ? '100.0 dB (完全)' : row.psnr.toFixed(2) + ' dB'}</td>
           <td>${row.ssim.toFixed(4)}</td>
           <td><span class="badge badge-stage">${breakdownStr}</span></td>
-          <td><span class="badge ${isOk ? 'badge-ok' : 'badge-warn'}">${isOk ? '100% 達成' : '部分欠損/復元'}</span></td>
+          <td><span class="badge ${isOk ? 'badge-ok' : 'badge-warn'}">${statusLabel}</span></td>
         `;
         tbody.appendChild(tr);
       });

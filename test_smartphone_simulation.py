@@ -24,7 +24,7 @@ def test_smartphone_acoustic_simulation():
             
     if not wav_path:
         print("テスト用WAVが見つかりません。新規作成します。")
-        from digital_turbo_jpeg.encoder_turbo import TurboJpegEncoder
+        from digital_turbo_jpeg.encoder_turbo import DigitalTurboJPEGEncoder as TurboJpegEncoder
         from PIL import Image
         img = Image.new("RGB", (256, 256), color=(100, 150, 200))
         test_img_path = os.path.join(ROOT_DIR, "test_acoustic_orig.png")

@@ -4,6 +4,7 @@ import json
 import time
 import shutil
 import subprocess
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 from PIL import Image
 
@@ -15,7 +16,7 @@ AUDIO_DIR = os.path.join(ROOT_DIR, "web_turbo_png", "static", "audio")
 MANIFEST_PATH = os.path.join(AUDIO_DIR, "audio_manifest.json")
 
 
-def _get_ffmpeg_bin():
+def _get_ffmpeg_bin() -> Optional[str]:
     return shutil.which("ffmpeg") or ("/usr/bin/ffmpeg" if os.path.exists("/usr/bin/ffmpeg") else None)
 
 
@@ -23,10 +24,10 @@ class AudioManager:
     """実験用音声トラックの登録、アップロード、画像からの自動エンコード、アクティブ管理"""
 
     @classmethod
-    def get_manifest(cls):
+    def get_manifest(cls) -> Dict[str, Any]:
         """マニフェストを取得し、存在しない既存ファイルを自動同期して返す"""
         os.makedirs(AUDIO_DIR, exist_ok=True)
-        manifest = {"active": {"JPEG": "turbo_256_256.wav", "PNG": "turbo_png_256_256.wav"}, "tracks": {}}
+        manifest: Dict[str, Any] = {"active": {"JPEG": "turbo_256_256.wav", "PNG": "turbo_png_256_256.wav"}, "tracks": {}}
 
         if os.path.exists(MANIFEST_PATH):
             try:
@@ -40,13 +41,13 @@ class AudioManager:
         return manifest
 
     @classmethod
-    def _sync_with_directory(cls, manifest):
+    def _sync_with_directory(cls, manifest: Dict[str, Any]) -> None:
         """ディレクトリ内の実際の .wav ファイルとマニフェストを同期"""
-        tracks = manifest.setdefault("tracks", {})
-        active = manifest.setdefault("active", {"JPEG": "turbo_256_256.wav", "PNG": "turbo_png_256_256.wav"})
+        tracks: Dict[str, Any] = manifest.setdefault("tracks", {})
+        active: Dict[str, str] = manifest.setdefault("active", {"JPEG": "turbo_256_256.wav", "PNG": "turbo_png_256_256.wav"})
 
         # デフォルトトラックの初期登録
-        default_defs = {
+        default_defs: Dict[str, Dict[str, Any]] = {
             "turbo_256_256.wav": {
                 "id": "turbo_256_256.wav",
                 "filename": "turbo_256_256.wav",
@@ -85,7 +86,7 @@ class AudioManager:
                     mtime = os.path.getmtime(full_path)
 
                     if fname not in tracks:
-                        base_info = default_defs.get(fname, {
+                        base_info: Dict[str, Any] = dict(default_defs.get(fname, {
                             "id": fname,
                             "filename": fname,
                             "label": fname,
@@ -93,7 +94,7 @@ class AudioManager:
                             "image_id": "---",
                             "description": "アップロードされた音声",
                             "is_system": False
-                        })
+                        }))
                         base_info["size_bytes"] = file_size
                         base_info["size_mb"] = round(file_size / (1024 * 1024), 2)
                         base_info["created_at"] = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
@@ -107,7 +108,7 @@ class AudioManager:
         # 存在しないファイルの整理
         to_delete = []
         for track_id, track_info in list(tracks.items()):
-            fname = track_info.get("filename", track_id)
+            fname = track_info.get("filename", track_id) if isinstance(track_info, dict) else track_id
             if not os.path.exists(os.path.join(AUDIO_DIR, fname)):
                 to_delete.append(track_id)
 
@@ -118,7 +119,7 @@ class AudioManager:
         # active が無効ならフォールバック
         for mode, default_fname in [("JPEG", "turbo_256_256.wav"), ("PNG", "turbo_png_256_256.wav")]:
             if active.get(mode) not in tracks:
-                mode_tracks = [t for t in tracks.values() if t.get("mode") == mode]
+                mode_tracks = [t for t in tracks.values() if isinstance(t, dict) and t.get("mode") == mode]
                 if mode_tracks:
                     active[mode] = mode_tracks[0]["filename"]
                 else:
@@ -129,22 +130,23 @@ class AudioManager:
             cls.save_manifest(manifest)
 
     @classmethod
-    def save_manifest(cls, manifest):
+    def save_manifest(cls, manifest: Dict[str, Any]) -> None:
         """マニフェストを JSON に保存"""
         os.makedirs(AUDIO_DIR, exist_ok=True)
         with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
             json.dump(manifest, f, ensure_ascii=False, indent=2)
 
     @classmethod
-    def list_tracks(cls, mode=None):
+    def list_tracks(cls, mode: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
         """トラック一覧を取得（mode でフィルタ可能）"""
         manifest = cls.get_manifest()
-        tracks = list(manifest.get("tracks", {}).values())
+        raw_tracks = manifest.get("tracks", {})
+        tracks: List[Dict[str, Any]] = list(raw_tracks.values()) if isinstance(raw_tracks, dict) else []
         if mode:
-            mode = mode.upper()
-            tracks = [t for t in tracks if t.get("mode") == mode]
+            mode_upper = mode.upper()
+            tracks = [t for t in tracks if isinstance(t, dict) and t.get("mode") == mode_upper]
         
-        active_map = manifest.get("active", {})
+        active_map: Dict[str, str] = manifest.get("active", {}) if isinstance(manifest.get("active"), dict) else {}
         for t in tracks:
             t_mode = t.get("mode", "JPEG")
             t["is_active"] = (active_map.get(t_mode) == t.get("filename"))
@@ -154,7 +156,7 @@ class AudioManager:
         return tracks, active_map
 
     @classmethod
-    def set_active_track(cls, mode, filename):
+    def set_active_track(cls, mode: str, filename: str) -> Dict[str, str]:
         """特定モードのアクティブトラックを設定"""
         mode = mode.upper()
         manifest = cls.get_manifest()
@@ -165,22 +167,25 @@ class AudioManager:
         return manifest["active"]
 
     @classmethod
-    def get_active_track(cls, mode):
+    def get_active_track(cls, mode: str) -> Dict[str, Any]:
         """現在アクティブなトラック情報を取得"""
         mode = mode.upper()
         manifest = cls.get_manifest()
-        active_filename = manifest.get("active", {}).get(mode)
-        if not active_filename or active_filename not in manifest.get("tracks", {}):
-            tracks = [t for t in manifest.get("tracks", {}).values() if t.get("mode") == mode]
-            if tracks:
-                return tracks[0]
+        tracks_dict: Dict[str, Any] = manifest.get("tracks", {}) if isinstance(manifest.get("tracks"), dict) else {}
+        active_dict: Dict[str, str] = manifest.get("active", {}) if isinstance(manifest.get("active"), dict) else {}
+        active_filename = active_dict.get(mode)
+        if not active_filename or active_filename not in tracks_dict:
+            tracks_list = [t for t in tracks_dict.values() if isinstance(t, dict) and t.get("mode") == mode]
+            if tracks_list:
+                return tracks_list[0]
             # フォールバック
             fname = "turbo_256_256.wav" if mode == "JPEG" else "turbo_png_256_256.wav"
             return {"filename": fname, "label": f"{mode} デフォルト音声", "mode": mode}
-        return manifest["tracks"][active_filename]
+        result = tracks_dict[active_filename]
+        return result if isinstance(result, dict) else {"filename": active_filename, "label": active_filename, "mode": mode}
 
     @classmethod
-    def add_audio_file(cls, src_path, filename, label, mode, description=""):
+    def add_audio_file(cls, src_path: str, filename: str, label: str, mode: str, description: str = "") -> Dict[str, Any]:
         """アップロードされた音声ファイルを 44.1kHz WAV として正規化して保存"""
         mode = mode.upper()
         safe_name = os.path.splitext(os.path.basename(filename))[0].replace(" ", "_")
@@ -209,7 +214,7 @@ class AudioManager:
 
         file_size = os.path.getsize(dest_path)
         manifest = cls.get_manifest()
-        manifest["tracks"][dest_filename] = {
+        new_track_info: Dict[str, Any] = {
             "id": dest_filename,
             "filename": dest_filename,
             "label": label or dest_filename,
@@ -221,11 +226,12 @@ class AudioManager:
             "size_mb": round(file_size / (1024 * 1024), 2),
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
         }
+        manifest["tracks"][dest_filename] = new_track_info
         cls.save_manifest(manifest)
-        return manifest["tracks"][dest_filename]
+        return new_track_info
 
     @classmethod
-    def encode_image_to_audio(cls, image_path, label, mode, description=""):
+    def encode_image_to_audio(cls, image_path: str, label: str, mode: str, description: str = "") -> Dict[str, Any]:
         """画像（JPG/PNG）から SSTV エンコードを実行して音声 WAV を生成し登録"""
         mode = mode.upper()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -246,7 +252,7 @@ class AudioManager:
         file_size = os.path.getsize(dest_path)
 
         manifest = cls.get_manifest()
-        manifest["tracks"][dest_filename] = {
+        encoded_track_info: Dict[str, Any] = {
             "id": dest_filename,
             "filename": dest_filename,
             "label": label or dest_filename,
@@ -260,18 +266,20 @@ class AudioManager:
             "size_mb": round(file_size / (1024 * 1024), 2),
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M")
         }
+        manifest["tracks"][dest_filename] = encoded_track_info
         cls.save_manifest(manifest)
-        return manifest["tracks"][dest_filename]
+        return encoded_track_info
 
     @classmethod
-    def delete_track(cls, filename):
+    def delete_track(cls, filename: str) -> bool:
         """トラックを削除（システムデフォルトは削除不可）"""
         manifest = cls.get_manifest()
-        if filename not in manifest.get("tracks", {}):
+        tracks_dict: Dict[str, Any] = manifest.get("tracks", {}) if isinstance(manifest.get("tracks"), dict) else {}
+        if filename not in tracks_dict:
             raise ValueError("指定されたトラックが見つかりません")
         
-        track = manifest["tracks"][filename]
-        if track.get("is_system"):
+        track = tracks_dict[filename]
+        if isinstance(track, dict) and track.get("is_system"):
             raise ValueError("システム初期音声は削除できません")
 
         full_path = os.path.join(AUDIO_DIR, filename)
@@ -281,13 +289,13 @@ class AudioManager:
             except Exception as e:
                 print(f"[AudioManager] File remove error: {e}")
 
-        del manifest["tracks"][filename]
+        del tracks_dict[filename]
 
         # もしアクティブだった場合は別のトラックに切り替え
         active = manifest.setdefault("active", {})
-        t_mode = track.get("mode", "JPEG")
+        t_mode = track.get("mode", "JPEG") if isinstance(track, dict) else "JPEG"
         if active.get(t_mode) == filename:
-            remaining = [t["filename"] for t in manifest["tracks"].values() if t.get("mode") == t_mode]
+            remaining = [t["filename"] for t in tracks_dict.values() if isinstance(t, dict) and t.get("mode") == t_mode]
             active[t_mode] = remaining[0] if remaining else ("turbo_256_256.wav" if t_mode == "JPEG" else "turbo_png_256_256.wav")
 
         cls.save_manifest(manifest)

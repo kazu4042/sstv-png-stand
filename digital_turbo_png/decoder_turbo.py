@@ -1,8 +1,9 @@
 import sys
 for stream in (sys.stdout, sys.stderr):
-    if hasattr(stream, 'reconfigure'):
+    reconf = getattr(stream, 'reconfigure', None)
+    if callable(reconf):
         try:
-            stream.reconfigure(encoding='utf-8', errors='replace')
+            reconf(encoding='utf-8', errors='replace')
         except Exception:
             pass
 
@@ -408,15 +409,35 @@ class DigitalTurboPNGDecoder(BaseDecoder):
                 if payload_start + payload_symbols * self.samples_per_symbol > len(data):
                     continue
 
-                p_bits, p_snr = fast_decode_symbols_exact(
-                    data, payload_start, payload_symbols, self.samples_per_symbol,
-                    self.hamming_win, self.target_phases_cos, self.target_phases_sin
-                )
-                if p_snr < 1.0:
+                best_bits = None
+                best_snr = -1.0
+                drift_candidates = [0.0, -0.0005, 0.0005, -0.0003, 0.0003, -0.0007, 0.0007, -0.0010, 0.0010]
+
+                for drift in drift_candidates:
+                    eff_sps = self.samples_per_symbol * (1.0 + drift)
+                    cur_bits = np.zeros(payload_symbols * 2, dtype=np.int32)
+                    snr_acc = 0.0
+                    valid_s = 0
+                    for s in range(payload_symbols):
+                        pos = int(round(payload_start + s * eff_sps))
+                        if pos + self.samples_per_symbol > len(data):
+                            break
+                        seg = data[pos : pos + self.samples_per_symbol]
+                        b_idx, s_snr = fast_detect_symbol_dft(seg, self.samples_per_symbol, self.hamming_win, self.target_phases_cos, self.target_phases_sin)
+                        cur_bits[s * 2] = (b_idx >> 1) & 1
+                        cur_bits[s * 2 + 1] = b_idx & 1
+                        snr_acc += s_snr
+                        valid_s += 1
+                    c_snr = snr_acc / valid_s if valid_s > 0 else 0.0
+                    if c_snr > best_snr:
+                        best_snr = c_snr
+                        best_bits = cur_bits
+
+                if best_snr < 1.0 or best_bits is None:
                     continue
 
-                payload_bits_str = "".join(str(b) for b in p_bits[:payload_length * 8])
-                snr_4bit_str = self.calculate_snr_to_4bit(p_snr)
+                payload_bits_str = "".join(str(b) for b in best_bits[:payload_length * 8])
+                snr_4bit_str = self.calculate_snr_to_4bit(best_snr)
 
                 image_id_bits    = format(image_id,        f'0{config.BIT_IMAGE_CRC}b')
                 tile_x_bits      = format(tile_x,          f'0{config.BIT_TILE_X}b')

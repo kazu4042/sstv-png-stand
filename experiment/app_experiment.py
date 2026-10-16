@@ -135,6 +135,7 @@ def api_run():
                 "tile_rate": float(d["tile_rate"]),
                 "visible_rate": float(d.get("visible_rate", d["tile_rate"])),
                 "bit_acc": float(d["bit_acc"]),
+                "bit_errors": int(d.get("bit_errors", 0)),
                 "psnr": float(d["psnr"]),
                 "ssim": float(d["ssim"]),
                 "stage_breakdown": d.get("stage_counts", {})

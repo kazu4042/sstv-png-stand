@@ -202,7 +202,8 @@ def fast_check_jpeg_soi_fast(data, payload_start, sps, win, cos_mat, sin_mat):
     r1 = np.zeros(8, dtype=np.int32)
     r2 = np.zeros(8, dtype=np.int32)
     diff = np.zeros(8, dtype=np.float64)
-    syms, _ = fast_decode_symbols_soft(data, payload_start, 8, sps, win, cos_mat, sin_mat, buf, r1, r2, diff)
+    eq_weights = np.ones(4, dtype=np.float64)
+    syms, _ = fast_decode_symbols_soft(data, payload_start, 8, sps, win, cos_mat, sin_mat, eq_weights, buf, r1, r2, diff)
     if syms < 8:
         return False
     expected = np.array([1,1,1,1,1,1,1,1, 1,1,0,1,1,0,0,0], dtype=np.int8)
@@ -470,17 +471,49 @@ class DigitalTurboJPEGDecoder(BaseDecoder):
                 p_start = int(c_pstarts[k])
 
                 payload_symbols = (payload_length * 8) // 2
-                p_buf = np.zeros(payload_length * 8, dtype=np.int8)
-                r1_dummy = np.zeros(payload_symbols, dtype=np.int32)
-                r2_dummy = np.zeros(payload_symbols, dtype=np.int32)
-                diff_dummy = np.zeros(payload_symbols, dtype=np.float64)
+                best_buf = None
+                best_p_snr = 0.0
+                found_valid_jpeg = False
 
-                _, p_snr = fast_decode_symbols_soft(
-                    data, p_start, payload_symbols, self.samples_per_symbol,
-                    self.hamming_win, self.cos_mat, self.sin_mat, self.eq_weights,
-                    p_buf, r1_dummy, r2_dummy, diff_dummy
-                )
+                # スマホ録音の水晶発振子クロック偏差 (±1000ppm) 自動追従候補
+                drift_candidates = [0.0, -0.0005, 0.0005, -0.0003, 0.0003, -0.0007, 0.0007, -0.0010, 0.0010]
 
+                for drift in drift_candidates:
+                    eff_sps = self.samples_per_symbol * (1.0 + drift)
+                    p_buf = np.zeros(payload_length * 8, dtype=np.int8)
+                    snr_acc = 0.0
+                    for s in range(payload_symbols):
+                        pos = int(round(p_start + s * eff_sps))
+                        if pos + self.samples_per_symbol > len(data):
+                            break
+                        seg = data[pos : pos + self.samples_per_symbol]
+                        p0 = (np.dot(seg * self.hamming_win, self.cos_mat[0]) ** 2 + np.dot(seg * self.hamming_win, self.sin_mat[0]) ** 2) * self.eq_weights[0]
+                        p1 = (np.dot(seg * self.hamming_win, self.cos_mat[1]) ** 2 + np.dot(seg * self.hamming_win, self.sin_mat[1]) ** 2) * self.eq_weights[1]
+                        p2 = (np.dot(seg * self.hamming_win, self.cos_mat[2]) ** 2 + np.dot(seg * self.hamming_win, self.sin_mat[2]) ** 2) * self.eq_weights[2]
+                        p3 = (np.dot(seg * self.hamming_win, self.cos_mat[3]) ** 2 + np.dot(seg * self.hamming_win, self.sin_mat[3]) ** 2) * self.eq_weights[3]
+                        powers = [p0, p1, p2, p3]
+                        best_idx = int(np.argmax(powers))
+                        p_buf[s * 2] = (best_idx >> 1) & 1
+                        p_buf[s * 2 + 1] = best_idx & 1
+                        peak = powers[best_idx]
+                        noise = (p0 + p1 + p2 + p3 - peak) / 3.0 + 1e-10
+                        snr_acc += peak / noise
+
+                    cur_snr = snr_acc / payload_symbols if payload_symbols > 0 else 0.0
+                    b_bytes = bytes(np.packbits(p_buf))[:payload_length]
+
+                    # JPEG EOI (0xFF 0xD9) マーカーで終端されているか検証
+                    if b_bytes.endswith(b'\xff\xd9'):
+                        best_buf = p_buf
+                        best_p_snr = cur_snr
+                        found_valid_jpeg = True
+                        break
+                    elif not found_valid_jpeg and cur_snr > best_p_snr:
+                        best_p_snr = cur_snr
+                        best_buf = p_buf
+
+                p_buf = best_buf if best_buf is not None else np.zeros(payload_length * 8, dtype=np.int8)
+                p_snr = best_p_snr
                 payload_bits_str = "".join(str(b) for b in p_buf)
                 snr_4bit_str = self.calculate_snr_to_4bit(p_snr)
 

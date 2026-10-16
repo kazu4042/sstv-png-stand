@@ -6,9 +6,10 @@ import numpy as np
 
 # コンソール出力エンコーディング設定
 for stream in (sys.stdout, sys.stderr):
-    if hasattr(stream, 'reconfigure'):
+    reconf = getattr(stream, 'reconfigure', None)
+    if callable(reconf):
         try:
-            stream.reconfigure(encoding='utf-8', errors='replace')
+            reconf(encoding='utf-8', errors='replace')
         except Exception:
             pass
 

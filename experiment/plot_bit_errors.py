@@ -2,9 +2,10 @@ import os
 import sys
 
 for stream in (sys.stdout, sys.stderr):
-    if hasattr(stream, 'reconfigure'):
+    reconf = getattr(stream, 'reconfigure', None)
+    if callable(reconf):
         try:
-            stream.reconfigure(encoding='utf-8', errors='replace')
+            reconf(encoding='utf-8', errors='replace')
         except Exception:
             pass
 

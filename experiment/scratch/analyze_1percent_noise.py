@@ -3,6 +3,7 @@ import sys
 import io
 import numpy as np
 from PIL import Image
+from typing import Any
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 if ROOT_DIR not in sys.path:
@@ -49,8 +50,8 @@ def analyze_1pct():
 
     # 4. 各タイルを decode_tile_bytes_safely および resolve_tile でデコード
     stage_counts = {}
-    valid_pixels_list = []
-    broken_tiles = []
+    valid_pixels_list: list[float] = []
+    broken_tiles: list[tuple[int, Any, Any, Any, float, Any]] = []
 
     for i, p in enumerate(pkts_1pct):
         plen = p["payload_length"]
@@ -61,10 +62,10 @@ def analyze_1pct():
         if tile_img is not None:
             arr = np.array(tile_img)
             # 有効画素率 (黒落ちしていない割合)
-            valid_ratio = np.mean(np.sum(arr, axis=2) > 3.0)
+            valid_ratio = float(np.mean(np.sum(arr, axis=2) > 3.0))
             valid_pixels_list.append(valid_ratio)
             if valid_ratio < 0.85:
-                broken_tiles.append((i, p["tile_x"], p["tile_y"], stage, valid_ratio, p["flipped_count"]))
+                broken_tiles.append((i, p["tile_x"], p["tile_y"], stage or "UNKNOWN", valid_ratio, p["flipped_count"]))
         else:
             valid_pixels_list.append(0.0)
             broken_tiles.append((i, p["tile_x"], p["tile_y"], "FAILED", 0.0, p["flipped_count"]))

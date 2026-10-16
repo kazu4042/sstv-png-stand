@@ -2,9 +2,10 @@ import os
 import sys
 
 for stream in (sys.stdout, sys.stderr):
-    if hasattr(stream, 'reconfigure'):
+    reconf = getattr(stream, 'reconfigure', None)
+    if callable(reconf):
         try:
-            stream.reconfigure(encoding='utf-8', errors='replace')
+            reconf(encoding='utf-8', errors='replace')
         except Exception:
             pass
 
@@ -37,7 +38,7 @@ def main():
         "--percent", "-p",
         type=float,
         default=5.0,
-        help="全体に対する反転割合 (%) (例: 1.0, 5.0, 10.0, 20.0 など)"
+        help="全体に対する反転割合 (%%) (例: 1.0, 5.0, 10.0, 20.0 など)"
     )
     parser.add_argument(
         "--mode", "-m",

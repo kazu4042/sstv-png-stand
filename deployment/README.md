@@ -1,4 +1,4 @@
-﻿# 🚀 SSTV TurboPNG VPS デプロイ手順書 (Ubuntu / Debian 向け)
+# 🚀 SSTV TurboPNG VPS デプロイ手順書 (Ubuntu / Debian 向け)
 
 VPSサーバー（ConoHa, さくらのVPS, AWS EC2, Linode など）で本アプリケーションを常時稼働させるための完全手順です。
 
@@ -9,7 +9,7 @@ VPSにSSHログイン後、必要なパッケージをインストールしま�
 
 ```bash
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y python3 python3-pip python3-venv nginx git
+sudo apt install -y python3 python3-pip python3-venv nginx git ffmpeg
 ```
 
 ---

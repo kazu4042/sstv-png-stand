@@ -15,7 +15,7 @@ class SystemFactory:
                 try:
                     with open(STATE_FILE, "r", encoding="utf-8") as f:
                         mode = f.read().strip().upper()
-                        if mode in ("PNG", "JPEG"):
+                        if mode in ("PNG", "JPEG", "FEC"):
                             cls._mode = mode
                             return cls._mode
                 except Exception:
@@ -27,8 +27,8 @@ class SystemFactory:
     @classmethod
     def set_mode(cls, mode):
         mode = mode.upper().strip()
-        if mode not in ("PNG", "JPEG"):
-            raise ValueError(f"Invalid mode: '{mode}'. Must be 'PNG' or 'JPEG'.")
+        if mode not in ("PNG", "JPEG", "FEC"):
+            raise ValueError(f"Invalid mode: '{mode}'. Must be 'PNG', 'JPEG', or 'FEC'.")
         with cls._lock:
             cls._mode = mode
             os.environ["ACTIVE_DECODER_MODE"] = mode
@@ -46,6 +46,9 @@ class SystemFactory:
         if target_mode == "JPEG":
             import digital_turbo_jpeg.config_turbo as config_jpeg
             return config_jpeg
+        elif target_mode == "FEC":
+            import digital_turbo_fec.config_turbo as config_fec
+            return config_fec
         else:
             import digital_turbo_png.config_turbo as config_png
             return config_png
@@ -56,6 +59,9 @@ class SystemFactory:
         if target_mode == "JPEG":
             from digital_turbo_jpeg.decoder_turbo import DigitalTurboJPEGDecoder
             return DigitalTurboJPEGDecoder(user_id=user_id)
+        elif target_mode == "FEC":
+            from digital_turbo_fec.decoder_turbo import DigitalTurboFECDecoder
+            return DigitalTurboFECDecoder(user_id=user_id)
         else:
             from digital_turbo_png.decoder_turbo import DigitalTurboPNGDecoder
             return DigitalTurboPNGDecoder(user_id=user_id)
@@ -66,6 +72,9 @@ class SystemFactory:
         if target_mode == "JPEG":
             from digital_turbo_jpeg.aggregator_turbo import TurboJPEGAggregator
             return TurboJPEGAggregator(log_dir=log_dir)
+        elif target_mode == "FEC":
+            from digital_turbo_fec.aggregator_turbo import TurboFECAggregator
+            return TurboFECAggregator(log_dir=log_dir)
         else:
             from digital_turbo_png.aggregator_turbo import TurboPNGAggregator
             return TurboPNGAggregator(log_dir=log_dir)
@@ -76,6 +85,10 @@ class SystemFactory:
         if target_mode == "JPEG":
             from digital_turbo_jpeg.encoder_turbo import DigitalTurboJPEGEncoder
             return DigitalTurboJPEGEncoder()
+        elif target_mode == "FEC":
+            from digital_turbo_fec.encoder_turbo import DigitalTurboFECEncoder
+            return DigitalTurboFECEncoder()
         else:
             from digital_turbo_png.encoder_turbo import DigitalTurboPNGEncoder
             return DigitalTurboPNGEncoder()
+

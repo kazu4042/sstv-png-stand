@@ -400,8 +400,9 @@ def admin_engine_mode():
     if request.method == 'POST':
         data = request.get_json(silent=True) or {}
         mode = data.get('mode') or request.form.get('mode')
-        if not mode or mode.upper() not in ('PNG', 'JPEG'):
-            return jsonify({'status': 'error', 'message': 'モードは PNG または JPEG を指定してください'}), 400
+        if not mode or mode.upper() not in ('PNG', 'JPEG', 'FEC'):
+            return jsonify({'status': 'error', 'message': 'モードは PNG, JPEG, または FEC を指定してください'}), 400
+
 
         SystemFactory.set_mode(mode.upper())
         invalidate_analyzer_cache()

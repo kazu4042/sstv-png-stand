@@ -355,11 +355,12 @@
             <div class="mb-5 text-center space-y-2">
                 <div>
                     <span id="currentModeBadge"
-                        class="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 rounded-full text-xs font-bold shadow-xs {% if current_engine_mode == 'JPEG' %}bg-amber-100 text-amber-900 border border-amber-300{% else %}bg-emerald-100 text-emerald-900 border border-emerald-300{% endif %}">
+                        class="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 rounded-full text-xs font-bold shadow-xs {% if current_engine_mode == 'JPEG' %}bg-amber-100 text-amber-900 border border-amber-300{% elif current_engine_mode == 'FEC' %}bg-purple-100 text-purple-900 border border-purple-300{% else %}bg-emerald-100 text-emerald-900 border border-emerald-300{% endif %}">
                         <span
-                            class="w-2.5 h-2.5 rounded-full {% if current_engine_mode == 'JPEG' %}bg-amber-500 animate-pulse{% else %}bg-emerald-500 animate-pulse{% endif %}"></span>
+                            class="w-2.5 h-2.5 rounded-full {% if current_engine_mode == 'JPEG' %}bg-amber-500 animate-pulse{% elif current_engine_mode == 'FEC' %}bg-purple-500 animate-pulse{% else %}bg-emerald-500 animate-pulse{% endif %}"></span>
                         <span id="currentModeLabel">{{ audio_label or 'SSTV テスト音声' }}</span>
                     </span>
+
                 </div>
                 {% if selected_track and selected_track.description %}
                 <p class="text-[11px] text-earth">

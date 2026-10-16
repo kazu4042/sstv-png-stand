@@ -3,9 +3,10 @@ import sys
 
 # WindowsコンソールのUTF-8文字化け・UnicodeEncodeError防止
 for stream in (sys.stdout, sys.stderr):
-    if hasattr(stream, 'reconfigure'):
+    reconf = getattr(stream, 'reconfigure', None)
+    if callable(reconf):
         try:
-            stream.reconfigure(encoding='utf-8', errors='replace')
+            reconf(encoding='utf-8', errors='replace')
         except Exception:
             pass
 
@@ -20,7 +21,7 @@ if ROOT_DIR not in sys.path:
 try:
     from experiment import config_experiment as exp_cfg
 except ImportError:
-    import config_experiment as exp_cfg
+    from . import config_experiment as exp_cfg
 
 from experiment.bit_flipper import JPEGTextBitFlipper
 from experiment.plot_bit_errors import plot_bit_error_distribution, plot_comparison_three_audio

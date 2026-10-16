@@ -286,56 +286,101 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                     if len_dict:
                         best_plen = max(len_dict.keys(), key=lambda k: sum((p[1] + 1.0) for p in len_dict[k]))
                         db_packets = len_dict[best_plen]
-                        payload_bit_len = best_plen * 8
-                        score_0 = np.zeros(payload_bit_len, dtype=float)
-                        score_1 = np.zeros(payload_bit_len, dtype=float)
-                        for row in db_packets:
-                            p_bits_str = row[0]
-                            p_weight = row[1] + 1.0
-                            if len(p_bits_str) < payload_bit_len:
-                                continue
-                            for i, bit_char in enumerate(p_bits_str[:payload_bit_len]):
-                                if bit_char == '1':
-                                     score_1[i] += p_weight
-                                elif bit_char == '0':
-                                     score_0[i] += p_weight
-                        voted_payload = "".join(
-                            '1' if score_1[i] >= score_0[i] else '0'
-                            for i in range(payload_bit_len)
-                        )
+
+                        # 【確認事項1: 多数決によるErrorのErasure判定連携】
+                        if mode_name == "FEC" and len(db_packets) >= 2:
+                            try:
+                                from digital_turbo_fec.fec_engine import fast_bit_majority_vote_with_erasures
+                                from digital_turbo_fec.rs_codec import RSCodec
+                                from digital_turbo_fec.config import RAPTOR_CFG
+
+                                cand_blocks = [bits_to_bytearray(row[0])[:best_plen] for row in db_packets if len(row[0]) >= best_plen * 8]
+                                cand_snrs = [float(row[1]) + 1.0 for row in db_packets if len(row[0]) >= best_plen * 8]
+                                if len(cand_blocks) >= 2:
+                                    v_block, erase_pos = fast_bit_majority_vote_with_erasures(cand_blocks, weights=cand_snrs)
+                                    rs_codec = RSCodec(nsym=RAPTOR_CFG.rs_nsym)
+                                    # 通常RS復号
+                                    dec_msg, _, ok = rs_codec.decode_after_vote(v_block)
+                                    # 票割れErasure連携復号 (最大32B訂正)
+                                    if (not ok or dec_msg is None) and erase_pos:
+                                        for e_lim in (8, 12, 16):
+                                            t_eras = erase_pos[:min(len(erase_pos), e_lim)]
+                                            dec_msg, _, ok = rs_codec.decode_with_erasures(v_block, erase_pos=t_eras)
+                                            if ok and dec_msg is not None:
+                                                break
+                                    if ok and dec_msg is not None:
+                                        # 多数決Erasure連携で完全蘇生したビット列
+                                        voted_payload = "".join(f"{b:08b}" for b in dec_msg)
+                            except Exception:
+                                pass
+
+                        if not voted_payload:
+                            payload_bit_len = best_plen * 8
+                            score_0 = np.zeros(payload_bit_len, dtype=float)
+                            score_1 = np.zeros(payload_bit_len, dtype=float)
+                            for row in db_packets:
+                                p_bits_str = row[0]
+                                p_weight = row[1] + 1.0
+                                if len(p_bits_str) < payload_bit_len:
+                                    continue
+                                for i, bit_char in enumerate(p_bits_str[:payload_bit_len]):
+                                    if bit_char == '1':
+                                         score_1[i] += p_weight
+                                    elif bit_char == '0':
+                                         score_0[i] += p_weight
+                            voted_payload = "".join(
+                                '1' if score_1[i] >= score_0[i] else '0'
+                                for i in range(payload_bit_len)
+                            )
 
                 if voted_payload:
                     bit_matches = sum(1 for u_b, v_b in zip(user_payload, voted_payload) if u_b == v_b)
                     if len(voted_payload) > 0 and (bit_matches / len(voted_payload)) >= 0.9:
                         matched_packets += 1
 
-                # ユーザー受信タイルを描画
+                # 【確認事項2: リスタートマーカ単位での復元 ＆ パケット単位の即時画像化】
+                tile_img = None
+                p_bytes = bits_to_bytearray(user_payload)[:plen]
+
+                # 1. ユーザー受信ペイロードの安全デコード（RSTスキップ空MCU補間）
                 try:
-                    p_bytes = bits_to_bytearray(user_payload)[:plen]
-                    tile_img = None
                     if hasattr(aggregator, 'decode_tile_bytes_safely'):
                         tile_img = aggregator.decode_tile_bytes_safely(p_bytes, config.TILE_SIZE, config.TILE_SIZE)
                     else:
                         tile_img = Image.open(io.BytesIO(p_bytes)).convert("RGB")
                         tile_img.load()
-
-                    if tile_img is not None:
-                        tw, th = tile_img.size
-                        paste_x = tile_x * tw
-                        paste_y = tile_y * th
-                        if paste_x + tw <= config.WIDTH and paste_y + th <= config.HEIGHT:
-                            user_image_buffer.paste(tile_img, (paste_x, paste_y))
-                        else:
-                            tile_img = tile_img.crop((0, 0,
-                                min(tw, config.WIDTH - paste_x),
-                                min(th, config.HEIGHT - paste_y)))
-                            user_image_buffer.paste(tile_img, (paste_x, paste_y))
                 except Exception:
-                    pass
+                    tile_img = None
+
+                # 2. 生データ破損時、多数決ペイロードでフォールバック復元
+                if tile_img is None and voted_payload:
+                    try:
+                        v_bytes = bits_to_bytearray(voted_payload)[:len(voted_payload)//8]
+                        if hasattr(aggregator, 'decode_tile_bytes_safely'):
+                            tile_img = aggregator.decode_tile_bytes_safely(v_bytes, config.TILE_SIZE, config.TILE_SIZE)
+                        else:
+                            tile_img = Image.open(io.BytesIO(v_bytes)).convert("RGB")
+                            tile_img.load()
+                    except Exception:
+                        tile_img = None
+
+                if tile_img is not None and tile_x < config.TILE_COUNT_X and tile_y < config.TILE_COUNT_Y:
+                    tw, th = tile_img.size
+                    paste_x = tile_x * tw
+                    paste_y = tile_y * th
+                    if paste_x + tw <= config.WIDTH and paste_y + th <= config.HEIGHT:
+                        user_image_buffer.paste(tile_img, (paste_x, paste_y))
+                    elif paste_x < config.WIDTH and paste_y < config.HEIGHT:
+                        crop_w = min(tw, config.WIDTH - paste_x)
+                        crop_h = min(th, config.HEIGHT - paste_y)
+                        if crop_w > 0 and crop_h > 0:
+                            tile_img = tile_img.crop((0, 0, crop_w, crop_h))
+                            user_image_buffer.paste(tile_img, (paste_x, paste_y))
 
             # モードに応じた拡張子と保存フォーマット
-            img_ext = ".jpg" if mode_name == "JPEG" else ".png"
-            img_fmt = "JPEG" if mode_name == "JPEG" else "PNG"
+            img_ext = ".jpg" if mode_name in ("JPEG", "FEC") else ".png"
+            img_fmt = "JPEG" if mode_name in ("JPEG", "FEC") else "PNG"
+
 
             # 1. 今回のセッション固有画像を保存 (キャッシュ回避 & 確実な表示)
             session_img_fname = f"user_session_{job_id}_ID_{img_id_hex}{img_ext}"
@@ -355,8 +400,9 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                 main_matched = matched_packets
 
         # 2. このユーザーが過去に送信したすべての画像IDについて累積画像をDBから完全合成して保存
-        img_ext = ".jpg" if mode_name == "JPEG" else ".png"
-        img_fmt = "JPEG" if mode_name == "JPEG" else "PNG"
+        img_ext = ".jpg" if mode_name in ("JPEG", "FEC") else ".png"
+        img_fmt = "JPEG" if mode_name in ("JPEG", "FEC") else "PNG"
+
 
         if user_id:
             user_all_counts = aggregator.db.get_all_image_ids_with_counts(user_id=user_id)

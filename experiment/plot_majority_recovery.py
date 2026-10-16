@@ -2,9 +2,10 @@ import os
 import sys
 
 for stream in (sys.stdout, sys.stderr):
-    if hasattr(stream, 'reconfigure'):
+    reconf = getattr(stream, 'reconfigure', None)
+    if callable(reconf):
         try:
-            stream.reconfigure(encoding='utf-8', errors='replace')
+            reconf(encoding='utf-8', errors='replace')
         except Exception:
             pass
 
@@ -176,8 +177,14 @@ class MajorityRecoveryEvaluator:
                     rendered_mask[ty, tx] = True
                     stage_counts[stage_name or "UNKNOWN"] += 1
 
-                    if stage_name in ("NO1", "NO2", "NO3"):
-                        perfect_count += 1
+                    # 正解画像 (gt_img_array) が与えられている場合は、ピクセルの完全一致で真の無傷を厳密判定
+                    if gt_img_array is not None:
+                        gt_tile = gt_img_array[y_start:y_end, x_start:x_end]
+                        if np.array_equal(gt_tile, t_arr):
+                            perfect_count += 1
+                    else:
+                        if stage_name in ("NO1", "NO2", "NO3"):
+                            perfect_count += 1
                     decoded_visible_count += 1
                 else:
                     stage_counts["FAILED"] += 1
@@ -246,9 +253,10 @@ class MajorityRecoveryEvaluator:
             matching = sum(1 for b1, b2 in zip(all_gt_bits[:min_len], all_voted_bits[:min_len]) if b1 == b2)
             bit_acc = (matching / min_len * 100.0) if min_len > 0 else 0.0
             ber = 100.0 - bit_acc
+            bit_errors = (min_len - matching) + abs(len(all_gt_bits) - len(all_voted_bits))
 
-            # ビット正解率が100%かつ全タイルNo1〜No3確定の場合はPSNRを100dB
-            if bit_acc >= 99.999 and tile_rate >= 99.99:
+            # 全タイルが真に100%完全復元され、ビット誤りも0の場合のみ100dBとする
+            if tile_rate >= 100.0 and bit_errors == 0:
                 psnr = 100.0
                 ssim = 1.0000
 
@@ -260,6 +268,7 @@ class MajorityRecoveryEvaluator:
                 "psnr": psnr,
                 "ssim": ssim,
                 "bit_acc": bit_acc,
+                "bit_errors": bit_errors,
                 "ber": ber,
                 "restored_img": restored_img,
                 "stage_counts": stage_counts
@@ -320,7 +329,8 @@ class MajorityRecoveryEvaluator:
             b1_x1 = center_x - 2
             draw.rectangle([(b1_x0, gy1 - tr_h), (b1_x1, gy1)], fill="#2A9D8F")
             if n_steps <= 10 or i % 2 == 0 or i == n_steps - 1:
-                draw.text((b1_x0 - 2, gy1 - tr_h - 18), f"{d['tile_rate']:.0f}%", fill="#2A9D8F")
+                tr_lbl = "100%" if d["tile_rate"] >= 100.0 else f"{d['tile_rate']:.1f}%"
+                draw.text((b1_x0 - 2, gy1 - tr_h - 18), tr_lbl, fill="#2A9D8F")
 
             # 2. ビット正解率バー (ブルー)
             ba_h = (d["bit_acc"] / 100.0) * (gy1 - gy0)
@@ -328,7 +338,14 @@ class MajorityRecoveryEvaluator:
             b2_x1 = center_x + bar_w + 2
             draw.rectangle([(b2_x0, gy1 - ba_h), (b2_x1, gy1)], fill="#457B9D")
             if n_steps <= 10 or i % 2 == 0 or i == n_steps - 1:
-                draw.text((b2_x0 - 2, gy1 - ba_h - 18), f"{d['bit_acc']:.0f}%", fill="#457B9D")
+                b_err = d.get("bit_errors", 0)
+                if b_err == 0:
+                    ba_lbl = "100%"
+                elif d["bit_acc"] >= 99.995:
+                    ba_lbl = "99.99%"
+                else:
+                    ba_lbl = f"{d['bit_acc']:.2f}%"
+                draw.text((b2_x0 - 2, gy1 - ba_h - 18), ba_lbl, fill="#457B9D")
 
             # X軸ラベル
             if n_steps <= 6:
@@ -434,21 +451,22 @@ class MajorityRecoveryEvaluator:
                 draw.text((cx + 5, cy + tile_h + 22), "PSNR: 100.0 dB", fill="#94A3B8")
             else:
                 d = itm["data"]
-                i = itm["idx"]
+                i = int(itm["idx"])
                 r_img = Image.fromarray(d["restored_img"]).resize((tile_w, tile_h), Image.Resampling.NEAREST)
                 gallery_img.paste(r_img, (cx, cy))
 
-                is_perfect = d["tile_rate"] >= 99.0
+                is_perfect = d["tile_rate"] >= 100.0
                 border_col = "#10B981" if is_perfect else "#F59E0B"
                 draw.rectangle([(cx, cy), (cx + tile_w, cy + tile_h)], outline=border_col, width=2)
 
-                psnr_str = f"{d['psnr']:.1f}dB" if d['psnr'] < 99 else "100dB"
+                psnr_str = "100dB" if d['psnr'] >= 99.9 else f"{d['psnr']:.1f}dB"
                 lbl_title = f"Stage {i+1} ({i+1} Sets)"
                 stages = d.get("stage_counts", {})
                 st_summary = f"No1:{stages.get('NO1',0)} No2:{stages.get('NO2',0)} No3:{stages.get('NO3',0)} No4:{stages.get('NO4',0)}"
 
+                perf_label = "Perfect: 100%" if is_perfect else f"Restored: {d['tile_rate']:.1f}%"
                 draw.text((cx + 5, cy - 20), lbl_title, fill="#38BDF8")
-                draw.text((cx + 5, cy + tile_h + 6), f"Perfect: {d['tile_rate']:.1f}% | {psnr_str}", fill=border_col)
+                draw.text((cx + 5, cy + tile_h + 6), f"{perf_label} | {psnr_str}", fill=border_col)
                 draw.text((cx + 5, cy + tile_h + 22), st_summary, fill="#94A3B8")
 
         gallery_img.save(save_path, quality=95)

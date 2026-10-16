@@ -164,19 +164,25 @@
                     <!-- デコードエンジン状態バッジ (表示のみ、切り替えは管理者ダッシュボード) -->
                     <div class="inline-flex items-center gap-2 p-1.5 px-3 rounded-xl bg-gray-50 border border-gray-200">
                         <span class="text-xs text-earth font-bold">デコードエンジン:</span>
-                        <span class="px-2.5 py-0.5 text-xs font-bold rounded-full {% if current_engine_mode == 'JPEG' %}bg-amber-100 text-amber-800 border border-amber-300{% else %}bg-emerald-100 text-emerald-800 border border-emerald-300{% endif %}">
-                            {% if current_engine_mode == 'JPEG' %}JPEG モード (ざらざら感・段階的復元){% else %}PNG モード (0/100 多数決復元){% endif %}
+                        <span class="px-2.5 py-0.5 text-xs font-bold rounded-full {% if current_engine_mode == 'JPEG' %}bg-amber-100 text-amber-800 border border-amber-300{% elif current_engine_mode == 'FEC' %}bg-purple-100 text-purple-800 border border-purple-300{% else %}bg-emerald-100 text-emerald-800 border border-emerald-300{% endif %}">
+                            {% if current_engine_mode == 'JPEG' %}JPEG モード (ざらざら感・段階的復元){% elif current_engine_mode == 'FEC' %}FEC モード (Raptor+RS 二重冗長 誤り訂正){% else %}PNG モード (0/100 多数決復元){% endif %}
                         </span>
                     </div>
+
                 </div>
 
                 <form action="/api/upload" method="POST" enctype="multipart/form-data" id="upload-form">
                     <!-- File Upload -->
-                    <div class="flex flex-col md:flex-row gap-4 mb-4">
+                    <!-- File Upload Area (スマホ録音・PC両対応) -->
+                    <div class="flex flex-col md:flex-row gap-4 mb-3">
                         <div class="relative flex-1">
-                            <div class="flex items-center justify-center w-full p-4 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 hover:bg-forestLight hover:border-forest text-ink/70 hover:text-forest transition-all cursor-pointer font-bold tracking-wide sm:tracking-widest h-full text-center"
+                            <div class="flex flex-col items-center justify-center w-full p-5 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 hover:bg-forestLight hover:border-forest text-ink/70 hover:text-forest transition-all cursor-pointer font-bold tracking-wide sm:tracking-widest h-full text-center group"
                                 id="upload-btn-text">
-                                <i data-lucide="folder-up" class="w-5 h-5 mr-2 shrink-0"></i> 音声ファイルを選択 (.wav, .m4a, .mp3 等)
+                                <div class="flex items-center justify-center gap-2 mb-1">
+                                    <i data-lucide="folder-up" class="w-5 h-5 text-forest group-hover:scale-110 transition-transform"></i>
+                                    <span class="text-sm sm:text-base">音声ファイルを選択 / ドロップ</span>
+                                </div>
+                                <span class="text-[11px] text-earth font-normal">スマホボイスメモ (.m4a)・PCM (.wav)・MP3 等に対応</span>
                             </div>
                             <input type="file" name="file" id="audio-file" accept="audio/*,.wav,.m4a,.mp3,.aac,.ogg,.flac,.webm,.caf,.3gp" required
                                 class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
@@ -188,8 +194,15 @@
                         </button>
                     </div>
 
+                    <!-- スマホ録音最適化バッジ -->
+                    <div class="flex items-center justify-center gap-2 text-[11px] text-slate-500 mb-4 bg-slate-50 py-1.5 px-3 rounded-lg border border-slate-100">
+                        <i data-lucide="smartphone" class="w-3.5 h-3.5 text-forest"></i>
+                        <span>スマホ録音最適化: ゼロ位相バンドパス・AGC・1000Hz純度比検出を自動適用</span>
+                    </div>
+
                     <div id="file-name-display"
                         class="text-center text-sm text-forest font-bold mb-6 min-h-[1.5rem] tracking-widest"></div>
+
 
                     <!-- Spectrum Toggle -->
                     <div
@@ -478,20 +491,36 @@
             return new Blob([view], { type: 'audio/wav' });
         }
 
-        // スマホ録音 (.m4a, .mp3, .aac, etc.) をブラウザ標準の Web Audio API で一瞬で PCM WAV にトランスコード
+        // スマホ録音 (.m4a, .mp3, .aac, etc.) をブラウザ標準の Web Audio API で一瞬で 44.1kHz PCM WAV にトランスコード
         async function convertAudioFileToWav(file, onProgressText) {
             const ext = (file.name.split('.').pop() || '').toLowerCase();
             if (ext === 'wav' && (file.type === 'audio/wav' || file.type === 'audio/x-wav')) {
                 return file;
             }
-            if (onProgressText) onProgressText('スマホ音声を高精度PCM WAVに最適化変換中...');
+            if (onProgressText) onProgressText('スマホ音声を高精度44.1kHz PCM WAVに最適化変換中...');
             try {
                 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
                 if (!AudioContextClass) return file;
                 const audioCtx = new AudioContextClass();
                 const arrayBuffer = await file.arrayBuffer();
                 const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-                const wavBlob = audioBufferToWavBlob(audioBuffer);
+
+                let targetBuffer = audioBuffer;
+                // 44.1kHz への高品質ブラウザネイティブリサンプリング
+                if (audioBuffer.sampleRate !== 44100) {
+                    const OfflineAudioContextClass = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+                    if (OfflineAudioContextClass) {
+                        const targetSamples = Math.ceil(audioBuffer.duration * 44100);
+                        const offlineCtx = new OfflineAudioContextClass(1, targetSamples, 44100);
+                        const srcNode = offlineCtx.createBufferSource();
+                        srcNode.buffer = audioBuffer;
+                        srcNode.connect(offlineCtx.destination);
+                        srcNode.start(0);
+                        targetBuffer = await offlineCtx.startRendering();
+                    }
+                }
+
+                const wavBlob = audioBufferToWavBlob(targetBuffer);
                 const newName = file.name.replace(/\.[^/.]+$/, "") + ".wav";
                 return new File([wavBlob], newName, { type: 'audio/wav' });
             } catch (err) {

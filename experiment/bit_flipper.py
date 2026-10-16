@@ -2,9 +2,10 @@ import os
 import sys
 
 for stream in (sys.stdout, sys.stderr):
-    if hasattr(stream, 'reconfigure'):
+    reconf = getattr(stream, 'reconfigure', None)
+    if callable(reconf):
         try:
-            stream.reconfigure(encoding='utf-8', errors='replace')
+            reconf(encoding='utf-8', errors='replace')
         except Exception:
             pass
 
@@ -185,7 +186,7 @@ class JPEGTextBitFlipper:
                     # 誤り率が低いほど高SNR、高いほど低SNR
                     snr_calc = max(1.0, min(15.0, 15.0 * (1.0 - min(1.0, prob * 20.0))))
                     p_copy["snr_val"] = snr_calc
-                    snr_int = int(round(snr_calc))
+                    snr_int = round(snr_calc)
                     p_copy["snr_bits"] = [
                         (snr_int >> 3) & 1,
                         (snr_int >> 2) & 1,
@@ -220,7 +221,7 @@ class JPEGTextBitFlipper:
 
                     snr_calc = max(1.0, min(15.0, 15.0 * (1.0 - min(1.0, prob * 15.0))))
                     p_copy["snr_val"] = snr_calc
-                    snr_int = int(round(snr_calc))
+                    snr_int = round(snr_calc)
                     p_copy["snr_bits"] = [
                         (snr_int >> 3) & 1,
                         (snr_int >> 2) & 1,
@@ -292,6 +293,92 @@ class JPEGTextBitFlipper:
                 line = header_info_str + payload_str + snr_str
                 f.write(line + "\n")
         return output_text_path
+
+    def flip_text_file(
+        self,
+        input_text_path,
+        output_text_path,
+        percent=5.0,
+        mode="8000_to_4000",
+        protect_header=True,
+        seed=42
+    ):
+        """保存されたパケットテキストファイル(1行=1パケット)に対し、
+        指定割合・モードでビット反転を施して新規テキストファイルに出力する。
+        """
+        if not os.path.exists(input_text_path):
+            raise FileNotFoundError(f"入力テキストファイルが見つかりません: {input_text_path}")
+
+        os.makedirs(os.path.dirname(os.path.abspath(output_text_path)), exist_ok=True)
+        set_rng = random.Random(seed)
+        prob = float(percent) / 100.0
+
+        header_len = 48 if protect_header else 0
+
+        with open(input_text_path, "r", encoding="utf-8") as f:
+            lines = [line.strip() for line in f if line.strip()]
+
+        output_lines = []
+        total_target_bits = 0
+        total_flipped = 0
+
+        for line in lines:
+            bits = [int(c) for c in line if c in ('0', '1')]
+            total_len = len(bits)
+            if total_len <= header_len:
+                output_lines.append("".join(str(b) for b in bits))
+                continue
+
+            # 末尾4bitはSNRビット (存在する場合)
+            end_idx = total_len - 4 if total_len > (header_len + 4) else total_len
+            target_slice_len = end_idx - header_len
+            total_target_bits += target_slice_len
+
+            if mode in ("random", "all"):
+                for idx in range(header_len, end_idx):
+                    if set_rng.random() < prob:
+                        bits[idx] = 1 - bits[idx]
+                        total_flipped += 1
+            elif mode == "8000_to_4000":
+                # 2bit単位で00(8000Hz)を10(4000Hz)へ置換
+                for idx in range(header_len, end_idx - 1, 2):
+                    if bits[idx] == 0 and bits[idx + 1] == 0:
+                        if set_rng.random() < prob:
+                            bits[idx] = 1
+                            total_flipped += 1
+            elif mode == "hybrid":
+                # 8000->4000置換 + ランダムノイズ
+                half_prob = prob * 0.5
+                for idx in range(header_len, end_idx - 1, 2):
+                    if bits[idx] == 0 and bits[idx + 1] == 0:
+                        if set_rng.random() < half_prob:
+                            bits[idx] = 1
+                            total_flipped += 1
+                for idx in range(header_len, end_idx):
+                    if set_rng.random() < half_prob:
+                        bits[idx] = 1 - bits[idx]
+                        total_flipped += 1
+            else:
+                for idx in range(header_len, end_idx):
+                    if set_rng.random() < prob:
+                        bits[idx] = 1 - bits[idx]
+                        total_flipped += 1
+
+            output_lines.append("".join(str(b) for b in bits))
+
+        with open(output_text_path, "w", encoding="utf-8") as f:
+            for out_line in output_lines:
+                f.write(out_line + "\n")
+
+        actual_ber = (total_flipped / total_target_bits * 100.0) if total_target_bits > 0 else 0.0
+
+        return {
+            "output_file": output_text_path,
+            "packet_count": len(lines),
+            "flipped_bits": total_flipped,
+            "total_bits": total_target_bits,
+            "actual_ber": actual_ber
+        }
 
     # -------------------------------------------------------------
     # 4. 4-FSK音声 (WAV) 生成

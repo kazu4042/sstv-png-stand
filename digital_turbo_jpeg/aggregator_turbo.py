@@ -1,8 +1,9 @@
 import sys
 for stream in (sys.stdout, sys.stderr):
-    if hasattr(stream, 'reconfigure'):
+    reconf = getattr(stream, 'reconfigure', None)
+    if callable(reconf):
         try:
-            stream.reconfigure(encoding='utf-8', errors='replace')
+            reconf(encoding='utf-8', errors='replace')
         except Exception:
             pass
 
@@ -250,10 +251,10 @@ class TurboJPEGAggregator(BaseAggregator):
             seg_count_freq: dict[int, int] = defaultdict(int)
             for p in parsed_packets:
                 seg_count_freq[len(p.segments)] += 1
-            target_seg_count = int(max(seg_count_freq.keys(), key=lambda k: seg_count_freq[k]))
+            target_seg_count = max(seg_count_freq.keys(), key=lambda k: seg_count_freq[k])
             target_packets = [p for p in parsed_packets if len(p.segments) == target_seg_count]
         else:
-            target_seg_count = int(expected_seg_count)
+            target_seg_count = int(expected_seg_count) if expected_seg_count is not None else 4
 
         if not target_packets or target_seg_count <= 0:
             return None
@@ -462,6 +463,10 @@ class TurboJPEGAggregator(BaseAggregator):
             if rst_markers != [0xD0, 0xD1, 0xD2]:
                 return None
 
+        # JPEG構造の基本検証 (SOIおよびEOIマーカーの存在確認)
+        if len(raw_bytes) < 4 or raw_bytes[:2] != b'\xff\xd8' or b'\xff\xd9' not in raw_bytes[-4:]:
+            return None
+
         old_truncated: bool = bool(getattr(ImageFile, 'LOAD_TRUNCATED_IMAGES', True))
         try:
             setattr(ImageFile, 'LOAD_TRUNCATED_IMAGES', False)
@@ -483,13 +488,6 @@ class TurboJPEGAggregator(BaseAggregator):
                           (np.abs(tile_arr[:, :, 1] - 128.0) < 1.0) & \
                           (np.abs(tile_arr[:, :, 2] - 128.0) < 1.0)
             if np.sum(gray_pixels) > 4:
-                return None
-
-            # 3. 極端な高周波チェッカーボード破損ノイズの検出
-            diff_y = np.abs(np.diff(tile_arr, axis=0))
-            diff_x = np.abs(np.diff(tile_arr, axis=1))
-            if np.max(diff_y) > 235.0 or np.max(diff_x) > 235.0:
-                # 隣接画素が0と240等で極端に破綻している
                 return None
 
             return tile_rgb
@@ -806,7 +804,7 @@ class TurboJPEGAggregator(BaseAggregator):
                     # ※No.4およびNo.5の場合は final_bytes が None のため確定保存されず、次回再挑戦される
                     if final_bytes is not None:
                         if not user_id:
-                            self.db.save_finalized_tile(main_id, tx, ty, final_bytes, stage=stage_name)
+                            self.db.save_finalized_tile(main_id, tx, ty, final_bytes, stage=stage_name or "UNKNOWN")
                             finalized_tiles[(tx, ty)] = (final_bytes, stage_name)
 
                     paste_x = tx * detected_tile_w

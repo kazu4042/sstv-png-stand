@@ -74,6 +74,7 @@ def test_dual_engine_detection():
     print(f"\n--- 最終ジョブ結果 ---")
     print(json.dumps(final_job, indent=2, ensure_ascii=False))
     
+    assert final_job is not None, "ジョブがタイムアウトしました"
     assert not final_job.get("error"), f"エラーが発生しました: {final_job.get('error')}"
     assert final_job.get("progress") == 100, f"進捗が100%に達していません: {final_job.get('progress')}"
     
@@ -122,6 +123,7 @@ def test_dual_engine_detection():
                 final_job_png = job
                 break
                 
+    assert final_job_png is not None, "ジョブがタイムアウトしました"
     assert not final_job_png.get("error"), f"エラー: {final_job_png.get('error')}"
     assert final_job_png.get("progress") == 100
     res_data_png = final_job_png.get("result_data", {})
