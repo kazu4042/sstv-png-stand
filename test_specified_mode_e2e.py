@@ -17,6 +17,7 @@ def test_specified_mode_only():
     print("================================================================")
     
     client = app.test_client()
+    initial_mode = SystemFactory.get_mode()
     
     # 1. ログイン
     login_res = client.post("/login", data={"email": "Nagasaki", "password": "123456789"}, follow_redirects=True)
@@ -169,6 +170,10 @@ def test_specified_mode_only():
                 os.remove(p)
             except Exception:
                 pass
+
+    # モード復元
+    SystemFactory.set_mode(initial_mode)
+    print(f"✅ サーバー稼働モードを初期値 {initial_mode} に復元完了")
 
     print("================================================================")
     print("🎉 全テスト合格: 指定されたモードのみで正確にスキャン・復元完了！")

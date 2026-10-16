@@ -14,6 +14,7 @@ def test_dual_engine_detection():
     print("=== デュアルエンジン自動検出 E2E デバッグテスト開始 ===")
     
     client = app.test_client()
+    initial_mode = SystemFactory.get_mode()
     
     # 1. ログイン
     login_res = client.post("/login", data={"email": "Nagasaki", "password": "123456789"}, follow_redirects=True)
@@ -131,6 +132,10 @@ def test_dual_engine_detection():
     assert SystemFactory.get_mode() == "PNG"
     print(f"🎯 PNG画像ID: {res_data_png.get('image_id')}, URL: {res_data_png.get('user_image_url')}")
     print("✅ [テスト2/2完了] JPEGサーバー -> PNG音声の自動判定合格！")
+
+    # 元のモードに復元
+    SystemFactory.set_mode(initial_mode)
+    print(f"✅ サーバー稼働モードを初期値 {initial_mode} に復元完了")
 
 if __name__ == "__main__":
     test_dual_engine_detection()

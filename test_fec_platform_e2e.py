@@ -29,6 +29,7 @@ def test_fec_web_platform_e2e():
     print("================================================================")
 
     client = app.test_client()
+    initial_mode = SystemFactory.get_mode()
 
     # 1. ログイン
     login_res = client.post("/login", data={"email": "Nagasaki", "password": "123456789"}, follow_redirects=True)
@@ -132,11 +133,11 @@ def test_fec_web_platform_e2e():
     assert os.path.getsize(local_img_path) > 500, f"画像サイズが小さすぎます: {os.path.getsize(local_img_path)}"
     print(f"✅ 復元画像ファイル確認成功: {local_img_path} ({os.path.getsize(local_img_path)} bytes)")
 
-    # 6. モードを安全に PNG に戻す
-    print("\n--- [4] モードを安全に PNG に戻す ---")
-    SystemFactory.set_mode("PNG")
-    assert SystemFactory.get_mode() == "PNG"
-    print(f"✅ サーバー稼働モードを PNG に復元: {SystemFactory.get_mode()}")
+    # 6. モードを安全に元に戻す
+    print(f"\n--- [4] モードを安全に {initial_mode} に戻す ---")
+    SystemFactory.set_mode(initial_mode)
+    assert SystemFactory.get_mode() == initial_mode
+    print(f"✅ サーバー稼働モードを {initial_mode} に復元: {SystemFactory.get_mode()}")
 
     # 一時ファイルの削除
     for p in [test_img_path, fec_wav_path, phone_wav_path]:
