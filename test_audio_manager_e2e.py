@@ -84,10 +84,44 @@ class TestAudioManagerE2E(unittest.TestCase):
         res = self.client.get('/demo')
         self.assertEqual(res.status_code, 200)
         html = res.get_data(as_text=True)
-        self.assertIn('audioSrc', html)
+        self.assertIn('modeTracks', html)
         self.assertIn('currentModeBadge', html)
         print("[Test 4] Demo page rendered with admin-configured active audio successfully.")
+
+    def test_05_upload_direct_wav_audio(self):
+        """音声ファイル (.wav) の直接アップロード＆登録＆削除の検証"""
+        import numpy as np
+        import scipy.io.wavfile as wavfile
+        
+        # 1秒のテスト用WAV作成
+        sr = 44100
+        samples = (np.sin(2 * np.pi * 1000 * np.arange(sr) / sr) * 10000).astype(np.int16)
+        wav_bytes = io.BytesIO()
+        wavfile.write(wav_bytes, sr, samples)
+        wav_bytes.seek(0)
+
+        data = {
+            'file': (wav_bytes, 'custom_experiment_test.wav'),
+            'label': '実験用直接UP音声',
+            'mode': 'FEC',
+            'type': 'audio',
+            'description': '直接アップロードテスト'
+        }
+
+        res = self.client.post('/admin/api/audio/upload', data=data, content_type='multipart/form-data')
+        self.assertEqual(res.status_code, 200)
+        resp_data = res.get_json()
+        self.assertEqual(resp_data['status'], 'success')
+        track = resp_data['track']
+        self.assertEqual(track['mode'], 'FEC')
+        print(f"[Test 5] Direct WAV uploaded: {track['filename']}, Duration: {track.get('duration_sec')}s, Size: {track['size_mb']} MB")
+
+        # 削除
+        del_res = self.client.post('/admin/api/audio/delete', json={'filename': track['filename']})
+        self.assertEqual(del_res.status_code, 200)
+        print(f"[Test 5] Direct WAV deleted successfully")
 
 
 if __name__ == '__main__':
     unittest.main()
+

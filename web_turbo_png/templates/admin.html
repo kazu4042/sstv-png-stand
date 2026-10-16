@@ -894,62 +894,62 @@
 
             <!-- タブ切り替え -->
             <div class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-bold">
-                <button type="button" onclick="switchAudioUploadTab('image')" id="tab-audio-type-image" class="flex-1 py-2 rounded-lg transition-all bg-white text-emerald-700 shadow-sm flex items-center justify-center gap-1.5">
-                    <i data-lucide="image" class="w-3.5 h-3.5"></i>
-                    <span>画像から自動エンコード生成 (推奨)</span>
-                </button>
-                <button type="button" onclick="switchAudioUploadTab('audio')" id="tab-audio-type-audio" class="flex-1 py-2 rounded-lg transition-all text-slate-600 hover:text-slate-900 flex items-center justify-center gap-1.5">
+                <button type="button" onclick="switchAudioUploadTab('audio')" id="tab-audio-type-audio" class="flex-1 py-2 rounded-lg transition-all bg-white text-emerald-700 shadow-sm flex items-center justify-center gap-1.5">
                     <i data-lucide="file-audio" class="w-3.5 h-3.5"></i>
-                    <span>音声ファイルを直接UP</span>
+                    <span>🎙️ 音声ファイルを直接UP (推奨)</span>
+                </button>
+                <button type="button" onclick="switchAudioUploadTab('image')" id="tab-audio-type-image" class="flex-1 py-2 rounded-lg transition-all text-slate-600 hover:text-slate-900 flex items-center justify-center gap-1.5">
+                    <i data-lucide="image" class="w-3.5 h-3.5"></i>
+                    <span>🖼️ 画像から自動エンコード生成</span>
                 </button>
             </div>
 
             <form id="audio-upload-form" onsubmit="submitAudioUpload(event)" class="space-y-4">
-                <input type="hidden" id="audio-upload-type" name="type" value="image">
+                <input type="hidden" id="audio-upload-type" name="type" value="audio">
 
                 <!-- 対象エンジンモード -->
                 <div>
                     <label class="block text-xs font-bold text-slate-700 mb-1.5">対象エンジンモード:</label>
                     <div class="grid grid-cols-3 gap-2 text-xs">
-                        <label class="relative flex items-center gap-1.5 p-2.5 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50 has-[:checked]:border-amber-500 has-[:checked]:bg-amber-50/50">
-                            <input type="radio" name="mode" value="JPEG" checked class="text-amber-600 focus:ring-amber-500">
+                        <label class="relative flex items-center gap-1.5 p-2.5 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50 has-[:checked]:border-purple-500 has-[:checked]:bg-purple-50/50">
+                            <input type="radio" name="mode" id="mode-radio-fec" value="FEC" class="text-purple-600 focus:ring-purple-500">
                             <div>
-                                <div class="font-bold text-slate-900">JPEG</div>
+                                <div class="font-bold text-slate-900">🟣 FEC</div>
+                                <div class="text-[9px] text-slate-500 leading-tight">Raptor+RS二重冗長</div>
+                            </div>
+                        </label>
+                        <label class="relative flex items-center gap-1.5 p-2.5 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50 has-[:checked]:border-amber-500 has-[:checked]:bg-amber-50/50">
+                            <input type="radio" name="mode" id="mode-radio-jpeg" value="JPEG" class="text-amber-600 focus:ring-amber-500">
+                            <div>
+                                <div class="font-bold text-slate-900">🟡 JPEG</div>
                                 <div class="text-[9px] text-slate-500 leading-tight">ざらざら・段階的</div>
                             </div>
                         </label>
                         <label class="relative flex items-center gap-1.5 p-2.5 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50 has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-50/50">
-                            <input type="radio" name="mode" value="PNG" class="text-emerald-600 focus:ring-emerald-500">
+                            <input type="radio" name="mode" id="mode-radio-png" value="PNG" class="text-emerald-600 focus:ring-emerald-500">
                             <div>
-                                <div class="font-bold text-slate-900">PNG</div>
+                                <div class="font-bold text-slate-900">🟢 PNG</div>
                                 <div class="text-[9px] text-slate-500 leading-tight">0/100 多数決</div>
-                            </div>
-                        </label>
-                        <label class="relative flex items-center gap-1.5 p-2.5 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50 has-[:checked]:border-purple-500 has-[:checked]:bg-purple-50/50">
-                            <input type="radio" name="mode" value="FEC" class="text-purple-600 focus:ring-purple-500">
-                            <div>
-                                <div class="font-bold text-slate-900">FEC</div>
-                                <div class="text-[9px] text-slate-500 leading-tight">Raptor+RS二重</div>
                             </div>
                         </label>
                     </div>
                 </div>
 
-                <!-- ファイル選択エリア -->
+                <!-- ファイル選択エリア (ドラッグ＆ドロップ対応) -->
                 <div>
                     <label class="block text-xs font-bold text-slate-700 mb-1.5" id="audio-file-input-label">
-                        画像ファイルを選択 (.jpg, .png 等):
+                        音声ファイルを選択 (.wav, .mp3, .m4a 等):
                     </label>
-                    <div class="border-2 border-dashed border-slate-200 rounded-xl p-4 text-center hover:border-emerald-500 transition-colors bg-slate-50/50 relative cursor-pointer" onclick="document.getElementById('audio-upload-file').click()">
-                        <input type="file" id="audio-upload-file" name="file" accept="image/*" required class="hidden" onchange="handleAudioFileSelected(this)">
-                        <div id="audio-file-placeholder" class="space-y-1">
-                            <i data-lucide="upload" class="w-6 h-6 mx-auto text-slate-400"></i>
-                            <p class="text-xs font-bold text-slate-700" id="audio-drop-text">クリックしてファイルを選択</p>
-                            <p class="text-[10px] text-slate-400" id="audio-drop-subtext">JPG, PNG 形式 (自動で 256x256 にリサイズ・変調されます)</p>
+                    <div id="audio-drop-zone" class="border-2 border-dashed border-slate-300 rounded-xl p-5 text-center hover:border-emerald-500 transition-all bg-slate-50/60 relative cursor-pointer" onclick="document.getElementById('audio-upload-file').click()">
+                        <input type="file" id="audio-upload-file" name="file" accept="audio/*,.wav,.mp3,.m4a" required class="hidden" onchange="handleAudioFileSelected(this)">
+                        <div id="audio-file-placeholder" class="space-y-1.5 pointer-events-none">
+                            <i data-lucide="upload-cloud" class="w-8 h-8 mx-auto text-emerald-600"></i>
+                            <p class="text-xs font-bold text-slate-700" id="audio-drop-text">クリックして選択、またはここにドラッグ＆ドロップ</p>
+                            <p class="text-[10px] text-slate-400" id="audio-drop-subtext">WAV, MP3, M4A 形式 (最大 200MB / 自動で 44.1kHz PCM に登録されます)</p>
                         </div>
-                        <div id="audio-file-preview-info" class="hidden text-xs font-bold text-emerald-700 flex items-center justify-center gap-1.5">
-                            <i data-lucide="check-circle" class="w-4 h-4"></i>
-                            <span id="audio-selected-filename">filename.jpg</span>
+                        <div id="audio-file-preview-info" class="hidden text-xs font-bold text-emerald-700 flex items-center justify-center gap-2 py-2">
+                            <i data-lucide="check-circle" class="w-5 h-5 text-emerald-600"></i>
+                            <span id="audio-selected-filename" class="font-mono text-sm">filename.wav</span>
                         </div>
                     </div>
                 </div>
@@ -1911,12 +1911,26 @@
             const modal = document.getElementById('audio-upload-modal');
             const form = document.getElementById('audio-upload-form');
             if (form) form.reset();
-            switchAudioUploadTab('image');
+
+            // 現在稼働中のモードをラジオボタンに自動反映
+            const modeVal = (currentEngineMode || 'FEC').toLowerCase();
+            const targetRadio = document.getElementById(`mode-radio-${modeVal}`);
+            if (targetRadio) {
+                targetRadio.checked = true;
+            }
+
+            // 音声直接UPタブを第一選択にする
+            switchAudioUploadTab('audio');
             resetAudioFileInputUI();
+
             const prog = document.getElementById('audio-upload-progress-container');
             if (prog) prog.classList.add('hidden');
+            const submitBtn = document.getElementById('btn-submit-audio-upload');
+            if (submitBtn) submitBtn.disabled = false;
+
             modal.classList.remove('hidden');
             modal.classList.add('flex');
+            initAudioDropZone();
             lucide.createIcons();
         }
 
@@ -1932,6 +1946,7 @@
             const tabAud = document.getElementById('tab-audio-type-audio');
             const fileInput = document.getElementById('audio-upload-file');
             const inputLabel = document.getElementById('audio-file-input-label');
+            const dropText = document.getElementById('audio-drop-text');
             const dropSubtext = document.getElementById('audio-drop-subtext');
             const submitBtnText = document.getElementById('btn-submit-audio-text');
 
@@ -1939,8 +1954,9 @@
             if (type === 'image') {
                 tabImg.className = 'flex-1 py-2 rounded-lg transition-all bg-white text-emerald-700 shadow-sm flex items-center justify-center gap-1.5';
                 tabAud.className = 'flex-1 py-2 rounded-lg transition-all text-slate-600 hover:text-slate-900 flex items-center justify-center gap-1.5';
-                fileInput.accept = 'image/*';
+                fileInput.accept = 'image/*,.jpg,.jpeg,.png,.bmp,.webp';
                 inputLabel.textContent = '画像ファイルを選択 (.jpg, .png 等):';
+                dropText.textContent = 'クリックして画像を選択、またはここにドラッグ＆ドロップ';
                 dropSubtext.textContent = 'JPG, PNG 形式 (自動で 256x256 にリサイズ・変調されます)';
                 submitBtnText.textContent = 'エンコード & 登録を実行';
             } else {
@@ -1948,7 +1964,8 @@
                 tabImg.className = 'flex-1 py-2 rounded-lg transition-all text-slate-600 hover:text-slate-900 flex items-center justify-center gap-1.5';
                 fileInput.accept = 'audio/*,.wav,.m4a,.mp3';
                 inputLabel.textContent = '音声ファイルを選択 (.wav, .mp3, .m4a 等):';
-                dropSubtext.textContent = 'WAV, MP3, M4A 形式 (44.1kHz PCM に自動正規化)';
+                dropText.textContent = 'クリックして音声を選択、またはここにドラッグ＆ドロップ';
+                dropSubtext.textContent = 'WAV, MP3, M4A 形式 (最大 200MB / 自動で 44.1kHz PCM に登録されます)';
                 submitBtnText.textContent = '音声ファイルを登録';
             }
             resetAudioFileInputUI();
@@ -1958,8 +1975,10 @@
         function resetAudioFileInputUI() {
             const previewInfo = document.getElementById('audio-file-preview-info');
             const placeholder = document.getElementById('audio-file-placeholder');
+            const zone = document.getElementById('audio-drop-zone');
             if (previewInfo) previewInfo.classList.add('hidden');
             if (placeholder) placeholder.classList.remove('hidden');
+            if (zone) zone.classList.remove('border-emerald-500', 'bg-emerald-50/60');
         }
 
         function handleAudioFileSelected(input) {
@@ -1980,8 +1999,52 @@
             }
         }
 
-        // アップロード実行
-        async function submitAudioUpload(e) {
+        // ドラッグ＆ドロップイベント初期化
+        let isDropZoneInitialized = false;
+        function initAudioDropZone() {
+            if (isDropZoneInitialized) return;
+            const zone = document.getElementById('audio-drop-zone');
+            const fileInput = document.getElementById('audio-upload-file');
+            if (!zone || !fileInput) return;
+
+            ['dragenter', 'dragover'].forEach(eventName => {
+                zone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    zone.classList.add('border-emerald-500', 'bg-emerald-50/60');
+                }, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                zone.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    zone.classList.remove('border-emerald-500', 'bg-emerald-50/60');
+                }, false);
+            });
+
+            zone.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer;
+                if (dt && dt.files && dt.files.length > 0) {
+                    const droppedFile = dt.files[0];
+                    fileInput.files = dt.files;
+
+                    // ファイル種別を判定してタブを自動追従
+                    const ext = droppedFile.name.split('.').pop().toLowerCase();
+                    if (['wav', 'mp3', 'm4a', 'aac', 'ogg'].includes(ext)) {
+                        switchAudioUploadTab('audio');
+                    } else if (['jpg', 'jpeg', 'png', 'bmp', 'webp'].includes(ext)) {
+                        switchAudioUploadTab('image');
+                    }
+                    handleAudioFileSelected(fileInput);
+                }
+            }, false);
+
+            isDropZoneInitialized = true;
+        }
+
+        // アップロード実行 (XMLHttpRequest によるリアルタイム進捗通知)
+        function submitAudioUpload(e) {
             e.preventDefault();
             const form = document.getElementById('audio-upload-form');
             const fileInput = document.getElementById('audio-upload-file');
@@ -1999,39 +2062,70 @@
 
             submitBtn.disabled = true;
             progContainer.classList.remove('hidden');
-            progressBar.style.width = '35%';
-            progressPct.textContent = '35%';
-            statusText.textContent = 'アップロード・処理中 (画像エンコードには少し時間がかかります)...';
+            progressBar.style.width = '2%';
+            progressPct.textContent = '2%';
+            statusText.textContent = 'アップロードを開始しています...';
 
-            try {
-                const res = await fetch(safeApiUrl('/admin/api/audio/upload'), {
-                    method: 'POST',
-                    body: formData
-                });
-                progressBar.style.width = '90%';
-                progressPct.textContent = '90%';
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', safeApiUrl('/admin/api/audio/upload'), true);
 
-                const data = await res.json();
-                if (data.status === 'success') {
-                    progressBar.style.width = '100%';
-                    progressPct.textContent = '100%';
-                    statusText.textContent = '完了！';
-                    showToast(data.message || '音声を登録しました！');
-                    setTimeout(() => {
-                        closeAudioUploadModal();
-                        reloadAudioTracks(false);
-                    }, 600);
-                } else {
-                    showToast(data.message || 'アップロードに失敗しました', 'error');
-                    statusText.textContent = 'エラーが発生しました';
+            // リアルタイムアップロード進捗
+            xhr.upload.onprogress = (ev) => {
+                if (ev.lengthComputable) {
+                    const pct = Math.min(95, Math.round((ev.loaded / ev.total) * 100));
+                    progressBar.style.width = `${pct}%`;
+                    progressPct.textContent = `${pct}%`;
+                    const loadedMb = (ev.loaded / (1024 * 1024)).toFixed(1);
+                    const totalMb = (ev.total / (1024 * 1024)).toFixed(1);
+                    statusText.textContent = `送信中: ${loadedMb} MB / ${totalMb} MB (${pct}%)`;
                 }
-            } catch (err) {
-                console.error(err);
-                showToast('通信エラーが発生しました', 'error');
-                statusText.textContent = '通信エラー';
-            } finally {
+            };
+
+            // アップロード完了後のサーバー処理中
+            xhr.upload.onload = () => {
+                progressBar.style.width = '96%';
+                progressPct.textContent = '96%';
+                statusText.textContent = 'サーバー側で音声の正規化・登録処理を実行中...';
+            };
+
+            xhr.onload = () => {
                 submitBtn.disabled = false;
-            }
+                try {
+                    const data = JSON.parse(xhr.responseText);
+                    if (xhr.status === 200 && data.status === 'success') {
+                        progressBar.style.width = '100%';
+                        progressPct.textContent = '100%';
+                        statusText.textContent = '登録完了！';
+                        showToast(data.message || '音声を登録しました！');
+                        setTimeout(() => {
+                            closeAudioUploadModal();
+                            reloadAudioTracks(false);
+                        }, 500);
+                    } else {
+                        showToast(data.message || 'アップロードに失敗しました', 'error');
+                        statusText.textContent = data.message || 'エラーが発生しました';
+                    }
+                } catch (err) {
+                    console.error("Upload parse error:", err);
+                    showToast('サーバー応答の解析に失敗しました', 'error');
+                    statusText.textContent = '通信エラー';
+                }
+            };
+
+            xhr.onerror = () => {
+                submitBtn.disabled = false;
+                showToast('通信エラーが発生しました。ネットワークまたは接続環境をご確認ください', 'error');
+                statusText.textContent = '通信エラーが発生しました';
+            };
+
+            xhr.timeout = 300000; // 5分タイムアウト
+            xhr.ontimeout = () => {
+                submitBtn.disabled = false;
+                showToast('アップロードがタイムアウトしました', 'error');
+                statusText.textContent = 'タイムアウトエラー';
+            };
+
+            xhr.send(formData);
         }
 
         // 音声削除ダイアログ

@@ -101,11 +101,32 @@ def setup_demo_audio():
     else:
         print(f"✅ PNG デモ音声は最新です: {png_target} ({os.path.getsize(png_target)} bytes)")
 
+    # 3. FEC 音声の確認・セットアップ (全320パケット / 約11分)
+    fec_target = os.path.join(static_audio_dir, "turbo_fec_256_256.wav")
+    from digital_turbo_fec import config_turbo as fec_config
+    if _needs_regeneration(fec_target, fec_config) or os.path.getsize(fec_target) < 10000000:
+        print("⚙️ FEC デモ音声をエンコード生成中 (全320パケット / 約11分)...")
+        from digital_turbo_fec.encoder_turbo import DigitalTurboFECEncoder
+        enc_fec = DigitalTurboFECEncoder()
+        enc_fec.encode(input_img, fec_target)
+        _save_meta(fec_target, fec_config)
+        print(f"✅ FEC デモ音声生成完了: {fec_target} ({os.path.getsize(fec_target)} bytes)")
+    else:
+        print(f"✅ FEC デモ音声は最新です: {fec_target} ({os.path.getsize(fec_target)} bytes)")
+
     # data ディレクトリ側にもコピーして同期
     data_jpeg_audio = os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "audio", "turbo_256_256.wav")
     os.makedirs(os.path.dirname(data_jpeg_audio), exist_ok=True)
     if not os.path.exists(data_jpeg_audio) or os.path.getsize(data_jpeg_audio) < 1000000:
         shutil.copyfile(jpeg_target, data_jpeg_audio)
+
+    data_fec_audio = os.path.join(ROOT_DIR, "data", "digital_turbo_fec", "audio", "turbo_fec_256_256.wav")
+    os.makedirs(os.path.dirname(data_fec_audio), exist_ok=True)
+    if not os.path.exists(data_fec_audio) or os.path.getsize(data_fec_audio) < 10000000:
+        shutil.copyfile(fec_target, data_fec_audio)
+
+    from web_turbo_png.services.audio_manager import AudioManager
+    AudioManager.get_manifest()
 
     print("\n🎉 デモ音声のセットアップがすべて完了しました！")
     return True

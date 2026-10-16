@@ -212,10 +212,26 @@ class AudioManager:
 
         # ffmpeg 変換またはコピー
         ffmpeg_bin = _get_ffmpeg_bin()
-        if ffmpeg_bin:
+        is_wav = src_path.lower().endswith(".wav")
+        duration_sec = 0.0
+
+        if is_wav:
+            try:
+                import wave
+                with wave.open(src_path, 'rb') as wf:
+                    frames = wf.getnframes()
+                    rate = wf.getframerate()
+                    duration_sec = round(frames / float(rate), 1)
+                    # 既に44.1kHz 16bit モノラルなら直接コピー
+                    if rate == 44100 and wf.getnchannels() == 1 and wf.getsampwidth() == 2:
+                        shutil.copy2(src_path, dest_path)
+                        ffmpeg_bin = None
+            except Exception:
+                pass
+
+        if ffmpeg_bin and not os.path.exists(dest_path):
             cmd = [
                 ffmpeg_bin, "-y", "-i", src_path,
-                "-af", "highpass=f=400,lowpass=f=9500,dynaudnorm=f=150:g=15:p=0.9",
                 "-ar", "44100",
                 "-ac", "1",
                 "-c:a", "pcm_s16le",
@@ -224,8 +240,17 @@ class AudioManager:
             res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
             if res.returncode != 0 or not os.path.exists(dest_path):
                 shutil.copy2(src_path, dest_path)
-        else:
+        elif not os.path.exists(dest_path):
             shutil.copy2(src_path, dest_path)
+
+        # duration_sec が未算出なら算出
+        if duration_sec <= 0.0 and os.path.exists(dest_path):
+            try:
+                import wave
+                with wave.open(dest_path, 'rb') as wf:
+                    duration_sec = round(wf.getnframes() / float(wf.getframerate()), 1)
+            except Exception:
+                pass
 
         file_size = os.path.getsize(dest_path)
         manifest = cls.get_manifest()
@@ -235,7 +260,8 @@ class AudioManager:
             "label": label or dest_filename,
             "mode": mode,
             "image_id": "Custom",
-            "description": description or f"{mode} 実験用音声",
+            "description": description or f"{mode} アップロード音声 ({round(duration_sec/60, 1) if duration_sec > 60 else duration_sec}{'分' if duration_sec > 60 else '秒'})",
+            "duration_sec": duration_sec,
             "is_system": False,
             "size_bytes": file_size,
             "size_mb": round(file_size / (1024 * 1024), 2),
