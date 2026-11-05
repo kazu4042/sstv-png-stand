@@ -69,22 +69,28 @@ def get_job(job_id, retries=1):
     return None
 
 def _write_job(job_id, data):
-    """アトミック書き込みで読み込み側のJSONパースエラーを防ぐ"""
+    """アトミック書き込みで読み込み側のJSONパースエラーを防ぐ（Windowsファイルロック耐性強化）"""
     filepath = _get_job_file(job_id)
-    temp_filepath = f"{filepath}.tmp.{time.time()}"
+    temp_filepath = f"{filepath}.tmp.{time.time()}_{os.getpid()}"
     try:
         with open(temp_filepath, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False)
-        # Windowsでも上書き可能な安全な置換
-        if os.path.exists(filepath):
+        
+        # Windowsの排他ロック・アクセス競合を回避するためのリトライ
+        for attempt in range(5):
             try:
                 os.replace(temp_filepath, filepath)
+                return
             except OSError:
-                # 代替手法
+                time.sleep(0.03)
+        
+        # 最終フォールバック
+        if os.path.exists(filepath):
+            try:
                 os.remove(filepath)
-                os.rename(temp_filepath, filepath)
-        else:
-            os.rename(temp_filepath, filepath)
+            except OSError:
+                pass
+        os.rename(temp_filepath, filepath)
     except Exception as e:
         print(f"Error writing job {job_id}: {e}")
         try:

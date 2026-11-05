@@ -164,7 +164,7 @@ class DigitalTurboFECDecoder(BaseDecoder):
         packet_payload_samples = packet_symbols * self.sps
         header_symbols = 28  # ヘッダ7B (28シンボル)
 
-        step_size = max(16, int(self.sync_samples * 0.3))
+        step_size = max(16, int(self.sync_samples * 0.25))
         fine_step = max(4, self.sps // 2)
         align_range = max(16, int(self.sps * 2.5))
 
@@ -172,26 +172,33 @@ class DigitalTurboFECDecoder(BaseDecoder):
         i = 0
 
         # スキャンループ
-        while i < total_samples - self.sync_samples - packet_payload_samples:
+        while i <= total_samples - packet_payload_samples:
             if progress_callback and total_samples > 0:
                 prog = min(99.0, (i / total_samples) * 100.0)
                 progress_callback(prog)
+
+            if i + self.sync_samples > total_samples:
+                break
 
             p, norm = self._detect_sync_energy(data[i : i + self.sync_samples])
 
             # 同期検出: 1000Hz純度比 (norm) または相関電力で検出
             if (norm > 0.08 and p > 0.005) or (p > 0.05 and norm > 0.04):
-                # 1. 同期パルスの立ち下がりエッジを探索（パルスの終端位置）
-                search_ptr = i + int(self.sync_samples * 0.5)
-                while search_ptr < total_samples - self.sync_samples:
-                    p2, _ = self._detect_sync_energy(data[search_ptr : search_ptr + self.sync_samples])
-                    if p2 < p * 0.30:
-                        break
-                    search_ptr += fine_step
+                # 1. ローカルピーク探索: 同期パルスエネルギーが最大になる位置を特定
+                search_start = max(0, i - step_size)
+                search_end = min(total_samples - self.sync_samples, i + int(self.sync_samples * 0.8))
+                best_p = p
+                peak_pos = i
+                for test_pos in range(search_start, search_end, 16):
+                    p_cand, _ = self._detect_sync_energy(data[test_pos : test_pos + self.sync_samples])
+                    if p_cand > best_p:
+                        best_p = p_cand
+                        peak_pos = test_pos
 
-                # 2. 立ち下がりエッジ周辺でヘッダCRC-16整合性による高精度シンボルアライメント＆クロック偏差探索
-                start_scan = max(0, search_ptr - align_range)
-                end_scan = min(total_samples - packet_payload_samples, search_ptr + align_range)
+                # 2. ピーク位置＋同期トーン長を基準に高精度シンボルアライメント＆クロック偏差探索
+                center_ptr = peak_pos + self.sync_samples
+                start_scan = max(0, center_ptr - align_range)
+                end_scan = min(total_samples - packet_payload_samples, center_ptr + align_range)
 
                 best_pos = -1
                 best_snr = -1.0
@@ -230,6 +237,10 @@ class DigitalTurboFECDecoder(BaseDecoder):
                         # パケット全体を一気にスキップして次へ
                         i = best_pos + packet_payload_samples
                         continue
+
+                # CRCが見つからなかった場合、同期パルス終端以降へ進める
+                i = center_ptr + self.sps
+                continue
 
             i += step_size
 
