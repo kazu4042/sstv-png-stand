@@ -164,6 +164,11 @@ def run_playwright_e2e():
             page.wait_for_url(f"{SERVER_URL}/app", timeout=10000)
             print("  ・メイン画面 (/app) へのログイン遷移成功")
 
+            # ヘッダーブランド名が 'SSTV' であることを確認
+            header_brand = page.locator("header.top-nav span").first.inner_text().strip()
+            assert header_brand == "SSTV", f"ヘッダー名がSSTVではありません: '{header_brand}'"
+            print(f"  ・Webサイト名検証成功: '{header_brand}'")
+
             # ファイル入力要素の待機
             file_input = page.wait_for_selector("input#audio-file")
 

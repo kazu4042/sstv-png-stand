@@ -234,5 +234,5 @@ def application(environ, start_response):
 app.wsgi_app = application
 
 if __name__ == '__main__':
-    print("✨ SSTV TurboPNG-Aggregator Web System is starting...")
+    print("✨ SSTV Web System is starting...")
     app.run(debug=True, host='0.0.0.0', port=5001)

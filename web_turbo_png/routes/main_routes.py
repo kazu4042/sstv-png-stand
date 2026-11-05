@@ -18,7 +18,7 @@ main_bp = Blueprint('main', __name__)
 @main_bp.route('/')
 def landing():
     """ホーム画面"""
-    return render_template('landing.html', engine_type='TurboPNG')
+    return render_template('landing.html', engine_type='SSTV')
 
 @main_bp.route('/app')
 @login_required
