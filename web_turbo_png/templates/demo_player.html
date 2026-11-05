@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SSTV - 音声再生</title>
+    <title>SSTV-aggregator - 音声再生</title>
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -342,8 +342,8 @@
             <!-- Header -->
             <div class="flex items-center justify-between mb-4">
                 <div>
-                    <h1 class="text-lg sm:text-xl font-bold text-ink mb-1">SSTV 音声再生</h1>
-                    <p class="text-[10px] sm:text-xs text-earth tracking-widest uppercase font-medium">SSTV Audio Broadcast</p>
+                    <h1 class="text-lg sm:text-xl font-bold text-ink mb-1">SSTV-aggregator 音声再生</h1>
+                    <p class="text-[10px] sm:text-xs text-earth tracking-widest uppercase font-medium">SSTV-aggregator Audio Broadcast</p>
                 </div>
                 <div id="statusBadge" class="status-badge ready">
                     <span class="w-2 h-2 rounded-full bg-current"></span>
@@ -358,7 +358,7 @@
                         class="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 rounded-full text-xs font-bold shadow-xs {% if current_engine_mode == 'JPEG' %}bg-amber-100 text-amber-900 border border-amber-300{% elif current_engine_mode == 'FEC' %}bg-purple-100 text-purple-900 border border-purple-300{% else %}bg-emerald-100 text-emerald-900 border border-emerald-300{% endif %}">
                         <span
                             class="w-2.5 h-2.5 rounded-full {% if current_engine_mode == 'JPEG' %}bg-amber-500 animate-pulse{% elif current_engine_mode == 'FEC' %}bg-purple-500 animate-pulse{% else %}bg-emerald-500 animate-pulse{% endif %}"></span>
-                        <span id="currentModeLabel">{{ audio_label or 'SSTV テスト音声' }}</span>
+                        <span id="currentModeLabel">{{ audio_label or 'SSTV-aggregator テスト音声' }}</span>
                     </span>
                 </div>
                 {% if selected_track and selected_track.description %}
