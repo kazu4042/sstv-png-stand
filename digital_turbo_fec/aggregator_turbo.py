@@ -237,6 +237,8 @@ class TurboFECAggregator(BaseAggregator):
             except Exception:
                 pass
 
+        return img_out_path
+
     def decode_tile_bytes_safely(self, p_bytes: bytes, tile_w: int = 16, tile_h: int = 16) -> Optional[Image.Image]:
         """
         RSTマーカー間スキップ復元 ＆ ヘッダ自動補間安全デコーダ (第5防壁)
