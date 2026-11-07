@@ -34,29 +34,30 @@ def apply_bandpass_filter_np(
     transition_width: float = 100.0
 ) -> np.ndarray:
     """
-    NumPyのみで動作するゼロ位相バンドパスフィルタ
-    スマホマイク録音時の低周波ハム音・エアコン音（50/60/120Hz）や高周波雑音を一掃して同期精度を劇的に向上させる。
+    ゼロ位相IIRバンドパスフィルタ (Butterworth SOS)
+    巨大FFT配列によるメモリ枯渇(OOM)を防止し、スマホマイク録音時の低周波ハム音や高周波雑音を高速・低メモリで除去。
     """
     n = len(data)
     if n == 0:
         return data
-    freqs = np.fft.rfftfreq(n, d=1.0 / sample_rate)
-    fft_data = np.fft.rfft(data)
 
-    weight = np.zeros_like(freqs, dtype=np.float32)
-    pass_band = (freqs >= low_freq) & (freqs <= high_freq)
-    weight[pass_band] = 1.0
-
-    if transition_width > 0:
-        low_trans = (freqs >= low_freq - transition_width) & (freqs < low_freq)
-        weight[low_trans] = 0.5 * (1.0 + np.cos(np.pi * (low_freq - freqs[low_trans]) / transition_width))
-
-        high_trans = (freqs > high_freq) & (freqs <= high_freq + transition_width)
-        weight[high_trans] = 0.5 * (1.0 + np.cos(np.pi * (freqs[high_trans] - high_freq) / transition_width))
-
-    filtered_fft = fft_data * weight
-    filtered_data = np.fft.irfft(filtered_fft, n=n)
-    return filtered_data.astype(np.float32)
+    try:
+        from scipy.signal import butter, sosfiltfilt
+        nyq = sample_rate / 2.0
+        low = max(10.0, min(low_freq, nyq - 100.0))
+        high = max(low + 100.0, min(high_freq, nyq - 10.0))
+        sos = butter(4, [low, high], btype='bandpass', fs=sample_rate, output='sos')
+        return sosfiltfilt(sos, data).astype(np.float32)
+    except Exception:
+        # SciPyがない場合のフォールバック（小ブロック向け）
+        freqs = np.fft.rfftfreq(n, d=1.0 / sample_rate)
+        fft_data = np.fft.rfft(data)
+        weight = np.zeros_like(freqs, dtype=np.float32)
+        pass_band = (freqs >= low_freq) & (freqs <= high_freq)
+        weight[pass_band] = 1.0
+        filtered_fft = fft_data * weight
+        filtered_data = np.fft.irfft(filtered_fft, n=n)
+        return filtered_data.astype(np.float32)
 
 
 class DigitalTurboFECDecoder(BaseDecoder):
