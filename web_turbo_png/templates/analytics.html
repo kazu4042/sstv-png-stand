@@ -75,9 +75,8 @@
 
         .base-image {
             display: block;
-            width: 100%; max-width: 640px;  
+            width: 512px; max-width: 100%;  
             height: auto; 
-            image-rendering: pixelated; 
         }
 
         .pointer-canvas {
@@ -567,8 +566,8 @@
             img.addEventListener('load', function() {
                 canvas.width = img.clientWidth;
                 canvas.height = img.clientHeight;
-                displayToNativeScaleX = canvas.width / (img.naturalWidth || parseInt("{{ image_width }}") || 256);
-                displayToNativeScaleY = canvas.height / (img.naturalHeight || parseInt("{{ image_height }}") || 256);
+                displayToNativeScaleX = canvas.width / (tileCountX * tileSize);
+                displayToNativeScaleY = canvas.height / (tileCountY * tileSize);
                 
                 // キャンバスサイズ変更で内容がクリアされるため再描画
                 if (packetDatabase && packetDatabase.length > 0) {
