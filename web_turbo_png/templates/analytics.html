@@ -428,6 +428,33 @@
             const urlParams = new URLSearchParams(window.location.search);
             let currentImageId = urlParams.get('image_id');
 
+            const tileCountX = parseInt("{{ tile_count_x }}") || 16;
+            const tileCountY = parseInt("{{ tile_count_y }}") || 16;
+            const tileSize = parseInt("{{ tile_size }}") || 16;
+            const logicalW = tileCountX * tileSize;
+            const logicalH = tileCountY * tileSize;
+
+            let displayToNativeScaleX = 1.0;
+            let displayToNativeScaleY = 1.0;
+            let packetDatabase = [];
+
+            function updateCanvasScale() {
+                if (img.clientWidth > 0 && img.clientHeight > 0) {
+                    canvas.width = img.clientWidth;
+                    canvas.height = img.clientHeight;
+                    displayToNativeScaleX = canvas.width / logicalW;
+                    displayToNativeScaleY = canvas.height / logicalH;
+                }
+            }
+
+            img.addEventListener('load', function() {
+                img.style.opacity = '1';
+                updateCanvasScale();
+                if (packetDatabase && packetDatabase.length > 0) {
+                    drawStaticOverlay();
+                }
+            });
+
             function switchToImage(newImageId, skipPushState = false) {
                 if (!newImageId) return;
                 if (newImageId === currentImageId && img.src !== "") return;
@@ -508,7 +535,7 @@
                 // onerrorで非表示になっていた場合への対策として明示的に表示状態をリセット
                 img.style.display = 'block';
                 // 対象画像の読み込み（モードに応じた拡張子判定）
-                const ext = '{{ current_engine_mode }}' === 'JPEG' ? '.jpg' : '.png';
+                const ext = ('{{ current_engine_mode }}' === 'JPEG' || '{{ current_engine_mode }}' === 'FEC') ? '.jpg' : '.png';
                 img.src = safeApiUrl(`/static/output/restored_ID_${imageId}${ext}?t=${new Date().getTime()}`);
                 img.onerror = function() {
                     // フォールバックでもう一方の拡張子も試す
@@ -530,6 +557,7 @@
             }
 
             function drawStaticOverlay() {
+                updateCanvasScale();
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 if (!packetDatabase || packetDatabase.length === 0) return;
                 
@@ -554,32 +582,7 @@
                 toggleGreenCover.addEventListener('change', drawStaticOverlay);
             }
 
-            const nativeW = img.naturalWidth || parseInt("{{ image_width }}") || 256;
-            const nativeH = img.naturalHeight || parseInt("{{ image_height }}") || 256;
-            const tileCountX = parseInt("{{ tile_count_x }}") || 16; const tileCountY = parseInt("{{ tile_count_y }}") || 16; const tileSize = parseInt("{{ tile_size }}") || 16;
-
-            
-            canvas.width = img.clientWidth || 640;
-            canvas.height = img.clientHeight || 480;
-            
-            // Resize canvas when image fully loads to prevent misalignment
-            img.addEventListener('load', function() {
-                canvas.width = img.clientWidth;
-                canvas.height = img.clientHeight;
-                displayToNativeScaleX = canvas.width / (tileCountX * tileSize);
-                displayToNativeScaleY = canvas.height / (tileCountY * tileSize);
-                
-                // キャンバスサイズ変更で内容がクリアされるため再描画
-                if (packetDatabase && packetDatabase.length > 0) {
-                    drawStaticOverlay();
-                }
-            });
-        
-
-            let displayToNativeScaleX = canvas.width / nativeW;
-            let displayToNativeScaleY = canvas.height / nativeH;
-
-            let packetDatabase = [];
+            updateCanvasScale();
 
             // (初期化はloadImageAndDataで行われる)
 
@@ -618,10 +621,12 @@
 
                 ctx.imageRendering = 'pixelated';
                 
-                const cropW = (radius * 2) / zoom / displayToNativeScaleX;
-                const cropH = (radius * 2) / zoom / displayToNativeScaleY;
-                const cropX = nativeMouseX - (radius / zoom / displayToNativeScaleX);
-                const cropY = nativeMouseY - (radius / zoom / displayToNativeScaleY);
+                const imgRatioX = (img.naturalWidth || logicalW) / logicalW;
+                const imgRatioY = (img.naturalHeight || logicalH) / logicalH;
+                const cropW = ((radius * 2) / zoom / displayToNativeScaleX) * imgRatioX;
+                const cropH = ((radius * 2) / zoom / displayToNativeScaleY) * imgRatioY;
+                const cropX = (nativeMouseX - (radius / zoom / displayToNativeScaleX)) * imgRatioX;
+                const cropY = (nativeMouseY - (radius / zoom / displayToNativeScaleY)) * imgRatioY;
 
                 try {
                     ctx.drawImage(

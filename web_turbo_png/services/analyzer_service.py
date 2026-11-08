@@ -388,7 +388,7 @@ class TurboPNGAnalyzerService:
                     user_score = 100.0
 
         static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
-        target_ext = ".jpg" if effective_mode == "JPEG" else ".png"
+        target_ext = ".jpg" if effective_mode in ("JPEG", "FEC") else ".png"
 
         # ユーザー単体画像（現在のモードの拡張子のみ）
         user_img_url = None
