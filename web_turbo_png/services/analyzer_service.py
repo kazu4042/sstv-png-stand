@@ -555,7 +555,8 @@ class TurboPNGAnalyzerService:
                 score_0 = np.zeros(payload_len, dtype=float)
                 score_1 = np.zeros(payload_len, dtype=float)
 
-                for payload_bits_str, snr, file_name, p_user_id, imported_at in packets:
+                for p in packets:
+                    payload_bits_str, snr, file_name, p_user_id, imported_at = p[:5]
                     weight = max(0.1, float(snr) + 1.0)
                     if len(payload_bits_str) < payload_len:
                         continue
@@ -576,7 +577,8 @@ class TurboPNGAnalyzerService:
 
                 sources = []
                 is_contributed = False
-                for payload_bits_str, snr, file_name, p_user_id, imported_at in packets:
+                for p in packets:
+                    payload_bits_str, snr, file_name, p_user_id, imported_at = p[:5]
                     if current_user_id is not None and p_user_id == current_user_id:
                         is_contributed = True
 

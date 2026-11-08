@@ -461,10 +461,16 @@
             }
 
             // 初期ロード処理
+            const serverInitialId = "{{ initial_image_id or '' }}";
+            if (!currentImageId && serverInitialId) {
+                currentImageId = serverInitialId;
+            }
             if (!currentImageId) {
-                const firstItem = document.querySelector('.session-img-item');
-                if (firstItem) {
-                    currentImageId = firstItem.dataset.id;
+                // アクティブなセッション、またはユーザー投稿のあるセッションを優先
+                const activeItem = document.querySelector('.session-img-item.active') ||
+                                   document.querySelector('.session-img-item');
+                if (activeItem) {
+                    currentImageId = activeItem.dataset.id;
                 }
             }
             if (currentImageId) {

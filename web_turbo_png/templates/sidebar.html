@@ -80,10 +80,10 @@
         <a href="/app" class="session-item {% if request.path == '/app' %}active{% endif %} flex items-center gap-3 px-4 py-3 rounded-lg mb-2 text-ink/70" style="text-decoration:none;">
             <i data-lucide="rocket" class="w-5 h-5"></i> アップロード
         </a>
-        <a href="/result" class="session-item {% if request.path == '/result' %}active{% endif %} flex items-center gap-3 px-4 py-3 rounded-lg mb-2 text-ink/70" style="text-decoration:none;">
+        <a href="/result{% if current_image_id %}?image_id={{ current_image_id }}{% endif %}" class="session-item {% if request.path == '/result' %}active{% endif %} flex items-center gap-3 px-4 py-3 rounded-lg mb-2 text-ink/70" style="text-decoration:none;">
             <i data-lucide="layout-dashboard" class="w-5 h-5"></i> 復元結果
         </a>
-        <a href="/analytics" class="session-item {% if request.path == '/analytics' %}active{% endif %} flex items-center gap-3 px-4 py-3 rounded-lg mb-2 text-ink/70" style="text-decoration:none;">
+        <a href="/analytics{% if current_image_id %}?image_id={{ current_image_id }}{% endif %}" class="session-item {% if request.path == '/analytics' %}active{% endif %} flex items-center gap-3 px-4 py-3 rounded-lg mb-2 text-ink/70" style="text-decoration:none;">
             <i data-lucide="activity" class="w-5 h-5"></i> アナリティクス
         </a>
         <a href="/calendar" class="session-item {% if request.path == '/calendar' %}active{% endif %} flex items-center gap-3 px-4 py-3 rounded-lg mb-2 text-ink/70" style="text-decoration:none;">

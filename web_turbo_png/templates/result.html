@@ -395,6 +395,10 @@
 
                 <div class="score-box" style="position: relative;">
                     <div style="position: absolute; top: 15px; right: 20px; display: flex; gap: 8px;">
+                        <a id="btn-goto-analytics" href="/analytics{% if current_image_id %}?image_id={{ current_image_id }}{% endif %}" class="btn-action"
+                            style="font-size: 0.75rem; padding: 6px 12px; margin: 0; background: #008d54; color: white; cursor: pointer; border: none; text-decoration: none; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px;" title="パケット詳細と信頼度マップを確認">
+                            <i data-lucide="activity" class="icon-inline"></i> パケット解析
+                        </a>
                         <button id="show-merge-btn" class="btn-action"
                             style="font-size: 0.75rem; padding: 6px 12px; margin: 0; background: #e2e8f0; color: #475569; cursor: pointer; border: none; display: none;">
                             <i data-lucide="git-merge" class="icon-inline"></i> マージ情報
@@ -799,6 +803,10 @@
             function updateViewForImageId(imageId) {
                 if (!imageId) return;
                 activeImageId = imageId;
+                const btnGotoAnalytics = document.getElementById('btn-goto-analytics');
+                if (btnGotoAnalytics) {
+                    btnGotoAnalytics.href = safeApiUrl('/analytics?image_id=' + imageId);
+                }
 
                 displayImageId.innerText = `0x${imageId}`;
 

@@ -31,8 +31,11 @@ def index():
 def analytics():
     """アナリティクス画面を表示"""
     config = SystemFactory.get_config()
+    req_image_id = request.args.get('image_id')
+    target_image_id = req_image_id or session.get('last_image_id') or ''
     return render_template(
         'analytics.html',
+        initial_image_id=target_image_id,
         timestamp=int(time.time()),
         width=config.WIDTH,
         height=config.HEIGHT,
@@ -108,6 +111,7 @@ def result():
     result_data['current_engine_mode'] = current_engine_mode
 
     if target_image_id:
+        session['last_image_id'] = target_image_id
         status_info = analyzer.get_image_status(target_image_id, user_id=user_id)
         job_user_img = result_data.get('user_image_url') or result_data.get('user_output_url')
         
