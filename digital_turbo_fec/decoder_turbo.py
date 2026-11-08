@@ -257,8 +257,8 @@ class DigitalTurboFECDecoder(BaseDecoder):
         packet_payload_samples = packet_symbols * self.sps
         header_symbols = 28  # ヘッダ7B (28シンボル)
 
-        step_size = max(16, int(self.sps * 2))  # 約2ms (88サンプル) ステップ
-        align_range = max(24, int(self.sps * 3.5))  # ±3.5ms アライメント探索窓
+        step_size = min(132, max(16, int(self.sps)))  # 約2〜3ms (88〜132サンプル) ステップで20ms同期信号を確実に捕捉
+        align_range = min(352, max(120, int(self.sps * 2.0)))  # アライメント探索窓
 
         base_drifts = [round(d * 0.0002, 5) for d in range(-10, 11)]  # -2000ppm 〜 +2000ppm (200ppm刻み)
         cached_drift = 0.0

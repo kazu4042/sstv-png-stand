@@ -56,7 +56,7 @@ class SystemConfig:
 
     # 5. 音響変調 (4-FSK) ＆ 同期信号設定
     sample_rate: int = 44100
-    ms_symbol: float = 2.0
+    ms_symbol: float = 4.0
     freq_sync: int = 1000
     ms_sync: int = 20
     sync_subdivisions: int = 20
