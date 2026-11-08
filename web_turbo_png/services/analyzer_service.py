@@ -297,24 +297,16 @@ class TurboPNGAnalyzerService:
         }
 
     def detect_image_mode(self, target_image_id_hex):
-        """画像IDが PNG / JPEG どちらのDBまたはファイルに存在するかを自動判定"""
+        """画像IDが FEC / JPEG / PNG いずれのDBまたはファイルに存在するかを自動判定"""
         clean_hex = str(target_image_id_hex).strip().upper().zfill(4)
         try:
             target_id_int = int(clean_hex, 16)
         except (ValueError, TypeError):
             return self.current_mode
 
-        # 1. 静的出力ファイルの拡張子をチェック
-        static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
-        jpg_exists = any(os.path.exists(os.path.join(static_out, f"{p}_ID_{clean_hex}.jpg")) for p in ("restored", "user_1", "user_cumulative_1"))
-        png_exists = any(os.path.exists(os.path.join(static_out, f"{p}_ID_{clean_hex}.png")) for p in ("restored", "user_1", "user_cumulative_1"))
-        if jpg_exists and not png_exists:
-            return "JPEG"
-        if png_exists and not jpg_exists:
-            return "PNG"
-
-        # 2. DB を確認
-        for check_mode in (self.current_mode, "JPEG" if self.current_mode == "PNG" else "PNG"):
+        # 1. 最優先で現在の稼働モードおよび各エンジンのDBにパケットが存在するか確認
+        modes_order = [self.current_mode] + [m for m in ("FEC", "JPEG", "PNG") if m != self.current_mode]
+        for check_mode in modes_order:
             try:
                 cfg = SystemFactory.get_config(check_mode)
                 ldir = getattr(cfg, "TEXT_LOG_DIR", f"data/digital_turbo_{check_mode.lower()}/logs")
@@ -326,6 +318,12 @@ class TurboPNGAnalyzerService:
                     return check_mode
             except Exception:
                 pass
+
+        # 2. フォールバックとして静的出力ファイルの拡張子をチェック
+        static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
+        png_exists = any(os.path.exists(os.path.join(static_out, f"{p}_ID_{clean_hex}.png")) for p in ("restored", "user_1", "user_cumulative_1"))
+        if png_exists:
+            return "PNG"
 
         return self.current_mode
 

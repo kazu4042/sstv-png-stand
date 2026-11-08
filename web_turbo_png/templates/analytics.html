@@ -673,7 +673,7 @@
                 ctx.fillStyle = '#f8fafc';
                 ctx.font = 'bold 10px monospace';
                 const quickScore = pkt ? `CONF: ${pkt.score}%` : "NO DATA";
-                ctx.fillText(`<i data-lucide="crosshair" class="icon-inline"></i> L: ${line} B: ${block} | ${quickScore}`, mouseX + 20, mouseY - radius + 13);
+                ctx.fillText(`L: ${line} B: ${block} | ${quickScore}`, mouseX + 20, mouseY - radius + 13);
             });
 
             stage.addEventListener('mouseleave', function() {
