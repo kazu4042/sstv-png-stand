@@ -512,7 +512,7 @@
                             <i data-lucide="check-circle-2" class="icon-inline"></i> 今回の音声デコード処理は完了しています
                         </div>
                         <div style="color: #15803d; font-size: 0.85rem; line-height: 1.5;">
-                            画像の一部のみが表示されている場合は、まだ全タイル分のパケットが揃っていません。続けて別の時間帯の音声を録音・アップロードすると、自動的にパズルのように統合されて復元率が向上します（FECモードではデータ＋リペアが合計256パケット集まった時点で100%一括完全復元されます）。
+                            画像の一部のみが表示されている場合は、まだ全タイル分のパケットが揃っていません。続けて別の時間帯の音声を録音・アップロードすると、自動的にパズルのように統合されて復元率が向上します（FECモードでは固定長104Bパケット［全783個：データ602＋ラプター符号181］のうち合計602パケットが集まった時点で100%一括完全復元されます）。
                         </div>
                     </div>
                     <div style="display: flex; gap: 10px; flex-wrap: wrap;">
@@ -865,12 +865,14 @@
                             }
                             overallRestorationScore = statusData.network_score.toFixed(1);
                             if (statusData.engine_mode === 'FEC' && statusData.repair_packets_received !== undefined) {
+                                const srcPkts = statusData.source_packets_received !== undefined ? statusData.source_packets_received : statusData.source_tiles_received;
+                                const expK = statusData.expected_data_packets || 602;
                                 if (statusData.raptor_recovered_count > 0 || statusData.network_received >= statusData.total_required) {
-                                    overallRestorationDetails = `<i data-lucide="sparkles" class="icon-inline"></i> 現在 <strong>${statusData.network_received}</strong> / ${statusData.total_required} タイル完全復元済み（直接受信: ${statusData.source_tiles_received} ＋ ラプター一括復元: ${statusData.raptor_recovered_count} / リペア: ${statusData.repair_packets_received}個）`;
-                                } else if (statusData.repair_packets_received > 0) {
-                                    overallRestorationDetails = `<i data-lucide="package-check" class="icon-inline"></i> 現在 <strong>${statusData.network_received}</strong> / ${statusData.total_required} タイル描画済み ＋ ラプター冗長パケット <strong>${statusData.repair_packets_received}</strong> 個保持（あと <strong>${statusData.remaining_for_raptor}</strong> パケットで100%一括復元）`;
+                                    overallRestorationDetails = `<i data-lucide="sparkles" class="icon-inline"></i> 現在 <strong>${statusData.network_received}</strong> / ${statusData.total_required} タイル完全復元済み（直接受信: ${statusData.source_tiles_received}タイル［${srcPkts}パケット］＋ ラプター一括復元: ${statusData.raptor_recovered_count}タイル / リペア: ${statusData.repair_packets_received}個）`;
+                                } else if (statusData.repair_packets_received > 0 || srcPkts > 0) {
+                                    overallRestorationDetails = `<i data-lucide="package-check" class="icon-inline"></i> 現在 <strong>${statusData.network_received}</strong> / ${statusData.total_required} タイル描画済み（受信パケット: データ <strong>${srcPkts}</strong> ＋ リペア <strong>${statusData.repair_packets_received}</strong> / 必要 ${expK}個 — あと <strong>${statusData.remaining_for_raptor}</strong> パケットで100%一括復元）`;
                                 } else {
-                                    overallRestorationDetails = `<i data-lucide="package-check" class="icon-inline"></i> 現在 <strong>${statusData.network_received}</strong> / ${statusData.total_required} パケット収集済み`;
+                                    overallRestorationDetails = `<i data-lucide="package-check" class="icon-inline"></i> 現在 <strong>${statusData.network_received}</strong> / ${statusData.total_required} タイル収集済み`;
                                 }
                             } else {
                                 overallRestorationDetails = `<i data-lucide="package-check" class="icon-inline"></i> 現在 <strong>${statusData.network_received}</strong> / ${statusData.total_required} パケット収集済み`;
@@ -907,7 +909,7 @@
                             if (data.overall_score !== undefined) {
                                 overallRestorationScore = data.overall_score.toFixed(1);
                             }
-                            if (!overallRestorationDetails || !overallRestorationDetails.includes('ラプター')) {
+                            if (!overallRestorationDetails || (!overallRestorationDetails.includes('ラプター') && !overallRestorationDetails.includes('受信パケット') && !overallRestorationDetails.includes('タイル完全復元'))) {
                                 overallRestorationDetails = `<i data-lucide="package-check" class="icon-inline"></i> 現在 <strong>${present}</strong> / ${totalBlocks} パケット収集済み`;
                             }
                         }

@@ -147,7 +147,7 @@ class DigitalTurboFECDecoder(BaseDecoder):
         28シンボル(7B)ヘッダのCRC-16検証、およびスマホ録音ノイズ時の軟判定1〜2シンボル反転修復。
         """
         import struct
-        max_esi = self.cfg.total_tiles + self.cfg.raptor_repair_count + 64
+        max_esi = getattr(self.cfg, "expected_total_packets", self.cfg.total_tiles + self.cfg.raptor_repair_count) + 128
 
         def _check_hdr(b_arr: bytes) -> bool:
             if len(b_arr) < 7:
@@ -388,9 +388,9 @@ class DigitalTurboFECDecoder(BaseDecoder):
                 locked_pos_final = -1
 
                 for _, best_pos, best_drift, best_hdr_bytes in distinct_locks:
-                    # パケット後半(末尾160シンボル: 860〜1020)のトーン純度(SNR)から最適クロックドリフトを100ppm精度で高速特定
-                    tail_sym_offset = packet_symbols - 160
-                    tail_num_syms = 160
+                    # パケット後半(末尾1/3区間)のトーン純度(SNR)から最適クロックドリフトを100ppm精度で高速特定
+                    tail_num_syms = min(160, max(64, packet_symbols // 3))
+                    tail_sym_offset = packet_symbols - tail_num_syms
                     coarse_scores = []
                     for d_c in base_drifts:
                         tail_start = int(round(best_pos + tail_sym_offset * self.sps * (1.0 + d_c)))
@@ -514,16 +514,22 @@ class DigitalTurboFECDecoder(BaseDecoder):
                     tile_x = tile_id % config.TILE_COUNT_X
                     tile_y = tile_id // config.TILE_COUNT_X
                 else:
-                    # リペアパケット時は tile_x = 0xFF (255), tile_y にリペア番号 (esi - TOTAL_TILES: 0..63) を格納して ESI を完全保持
+                    # リペアパケット時は tile_x = 0xFF (255), tile_y にリペア番号 (0..254) を格納
                     tile_x = 0xFF
-                    rep_idx = int(pkt.get("esi", config.TOTAL_TILES)) - config.TOTAL_TILES
+                    expected_k = getattr(self.cfg, "expected_data_packets", config.TOTAL_TILES)
+                    rep_idx = int(pkt.get("esi", expected_k)) - expected_k
                     tile_y = max(0, min(254, rep_idx))
+
+                esi_val = max(0, min(65535, int(pkt.get("esi", 0))))
+                ptype_val = max(0, min(15, int(pkt_type)))
 
                 payload_len = len(payload)
                 payload_bits = self._bytes_to_bits_str(payload)
 
                 snr_int = min(15, max(0, int(round(snr_db))))
                 snr_bits = f"{snr_int:04b}"
+                esi_bits = f"{esi_val:016b}"
+                ptype_bits = f"{ptype_val:04b}"
 
                 header_bits = (
                     f"{img_id:016b}"
@@ -531,7 +537,7 @@ class DigitalTurboFECDecoder(BaseDecoder):
                     f"{tile_y:08b}"
                     f"{payload_len:016b}"
                 )
-                line = f"{header_bits}{payload_bits}{snr_bits}\n"
+                line = f"{header_bits}{payload_bits}{snr_bits}{esi_bits}{ptype_bits}\n"
                 f.write(line)
                 success_count += 1
 

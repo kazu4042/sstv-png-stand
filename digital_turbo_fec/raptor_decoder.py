@@ -158,7 +158,7 @@ class RaptorRSDecoder:
         if fast_calculate_crc16(decoded_data[:5]) != hdr_crc:
             return None
 
-        max_esi = self.cfg.total_tiles + self.cfg.raptor_repair_count + 64
+        max_esi = getattr(self.cfg, "expected_total_packets", self.cfg.total_tiles + self.cfg.raptor_repair_count) + 128
         if pkt_type not in (self.cfg.TYPE_DATA, self.cfg.TYPE_REPAIR) or esi >= max_esi:
             return None
 
@@ -176,7 +176,7 @@ class RaptorRSDecoder:
                 return None
             if t_len < 1 or t_len > self.cfg.rs_data_chunk_size * t_num_pkts:
                 return None
-            if getattr(self.cfg, "enable_header_stripping", True) and t_num_pkts == 1:
+            if getattr(self.cfg, "enable_header_stripping", True) and t_num_pkts == 1 and self.cfg.rs_data_chunk_size >= 200:
                 if tile_id != esi:
                     return None
 

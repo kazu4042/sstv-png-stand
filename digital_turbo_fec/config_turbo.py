@@ -50,13 +50,15 @@ VALID_BAND_MAX = 9000
 BANDPASS_ENABLE = True    # 受信時のノイズフィルタを有効にするか
 
 # ========================================================
-# 🛡️ Raptor ＋ RS 二重冗長 FEC 特有パラメータ
+# 🛡️ Raptor ＋ RS 二重冗長 FEC 特有パラメータ (104B固定長 / 冗長率30%)
 # ========================================================
-RS_NSYM = 32                      # RS(255, 223) パリティバイト数 (最大16B自動誤り訂正、イレイジャ時最大32B)
-RS_TOTAL_SIZE = 255               # パケット総サイズ (255B固定長)
-RS_PAYLOAD_SIZE = 216             # RSペイロード長 (タグ5B + 実データ211B)
+RS_NSYM = 32                      # RS(104, 72) パリティバイト数 (最大16B自動誤り訂正、イレイジャ時最大32B)
+RS_TOTAL_SIZE = 104               # パケット総サイズ (104B固定長: ヘッダ7B + ペイロード65B + パリティ32B)
+RS_PAYLOAD_SIZE = 65              # RSペイロード長 (タグ5B + 実データ60B)
 TAG_SIZE = 5                      # 自己完結タグ長 (tile_id, seq, num_pkts, data_len)
-RAPTOR_REPAIR_COUNT = 64          # 万能ラプター消去リペアパケット数 (R=64, 20%欠落でも100%全再生)
+RS_DATA_CHUNK_SIZE = 60           # 1パケットあたりのタイル実データ格納枠 (60B)
+EXPECTED_DATA_PACKETS = 602       # 想定データパケット数 (256タイル分割計602個)
+RAPTOR_REPAIR_COUNT = 181         # 万能ラプター消去リペアパケット数 (R=181, 冗長率30%, 全783パケット / 約22.0分)
 USE_GLOBAL_MDS = True             # 大域 Cauchy MDS (特異点ゼロ・ブロック分割撤廃)
 MAX_SUBBLOCK_SIZE = 0             # 0: 分割なし (大域MDS)
 RAPTOR_SEED = 42

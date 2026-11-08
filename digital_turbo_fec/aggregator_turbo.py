@@ -106,18 +106,24 @@ class TurboFECAggregator(BaseAggregator):
                             idx += config.BIT_PAYLOAD_LENGTH
 
                             payload_bits = line[idx : idx + payload_len * 8]
-                            snr_str = line[idx + payload_len * 8 :]
-                            snr_val = float(int(snr_str, 2)) if len(snr_str) == 4 else 1.0
+                            tail_str = line[idx + payload_len * 8 :]
+                            expected_k = getattr(RAPTOR_CFG, "expected_data_packets", getattr(config, "EXPECTED_DATA_PACKETS", config.TOTAL_TILES))
 
-                            esi = None
-                            pkt_type = 0
-                            if tile_x == 0xFF:
-                                pkt_type = 1  # リペアパケット
-                                if tile_y < 0xFF:
-                                    esi = config.TOTAL_TILES + tile_y
+                            if len(tail_str) >= 24:
+                                snr_val = float(int(tail_str[:4], 2))
+                                esi = int(tail_str[4:20], 2)
+                                pkt_type = int(tail_str[20:24], 2)
                             else:
-                                pkt_type = 0  # データパケット
-                                esi = tile_y * config.TILE_COUNT_X + tile_x
+                                snr_val = float(int(tail_str[:4], 2)) if len(tail_str) >= 4 else 1.0
+                                esi = None
+                                pkt_type = 0
+                                if tile_x == 0xFF:
+                                    pkt_type = 1  # リペアパケット
+                                    if tile_y < 0xFF:
+                                        esi = expected_k + tile_y
+                                else:
+                                    pkt_type = 0  # データパケット
+                                    esi = tile_y * config.TILE_COUNT_X + tile_x
 
                             file_packets.append((img_id, tile_x, tile_y, payload_len, payload_bits, snr_val, esi, pkt_type))
                         except Exception:
@@ -173,112 +179,149 @@ class TurboFECAggregator(BaseAggregator):
         web_static_out = os.path.join(_PROJECT_ROOT, "web_turbo_png", "static", "output")
         web_out_path = os.path.join(web_static_out, img_filename)
 
-        agg = RaptorRSAggregator(RAPTOR_CFG, total_source_packets=config.TOTAL_TILES)
+        expected_k = getattr(RAPTOR_CFG, "expected_data_packets", getattr(config, "EXPECTED_DATA_PACKETS", config.TOTAL_TILES))
+        agg = RaptorRSAggregator(RAPTOR_CFG, total_source_packets=expected_k)
         from digital_turbo_fec.fec_engine import fast_bit_majority_vote
+
+        # パケットを ESI (または (tile_id, tile_seq)) 単位でグループ化し、同一パケットの複数局受信に対してビット多数決を適用
+        data_groups: Dict[Tuple[int, int], List[Tuple[bytes, float, Optional[int]]]] = defaultdict(list)
+        repair_groups: Dict[int, List[Tuple[bytes, float]]] = defaultdict(list)
 
         for ty in sorted(tiles_data.keys()):
             for tx in sorted(tiles_data[ty].keys()):
                 for plen, pkts in tiles_data[ty][tx].items():
-                    cand_payloads = []
-                    cand_snrs = []
-                    last_esi_val = None
-
                     for p in pkts:
                         pbits, snr_val, fname, uid, imp_at, esi_val, ptype_val = p
                         payload_bytes = self.bits_to_bytes(pbits[:plen * 8])
                         if not payload_bytes:
                             continue
-                        cand_payloads.append(payload_bytes)
-                        cand_snrs.append(max(0.1, float(snr_val) + 1.0))
-                        if esi_val is not None:
-                            last_esi_val = int(esi_val)
+                        w_snr = max(0.1, float(snr_val) + 1.0)
+                        e_int = int(esi_val) if esi_val is not None else None
 
-                        if tx < config.TILE_COUNT_X and ty < config.TILE_COUNT_Y:
+                        if tx < config.TILE_COUNT_X and ty < config.TILE_COUNT_Y and ptype_val == 0:
                             tile_id = ty * config.TILE_COUNT_X + tx
                             tile_seq = 0
-                            tile_num_pkts = 1
-                            tile_len = len(payload_bytes) - config.TAG_SIZE if len(payload_bytes) > config.TAG_SIZE else len(payload_bytes)
                             if len(payload_bytes) >= 5:
                                 try:
                                     _, t_s, t_np, t_l = struct.unpack(">BBBH", payload_bytes[:5])
-                                    if 1 <= t_np <= 8 and 1 <= t_l <= config.RS_DATA_CHUNK_SIZE * t_np:
+                                    if 1 <= t_np <= 8 and 0 <= t_s < t_np:
                                         tile_seq = t_s
-                                        tile_num_pkts = t_np
-                                        tile_len = t_l
                                 except Exception:
                                     pass
+                            data_groups[(tile_id, tile_seq)].append((payload_bytes, w_snr, e_int))
+                        elif tx == 0xFF or ptype_val == 1:
+                            rep_esi = e_int
+                            if rep_esi is None or rep_esi < expected_k:
+                                if ty < 0xFF:
+                                    rep_esi = expected_k + ty
+                            if rep_esi is not None:
+                                repair_groups[rep_esi].append((payload_bytes, w_snr))
 
-                            pkt_info = {
-                                "is_valid": True,
-                                "corrected_bytes": 0,
-                                "packet_id": tile_id,
-                                "img_id": img_id,
-                                "pkt_type": config.TYPE_DATA if hasattr(config, "TYPE_DATA") else 0,
-                                "esi": tile_id,
-                                "tile_id": tile_id,
-                                "tile_seq": tile_seq,
-                                "tile_num_pkts": tile_num_pkts,
-                                "tile_data_len": tile_len,
-                                "payload": payload_bytes,
-                                "raw_rs_block": payload_bytes + b"\x00" * config.RS_NSYM,
-                                "snr_db": float(snr_val)
-                            }
-                            agg.add_packet(pkt_info)
+        # 1. データパケット群の多数決統合 ＆ アグリゲータ投入
+        for (tile_id, tile_seq), items in sorted(data_groups.items()):
+            # 最優先ペイロード長 (65B = config.RS_PAYLOAD_SIZE) または最大重み長に揃える
+            target_len = config.RS_PAYLOAD_SIZE
+            same_len_items = [it for it in items if len(it[0]) == target_len]
+            if not same_len_items:
+                best_len = max(items, key=lambda x: x[1])[0]
+                same_len_items = [it for it in items if len(it[0]) == len(best_len)]
+            cand_payloads = [it[0] for it in same_len_items]
+            cand_snrs = [it[1] for it in same_len_items]
+            valid_esis = [it[2] for it in same_len_items if it[2] is not None]
+            pkt_esi = valid_esis[0] if valid_esis else tile_id
 
-                    if not cand_payloads:
-                        continue
+            if len(cand_payloads) >= 2:
+                voted_bytes = fast_bit_majority_vote(cand_payloads, weights=cand_snrs)
+            else:
+                voted_bytes = cand_payloads[0]
+            best_snr = float(max(cand_snrs))
 
-                    # 同一座標または同一リペアESIに対して複数局の受信がある場合、SNR重み付けビット多数決で最適シンボルを確定
-                    if len(cand_payloads) >= 2:
-                        voted_bytes = fast_bit_majority_vote(cand_payloads, weights=cand_snrs)
-                    else:
-                        voted_bytes = cand_payloads[0]
-                    best_snr = float(max(cand_snrs))
+            tile_num_pkts = 1
+            tile_len = len(voted_bytes) - config.TAG_SIZE if len(voted_bytes) > config.TAG_SIZE else len(voted_bytes)
+            if len(voted_bytes) >= 5:
+                try:
+                    _, t_s, t_np, t_l = struct.unpack(">BBBH", voted_bytes[:5])
+                    if 1 <= t_np <= 8 and 1 <= t_l <= RAPTOR_CFG.rs_data_chunk_size * t_np:
+                        tile_seq = t_s
+                        tile_num_pkts = t_np
+                        tile_len = t_l
+                except Exception:
+                    pass
 
-                    if tx < config.TILE_COUNT_X and ty < config.TILE_COUNT_Y:
-                        tile_id = ty * config.TILE_COUNT_X + tx
-                        agg.raptor_symbols[tile_id] = voted_bytes
-                    elif tx == 0xFF:
-                        rep_esi = None
-                        if ty < 0xFF:
-                            rep_esi = config.TOTAL_TILES + ty
-                        elif last_esi_val is not None and last_esi_val >= config.TOTAL_TILES:
-                            rep_esi = last_esi_val
+            pkt_info = {
+                "is_valid": True,
+                "corrected_bytes": 0,
+                "packet_id": pkt_esi,
+                "img_id": img_id,
+                "pkt_type": 0,
+                "esi": pkt_esi,
+                "tile_id": tile_id,
+                "tile_seq": tile_seq,
+                "tile_num_pkts": tile_num_pkts,
+                "tile_data_len": tile_len,
+                "payload": voted_bytes,
+                "raw_rs_block": voted_bytes + b"\x00" * config.RS_NSYM,
+                "snr_db": best_snr
+            }
+            agg.add_packet(pkt_info)
+            agg.raptor_symbols[pkt_esi] = voted_bytes
 
-                        if rep_esi is not None:
-                            pkt_info = {
-                                "is_valid": True,
-                                "corrected_bytes": 0,
-                                "packet_id": rep_esi,
-                                "img_id": img_id,
-                                "pkt_type": 1,
-                                "esi": rep_esi,
-                                "tile_id": 0xFF,
-                                "tile_seq": -1,
-                                "tile_num_pkts": -1,
-                                "tile_data_len": -1,
-                                "payload": voted_bytes,
-                                "raw_rs_block": voted_bytes + b"\x00" * config.RS_NSYM,
-                                "snr_db": best_snr
-                            }
-                            agg.add_packet(pkt_info)
+        # 2. リペアパケット群の多数決統合 ＆ アグリゲータ投入
+        for rep_esi, items in sorted(repair_groups.items()):
+            target_len = config.RS_PAYLOAD_SIZE
+            same_len_items = [it for it in items if len(it[0]) == target_len]
+            if not same_len_items:
+                best_len = max(items, key=lambda x: x[1])[0]
+                same_len_items = [it for it in items if len(it[0]) == len(best_len)]
+            cand_payloads = [it[0] for it in same_len_items]
+            cand_snrs = [it[1] for it in same_len_items]
+            if len(cand_payloads) >= 2:
+                voted_bytes = fast_bit_majority_vote(cand_payloads, weights=cand_snrs)
+            else:
+                voted_bytes = cand_payloads[0]
+            best_snr = float(max(cand_snrs))
 
-        # 第4防壁: ラプター消去復元
+            pkt_info = {
+                "is_valid": True,
+                "corrected_bytes": 0,
+                "packet_id": rep_esi,
+                "img_id": img_id,
+                "pkt_type": 1,
+                "esi": rep_esi,
+                "tile_id": 0xFF,
+                "tile_seq": -1,
+                "tile_num_pkts": -1,
+                "tile_data_len": -1,
+                "payload": voted_bytes,
+                "raw_rs_block": voted_bytes + b"\x00" * config.RS_NSYM,
+                "snr_db": best_snr
+            }
+            agg.add_packet(pkt_info)
+
+        direct_rendered = set(agg.rendered_tiles)
+
+        # 第4防壁: ラプター消去復元 (全データパケット K=602 個中、未到達分を一括生成)
         agg.run_raptor_recovery()
+        raptor_rendered = set(agg.rendered_tiles) - direct_rendered
 
         # 第5防壁: RSTスキップ補間
         agg.finalize_tiles()
 
-        # 全体統合時は確定・ラプター復元済みタイルを DB の finalized_tiles テーブルへ同期保存
+        # 全体統合時は確定・ラプター復元済みタイルを DB の finalized_tiles テーブルへ PNG バイナリとして同期保存
         if target_user_id is None:
             finalized_rows = []
-            for esi_idx in range(config.TOTAL_TILES):
-                tx = esi_idx % config.TILE_COUNT_X
-                ty = esi_idx // config.TILE_COUNT_X
-                if (tx, ty) in agg.rendered_tiles and esi_idx in agg.raptor_symbols:
-                    is_direct = (ty in tiles_data and tx in tiles_data[ty])
-                    stage_label = "DIRECT_RS" if is_direct else "RAPTOR_MDS"
-                    finalized_rows.append((tx, ty, agg.raptor_symbols[esi_idx], stage_label))
+            ts = config.TILE_SIZE
+            for ty in range(config.TILE_COUNT_Y):
+                for tx in range(config.TILE_COUNT_X):
+                    if (tx, ty) in agg.rendered_tiles:
+                        y0, y1 = ty * ts, min((ty + 1) * ts, config.HEIGHT)
+                        x0, x1 = tx * ts, min((tx + 1) * ts, config.WIDTH)
+                        tile_arr = agg.canvas[y0:y1, x0:x1]
+                        with io.BytesIO() as bio:
+                            Image.fromarray(tile_arr).save(bio, format="PNG")
+                            tile_png_bytes = bio.getvalue()
+                        stage_label = "RAPTOR_MDS" if (tx, ty) in raptor_rendered else "DIRECT_RS"
+                        finalized_rows.append((tx, ty, tile_png_bytes, stage_label))
             if finalized_rows:
                 try:
                     self.db.upsert_finalized_tiles(img_id, finalized_rows)

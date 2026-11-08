@@ -366,13 +366,15 @@ class TurboPNGAnalyzerService:
         cursor.execute("""
             SELECT
                 COUNT(DISTINCT CASE WHEN tile_x < 255 AND tile_y < 255 THEN tile_y || '_' || tile_x ELSE NULL END),
-                COUNT(DISTINCT CASE WHEN tile_x = 255 AND tile_y < 255 THEN tile_y ELSE NULL END)
+                COUNT(DISTINCT CASE WHEN tile_x = 255 AND tile_y < 255 THEN COALESCE(esi, 602 + tile_y) ELSE NULL END),
+                COUNT(DISTINCT CASE WHEN tile_x < 255 AND tile_y < 255 THEN COALESCE(esi, tile_y * 16 + tile_x) ELSE NULL END)
             FROM packets
             WHERE image_id = ?
         """, (target_id_int,))
         row_net = cursor.fetchone()
         source_tiles_received = int(row_net[0] or 0) if row_net else 0
         repair_packets_received = int(row_net[1] or 0) if row_net else 0
+        source_packets_received = int(row_net[2] or 0) if row_net else 0
 
         finalized_count = 0
         raptor_recovered_count = 0
@@ -390,9 +392,13 @@ class TurboPNGAnalyzerService:
             except Exception:
                 pass
 
+        expected_data_packets = getattr(config, "EXPECTED_DATA_PACKETS", total_required)
         network_received = min(total_required, max(source_tiles_received, finalized_count))
         network_score = round((network_received / total_required) * 100, 1) if total_required > 0 else 0.0
-        remaining_for_raptor = max(0, total_required - (source_tiles_received + repair_packets_received))
+        if raptor_recovered_count > 0 or network_received >= total_required:
+            remaining_for_raptor = 0
+        else:
+            remaining_for_raptor = max(0, expected_data_packets - (source_packets_received + repair_packets_received))
 
         user_has_data = False
         user_packet_count = 0
@@ -471,9 +477,11 @@ class TurboPNGAnalyzerService:
             "user_score": user_score,
             "network_received": network_received,
             "source_tiles_received": source_tiles_received,
+            "source_packets_received": source_packets_received,
             "repair_packets_received": repair_packets_received,
             "raptor_recovered_count": raptor_recovered_count,
             "remaining_for_raptor": remaining_for_raptor,
+            "expected_data_packets": expected_data_packets,
             "network_score": network_score,
             "total_required": total_required,
             "user_img_url": user_img_url,

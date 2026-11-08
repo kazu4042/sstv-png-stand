@@ -36,13 +36,13 @@ class SystemConfig:
     TYPE_REPAIR: int = 0x01
     rs_header_size: int = 7
     tag_size: int = 5
-    rs_payload_size: int = 216
+    rs_payload_size: int = 65
     rs_nsym: int = 32
     magic_size: int = 0
     magic_bytes: bytes = b""
 
     # 4. ラプター消去訂正符号
-    raptor_repair_count: int = 64
+    raptor_repair_count: int = 181
     use_global_mds: bool = True
     max_subblock_size: int = 0
     raptor_seed: int = 42
@@ -152,9 +152,19 @@ class SystemConfig:
 
     @property
     def expected_data_packets(self) -> int:
-        if self.enable_header_stripping:
-            return self.total_tiles
-        return self.total_tiles * 4
+        if not self.enable_header_stripping:
+            return self.total_tiles * 4
+        chunk = self.rs_data_chunk_size
+        if chunk >= 204:
+            return 256
+        elif chunk >= 66:
+            return 562
+        elif chunk >= 61:
+            return 595
+        elif chunk >= 60:
+            return 602
+        else:
+            return max(256, int(round(28946 / max(1, chunk))))
 
     @property
     def expected_total_packets(self) -> int:

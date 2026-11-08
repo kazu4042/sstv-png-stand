@@ -114,7 +114,7 @@ def parse_turbo_log_line(line, config_module=None):
         payload_length = int(line[idx:idx + config.BIT_PAYLOAD_LENGTH], 2);  idx += config.BIT_PAYLOAD_LENGTH
         payload_bits   = line[idx:idx + payload_length * 8]
         snr_str        = line[idx + payload_length * 8:]
-        snr_val = float(int(snr_str, 2)) if len(snr_str) == 4 else 1.0
+        snr_val = float(int(snr_str[:4], 2)) if len(snr_str) >= 4 else 1.0
         return (img_id, tile_x, tile_y, payload_length, payload_bits, snr_val)
     except (ValueError, IndexError):
         return None
@@ -377,25 +377,34 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                             tile_img = tile_img.crop((0, 0, crop_w, crop_h))
                             user_image_buffer.paste(tile_img, (paste_x, paste_y))
 
-            # FECモードで今回の送信分だけでデータ＋リペアが所定タイル数(256)以上揃っている場合、ラプター消去復元を適用
-            if mode_name == "FEC" and len(packets) >= total_required_packets:
+            # FECモードでは今回の送信分に対して常にRaptor+RSアグリゲーション(複数分割チャンク合成・RST補間・ラプター復元)を適用
+            if mode_name == "FEC":
                 try:
+                    import struct
                     from digital_turbo_fec.raptor_aggregator import RaptorRSAggregator
                     from digital_turbo_fec.config import RAPTOR_CFG
-                    u_agg = RaptorRSAggregator(RAPTOR_CFG, total_source_packets=total_required_packets)
+                    expected_k = getattr(RAPTOR_CFG, "expected_data_packets", total_required_packets)
+                    u_agg = RaptorRSAggregator(RAPTOR_CFG, total_source_packets=expected_k)
+                    seq_counter = 0
                     for parsed in packets:
                         p_img_id, p_tx, p_ty, p_len, p_bits, p_snr = parsed
                         p_b = bytes(bits_to_bytearray(p_bits)[:p_len])
-                        if p_tx < config.TILE_COUNT_X and p_ty < config.TILE_COUNT_Y:
-                            t_id = p_ty * config.TILE_COUNT_X + p_tx
+                        if p_tx < config.TILE_COUNT_X and p_ty < config.TILE_COUNT_Y and len(p_b) >= 5:
+                            t_id, t_seq, t_np, t_len = struct.unpack(">BBBH", p_b[:5])
+                            if t_id >= config.TOTAL_TILES or t_np < 1 or t_np > 8 or t_seq >= t_np:
+                                t_id = p_ty * config.TILE_COUNT_X + p_tx
+                                t_seq = 0
+                                t_np = 1
+                                t_len = max(1, len(p_b) - 5)
                             u_agg.add_packet({
-                                "is_valid": True, "corrected_bytes": 0, "packet_id": t_id,
-                                "img_id": p_img_id, "pkt_type": 0, "esi": t_id, "tile_id": t_id,
-                                "tile_seq": 0, "tile_num_pkts": 1, "tile_data_len": max(1, len(p_b) - 5),
+                                "is_valid": True, "corrected_bytes": 0, "packet_id": seq_counter,
+                                "img_id": p_img_id, "pkt_type": 0, "esi": seq_counter, "tile_id": t_id,
+                                "tile_seq": t_seq, "tile_num_pkts": t_np, "tile_data_len": t_len,
                                 "payload": p_b, "raw_rs_block": p_b + b"\x00" * 32, "snr_db": float(p_snr)
                             })
+                            seq_counter += 1
                         elif p_tx == 0xFF and p_ty < 0xFF:
-                            r_esi = total_required_packets + p_ty
+                            r_esi = expected_k + p_ty
                             u_agg.add_packet({
                                 "is_valid": True, "corrected_bytes": 0, "packet_id": r_esi,
                                 "img_id": p_img_id, "pkt_type": 1, "esi": r_esi, "tile_id": 0xFF,
@@ -406,7 +415,7 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                     u_agg.finalize_tiles()
                     if len(u_agg.rendered_tiles) > 0:
                         user_image_buffer = Image.fromarray(u_agg.canvas)
-                        matched_packets = max(matched_packets, len(u_agg.rendered_tiles))
+                        matched_packets = len(u_agg.rendered_tiles)
                 except Exception:
                     pass
 
@@ -476,24 +485,34 @@ def process_upload(filepath, original_filename, job_id, app, user_id):
                 if mode_name == "FEC" and hasattr(aggregator, "process_single_image"):
                     try:
                         # FECモードではユーザーの累積パケットに対してもRaptor+RSアグリゲーションを適用
+                        import struct
                         from digital_turbo_fec.raptor_aggregator import RaptorRSAggregator
                         from digital_turbo_fec.config import RAPTOR_CFG
-                        uc_agg = RaptorRSAggregator(RAPTOR_CFG, total_source_packets=total_required_packets)
+                        expected_k = getattr(RAPTOR_CFG, "expected_data_packets", total_required_packets)
+                        uc_agg = RaptorRSAggregator(RAPTOR_CFG, total_source_packets=expected_k)
                         for ty_c, tx_dict in user_db_tiles.items():
                             for tx_c, plen_dict in tx_dict.items():
                                 for plen_c, pkts_c in plen_dict.items():
                                     for p_c in pkts_c:
                                         p_b = bytes(bits_to_bytearray(p_c[0])[:plen_c])
-                                        if tx_c < config.TILE_COUNT_X and ty_c < config.TILE_COUNT_Y:
-                                            t_id = ty_c * config.TILE_COUNT_X + tx_c
+                                        e_val = p_c[5] if len(p_c) > 5 else None
+                                        pt_val = p_c[6] if len(p_c) > 6 else 0
+                                        if tx_c < config.TILE_COUNT_X and ty_c < config.TILE_COUNT_Y and pt_val == 0 and len(p_b) >= 5:
+                                            t_id, t_seq, t_np, t_len = struct.unpack(">BBBH", p_b[:5])
+                                            if t_id >= config.TOTAL_TILES or t_np < 1 or t_np > 8 or t_seq >= t_np:
+                                                t_id = ty_c * config.TILE_COUNT_X + tx_c
+                                                t_seq = 0
+                                                t_np = 1
+                                                t_len = max(1, len(p_b) - 5)
+                                            pkt_esi = int(e_val) if e_val is not None else t_id
                                             uc_agg.add_packet({
-                                                "is_valid": True, "corrected_bytes": 0, "packet_id": t_id,
-                                                "img_id": u_img_id_int, "pkt_type": 0, "esi": t_id, "tile_id": t_id,
-                                                "tile_seq": 0, "tile_num_pkts": 1, "tile_data_len": max(1, len(p_b) - 5),
+                                                "is_valid": True, "corrected_bytes": 0, "packet_id": pkt_esi,
+                                                "img_id": u_img_id_int, "pkt_type": 0, "esi": pkt_esi, "tile_id": t_id,
+                                                "tile_seq": t_seq, "tile_num_pkts": t_np, "tile_data_len": t_len,
                                                 "payload": p_b, "raw_rs_block": p_b + b"\x00" * 32, "snr_db": float(p_c[1])
                                             })
-                                        elif tx_c == 0xFF and ty_c < 0xFF:
-                                            r_esi = total_required_packets + ty_c
+                                        elif tx_c == 0xFF or pt_val == 1:
+                                            r_esi = int(e_val) if (e_val is not None and int(e_val) >= expected_k) else (expected_k + ty_c)
                                             uc_agg.add_packet({
                                                 "is_valid": True, "corrected_bytes": 0, "packet_id": r_esi,
                                                 "img_id": u_img_id_int, "pkt_type": 1, "esi": r_esi, "tile_id": 0xFF,
