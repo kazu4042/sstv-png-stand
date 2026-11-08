@@ -279,7 +279,7 @@ class TurboPNGAnalyzerService:
         
         target_patterns = ["*.png", "*.jpg", "*.jpeg"]
         if mode_only:
-            target_patterns = ["*.jpg", "*.jpeg"] if effective_mode == "JPEG" else ["*.png"]
+            target_patterns = ["*.jpg", "*.jpeg"] if effective_mode in ("JPEG", "FEC") else ["*.png"]
 
         for dir_path in directories_to_clean:
             if not os.path.exists(dir_path):

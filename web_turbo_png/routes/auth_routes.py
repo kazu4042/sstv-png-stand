@@ -127,7 +127,17 @@ def admin_dashboard():
     for img in images_jpeg:
         img['engine_mode'] = 'JPEG'
 
-    current_images = images_jpeg if current_engine_mode == 'JPEG' else images_png
+    analyzer_fec = get_analyzer(mode='FEC')
+    images_fec = analyzer_fec.get_all_images_summary(mode='FEC')
+    for img in images_fec:
+        img['engine_mode'] = 'FEC'
+
+    if current_engine_mode == 'JPEG':
+        current_images = images_jpeg
+    elif current_engine_mode == 'FEC':
+        current_images = images_fec
+    else:
+        current_images = images_png
 
     from web_turbo_png.services.audio_manager import AudioManager
     audio_tracks, active_tracks = AudioManager.list_tracks()
@@ -140,7 +150,8 @@ def admin_dashboard():
         images=current_images,
         png_count=len(images_png),
         jpeg_count=len(images_jpeg),
-        all_count=len(images_png) + len(images_jpeg),
+        fec_count=len(images_fec),
+        all_count=len(images_png) + len(images_jpeg) + len(images_fec),
         current_engine_mode=current_engine_mode,
         audio_tracks=audio_tracks,
         active_tracks=active_tracks,
@@ -154,7 +165,7 @@ def get_admin_submissions(filter_mode=None, filter_user_id=None, search_keyword=
     """
     管理者ダッシュボード用:
     各ユーザーの音声投稿セッション（どのログ/セッションか、どの画像IDか、何パケットか、何%復元されたか）
-    を集計して返す。PNGとJPEGの両方のパケットDBから情報を統合。
+    を集計して返す。PNG・JPEG・FECすべてのパケットDBから情報を統合。
     """
     import sqlite3
     import re
@@ -173,15 +184,19 @@ def get_admin_submissions(filter_mode=None, filter_user_id=None, search_keyword=
 
     submissions = []
     modes_to_query = []
-    if filter_mode and filter_mode.upper() in ('PNG', 'JPEG'):
+    if filter_mode and filter_mode.upper() in ('PNG', 'JPEG', 'FEC'):
         modes_to_query = [filter_mode.upper()]
     else:
-        modes_to_query = ['PNG', 'JPEG']
+        modes_to_query = ['FEC', 'JPEG', 'PNG']
 
     static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
 
     for mode in modes_to_query:
-        if mode == 'JPEG':
+        if mode == 'FEC':
+            db_path = os.path.join(ROOT_DIR, "data/digital_turbo_fec/logs/sstv_packets_turbo_fec.db")
+            conf_tiles = 256
+            ext = ".jpg"
+        elif mode == 'JPEG':
             db_path = os.path.join(ROOT_DIR, "data/digital_turbo_jpeg/logs/sstv_packets_turbo_jpeg.db")
             conf_tiles = 256
             ext = ".jpg"
@@ -201,12 +216,20 @@ def get_admin_submissions(filter_mode=None, filter_user_id=None, search_keyword=
                 conn.close()
                 continue
 
-            query = """
-                SELECT file_name, user_id, image_id, COUNT(*) as pkt_count,
-                       COUNT(DISTINCT tile_y || '_' || tile_x) as tile_count,
-                       AVG(snr) as avg_snr, MIN(imported_at) as first_imp, MAX(imported_at) as last_imp
-                FROM packets
-            """
+            if mode == 'FEC':
+                query = """
+                    SELECT file_name, user_id, image_id, COUNT(*) as pkt_count,
+                           COUNT(DISTINCT CASE WHEN tile_x < 255 AND tile_y < 255 THEN tile_y || '_' || tile_x ELSE NULL END) as tile_count,
+                           AVG(snr) as avg_snr, MIN(imported_at) as first_imp, MAX(imported_at) as last_imp
+                    FROM packets
+                """
+            else:
+                query = """
+                    SELECT file_name, user_id, image_id, COUNT(*) as pkt_count,
+                           COUNT(DISTINCT tile_y || '_' || tile_x) as tile_count,
+                           AVG(snr) as avg_snr, MIN(imported_at) as first_imp, MAX(imported_at) as last_imp
+                    FROM packets
+                """
             params = []
             where_clauses = []
 
@@ -322,7 +345,7 @@ def admin_get_submissions():
     search = request.args.get('q') or request.args.get('search')
     limit = request.args.get('limit', 200, type=int)
 
-    filter_mode = mode if mode in ('PNG', 'JPEG') else None
+    filter_mode = mode if mode in ('PNG', 'JPEG', 'FEC') else None
     filter_user_id = None
     if user_id and user_id.lower() != 'all':
         filter_user_id = user_id
@@ -366,14 +389,26 @@ def admin_get_images():
     for img in images_jpeg:
         img['engine_mode'] = 'JPEG'
 
+    analyzer_fec = get_analyzer(mode='FEC')
+    images_fec = analyzer_fec.get_all_images_summary(mode='FEC')
+    for img in images_fec:
+        img['engine_mode'] = 'FEC'
+
     if req_mode == 'PNG':
         display_images = images_png
     elif req_mode == 'JPEG':
         display_images = images_jpeg
+    elif req_mode == 'FEC':
+        display_images = images_fec
     elif req_mode == 'ALL':
-        display_images = images_png + images_jpeg
+        display_images = images_fec + images_jpeg + images_png
     else:
-        display_images = images_jpeg if current_mode == 'JPEG' else images_png
+        if current_mode == 'JPEG':
+            display_images = images_jpeg
+        elif current_mode == 'FEC':
+            display_images = images_fec
+        else:
+            display_images = images_png
 
     return jsonify({
         'status': 'success',
@@ -383,7 +418,8 @@ def admin_get_images():
         'count': len(display_images),
         'png_count': len(images_png),
         'jpeg_count': len(images_jpeg),
-        'all_count': len(images_png) + len(images_jpeg)
+        'fec_count': len(images_fec),
+        'all_count': len(images_png) + len(images_jpeg) + len(images_fec)
     })
 
 
@@ -516,7 +552,7 @@ def admin_clear_all_images():
     from web_turbo_png.routes.api_routes import get_analyzer
     analyzer = get_analyzer()
 
-    if mode_target and mode_target.upper() in ('PNG', 'JPEG'):
+    if mode_target and mode_target.upper() in ('PNG', 'JPEG', 'FEC'):
         target_m = mode_target.upper()
         result = analyzer.clear_all_images(mode_only=True, target_mode=target_m)
         msg = f"{target_m} エンジンの画像データをクリアしました（パケット数: {result['deleted_packets']}）"

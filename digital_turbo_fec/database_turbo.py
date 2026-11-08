@@ -346,6 +346,131 @@ class PacketDatabaseRaptorFEC:
             })
         return history
 
+    def get_top_contributors(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """パケット提供数の多いユーザーランキング"""
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT 
+                user_id,
+                COUNT(*) as packet_count,
+                COUNT(DISTINCT image_id) as image_count,
+                COUNT(DISTINCT CASE WHEN tile_x < 255 AND tile_y < 255 THEN tile_y || '_' || tile_x ELSE NULL END) as tile_count,
+                AVG(snr) as avg_snr,
+                MAX(imported_at) as last_seen
+            FROM packets
+            WHERE user_id IS NOT NULL
+            GROUP BY user_id
+            ORDER BY packet_count DESC
+            LIMIT ?
+        """, (limit,))
+        results = []
+        for row in cursor.fetchall():
+            u_id, p_count, img_count, t_count, a_snr, l_seen = row
+            results.append({
+                "user_id": u_id,
+                "packet_count": p_count,
+                "image_count": img_count,
+                "tile_count": t_count,
+                "avg_snr": round(a_snr or 0.0, 1),
+                "last_seen": l_seen
+            })
+        return results
+
+    def get_hourly_packet_traffic(self, period: str = 'today') -> Dict[str, Any]:
+        """パケット受信量の時系列推移"""
+        from datetime import datetime, timedelta
+        cursor = self.conn.cursor()
+        labels = []
+        traffic_data = []
+
+        try:
+            if period == 'today':
+                today_str = datetime.now().strftime('%Y-%m-%d')
+                cursor.execute("""
+                    SELECT strftime('%H', imported_at) as hour,
+                           COUNT(*) as packet_count
+                    FROM packets
+                    WHERE date(imported_at) = ?
+                    GROUP BY hour
+                """, (today_str,))
+                hour_map = {row[0]: row[1] for row in cursor.fetchall()}
+                for h in range(24):
+                    h_str = f"{h:02d}"
+                    labels.append(f"{h_str}:00")
+                    traffic_data.append(hour_map.get(h_str, 0))
+
+            elif period == '24h':
+                since_time = (datetime.now() - timedelta(hours=23)).strftime('%Y-%m-%d %H:00:00')
+                cursor.execute("""
+                    SELECT strftime('%Y-%m-%d %H:00', imported_at) as hour_slot,
+                           COUNT(*) as packet_count
+                    FROM packets
+                    WHERE imported_at >= ?
+                    GROUP BY hour_slot
+                """, (since_time,))
+                slot_map = {row[0]: row[1] for row in cursor.fetchall()}
+                now = datetime.now()
+                for i in range(23, -1, -1):
+                    t = now - timedelta(hours=i)
+                    slot_key = t.strftime('%Y-%m-%d %H:00')
+                    labels.append(t.strftime('%H:00'))
+                    traffic_data.append(slot_map.get(slot_key, 0))
+
+            elif period in ['7d', '30d']:
+                days = 7 if period == '7d' else 30
+                since_date = (datetime.now() - timedelta(days=days - 1)).strftime('%Y-%m-%d 00:00:00')
+                cursor.execute("""
+                    SELECT date(imported_at) as day,
+                           COUNT(*) as packet_count
+                    FROM packets
+                    WHERE imported_at >= ?
+                    GROUP BY day
+                """, (since_date,))
+                day_map = {row[0]: row[1] for row in cursor.fetchall()}
+                now = datetime.now()
+                for i in range(days - 1, -1, -1):
+                    d = now - timedelta(days=i)
+                    day_key = d.strftime('%Y-%m-%d')
+                    labels.append(d.strftime('%m/%d'))
+                    traffic_data.append(day_map.get(day_key, 0))
+        except Exception as e:
+            print(f"[PacketDB-FEC] get_hourly_packet_traffic error: {e}")
+
+        return {
+            "period": period,
+            "labels": labels,
+            "packets": traffic_data
+        }
+
+    def get_system_storage_metrics(self) -> Dict[str, Any]:
+        """ストレージ使用量およびシステム統計"""
+        db_size_bytes = os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0
+        db_size_mb = round(db_size_bytes / (1024 * 1024), 2)
+
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM imported_files")
+        row_files = cursor.fetchone()
+        imported_files_count = row_files[0] if row_files else 0
+
+        cursor.execute("SELECT COUNT(*) FROM packets")
+        row_pkts = cursor.fetchone()
+        total_packets = row_pkts[0] if row_pkts else 0
+
+        return {
+            "db_size_mb": db_size_mb,
+            "imported_files_count": imported_files_count,
+            "total_packets": total_packets
+        }
+
+    def optimize_database(self) -> bool:
+        """DB の VACUUM 最適化を実行"""
+        try:
+            self.conn.execute("VACUUM")
+            return True
+        except Exception as e:
+            print(f"[PacketDB-FEC] Optimize error: {e}")
+            return False
+
     def close(self):
         try:
             self.conn.close()

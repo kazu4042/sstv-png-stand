@@ -166,9 +166,9 @@
                     </div>
 
                     <div class="mt-4">
-                        <h3 class="text-lg font-bold text-slate-900 flex items-center gap-2">
-                            JPEG デコードモード
-                            <span class="text-xs px-2 py-0.5 rounded font-mono font-bold bg-amber-100 text-amber-800 border border-amber-200">ざらざら感再現</span>
+                        <h3 class="text-lg font-bold text-slate-900 flex items-center gap-2 flex-wrap">
+                            <span class="whitespace-nowrap">JPEG デコードモード</span>
+                            <span class="text-xs px-2 py-0.5 rounded font-mono font-bold bg-amber-100 text-amber-800 border border-amber-200 whitespace-nowrap">ざらざら感再現</span>
                         </h3>
                         <p class="text-xs text-slate-600 mt-1 leading-relaxed">
                             超耐ノイズ・段階的復元。低SNRの悪条件下でも即座に大まかな輪郭が浮かび上がり、アナログSSTV特有のディテールを段階復元します。
@@ -199,21 +199,21 @@
                     </div>
 
                     <div class="mt-4">
-                        <h3 class="text-lg font-bold text-slate-900 flex items-center gap-2">
-                            FEC デコードモード
-                            <span class="text-xs px-2 py-0.5 rounded font-mono font-bold bg-purple-100 text-purple-800 border border-purple-200">Raptor + RS</span>
+                        <h3 class="text-lg font-bold text-slate-900 flex items-center gap-2 flex-wrap">
+                            <span class="whitespace-nowrap">FEC デコードモード</span>
+                            <span class="text-xs px-2 py-0.5 rounded font-mono font-bold bg-purple-100 text-purple-800 border border-purple-200 whitespace-nowrap">Raptor + RS (104B)</span>
                         </h3>
                         <p class="text-xs text-slate-600 mt-1 leading-relaxed">
-                            二重冗長 誤り訂正。RS(255,223) によるパケット内16B自動修復と、大域Cauchy MDS消去訂正による20%欠落100%全再生を実現します。
+                            二重冗長 誤り訂正。固定長104B・RS(104,72)によるパケット内16B自動修復と、大域Cauchy MDS消去訂正（全783パケット中602個で100%一括復元）を実現します。
                         </p>
                     </div>
 
                     <div class="mt-4 pt-4 border-t border-slate-200/60 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-slate-200">
-                            <i data-lucide="shield" class="w-3 h-3 text-purple-600"></i> 大域MDS消去訂正
+                            <i data-lucide="shield" class="w-3 h-3 text-purple-600"></i> 大域MDS消去訂正 (602/783)
                         </span>
                         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white border border-slate-200">
-                            <i data-lucide="cpu" class="w-3 h-3 text-purple-600"></i> RS(255,223) 二重保護
+                            <i data-lucide="cpu" class="w-3 h-3 text-purple-600"></i> RS(104,72) 固定長104B
                         </span>
                     </div>
                 </div>
@@ -331,11 +331,14 @@
                         <button onclick="setSubmissionModeFilter('ALL')" id="sub-mode-filter-all" class="px-2.5 py-1 rounded-md font-bold transition-all bg-white text-slate-900 shadow-xs">
                             すべて
                         </button>
-                        <button onclick="setSubmissionModeFilter('PNG')" id="sub-mode-filter-png" class="px-2.5 py-1 rounded-md font-bold transition-all text-slate-600 hover:text-slate-900">
-                            PNG
+                        <button onclick="setSubmissionModeFilter('FEC')" id="sub-mode-filter-fec" class="px-2.5 py-1 rounded-md font-bold transition-all text-slate-600 hover:text-slate-900">
+                            FEC
                         </button>
                         <button onclick="setSubmissionModeFilter('JPEG')" id="sub-mode-filter-jpeg" class="px-2.5 py-1 rounded-md font-bold transition-all text-slate-600 hover:text-slate-900">
                             JPEG
+                        </button>
+                        <button onclick="setSubmissionModeFilter('PNG')" id="sub-mode-filter-png" class="px-2.5 py-1 rounded-md font-bold transition-all text-slate-600 hover:text-slate-900">
+                            PNG
                         </button>
                     </div>
                 </div>
@@ -402,7 +405,9 @@
 
                                 <!-- モード -->
                                 <td class="py-3 px-4">
-                                    {% if sub.mode == 'JPEG' %}
+                                    {% if sub.mode == 'FEC' %}
+                                    <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-purple-100 text-purple-800 border border-purple-300">FEC</span>
+                                    {% elif sub.mode == 'JPEG' %}
                                     <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-800 border border-amber-300">JPEG</span>
                                     {% else %}
                                     <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">PNG</span>
@@ -423,7 +428,7 @@
                                 <td class="py-3 px-4">
                                     <div class="flex items-center gap-2">
                                         <div class="flex-1 bg-slate-200 rounded-full h-2 overflow-hidden min-w-[70px]">
-                                            <div class="{% if sub.mode == 'JPEG' %}bg-amber-600{% else %}bg-emerald-600{% endif %} h-2 rounded-full transition-all duration-500" style="width: {{ sub.restoration_score }}%;"></div>
+                                            <div class="{% if sub.mode == 'FEC' %}bg-purple-600{% elif sub.mode == 'JPEG' %}bg-amber-600{% else %}bg-emerald-600{% endif %} h-2 rounded-full transition-all duration-500" style="width: {{ sub.restoration_score }}%;"></div>
                                         </div>
                                         <span class="text-xs font-bold font-mono text-slate-900 shrink-0">{{ sub.restoration_score }}%</span>
                                     </div>
@@ -723,7 +728,9 @@
                             <td class="py-3.5 px-4">
                                 <div class="flex items-center gap-2">
                                     <span class="font-mono font-bold text-slate-900 text-base">0x{{ img.image_id_hex }}</span>
-                                    {% if (img.engine_mode or current_engine_mode) == 'JPEG' %}
+                                    {% if (img.engine_mode or current_engine_mode) == 'FEC' %}
+                                    <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-purple-100 text-purple-800 border border-purple-300">FEC</span>
+                                    {% elif (img.engine_mode or current_engine_mode) == 'JPEG' %}
                                     <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-100 text-amber-800 border border-amber-300">JPEG</span>
                                     {% else %}
                                     <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">PNG</span>
@@ -738,7 +745,7 @@
                             <td class="py-3.5 px-4">
                                 <div class="flex items-center gap-2">
                                     <div class="w-24 bg-slate-200 rounded-full h-2 overflow-hidden">
-                                        <div class="{% if (img.engine_mode or current_engine_mode) == 'JPEG' %}bg-amber-600{% else %}bg-emerald-600{% endif %} h-2 rounded-full transition-all duration-500" {{ ('style="width: %s%%;"' % (img.restoration_score or 0)) | safe }}></div>
+                                        <div class="{% if (img.engine_mode or current_engine_mode) == 'FEC' %}bg-purple-600{% elif (img.engine_mode or current_engine_mode) == 'JPEG' %}bg-amber-600{% else %}bg-emerald-600{% endif %} h-2 rounded-full transition-all duration-500" {{ ('style="width: %s%%;"' % (img.restoration_score or 0)) | safe }}></div>
                                     </div>
                                     <span class="text-xs font-bold font-mono text-slate-800">{{ img.restoration_score }}%</span>
                                 </div>
@@ -850,7 +857,7 @@
                 <div class="space-y-1.5 text-xs text-slate-600">
                     <label class="flex items-center gap-2 cursor-pointer">
                         <input type="radio" name="clear-scope" value="ALL" checked class="text-rose-600 focus:ring-rose-500 cursor-pointer">
-                        <span class="font-bold text-slate-800">すべての画像データ（PNG & JPEG 両方完全初期化）</span>
+                        <span class="font-bold text-slate-800">すべての画像データ（PNG / JPEG / FEC すべて完全初期化）</span>
                     </label>
                     <label class="flex items-center gap-2 cursor-pointer">
                         <input type="radio" name="clear-scope" value="CURRENT" class="text-rose-600 focus:ring-rose-500 cursor-pointer">
@@ -1045,7 +1052,7 @@
         // ==========================================
         function setSubmissionModeFilter(mode) {
             currentSubmissionMode = mode;
-            ['all', 'png', 'jpeg'].forEach(m => {
+            ['all', 'fec', 'jpeg', 'png'].forEach(m => {
                 const btn = document.getElementById(`sub-mode-filter-${m}`);
                 if (btn) {
                     if (m === mode.toLowerCase()) {
@@ -1136,9 +1143,12 @@
             }
 
             tbody.innerHTML = submissions.map(sub => {
+                const isFec = (sub.mode === 'FEC');
                 const isJpeg = (sub.mode === 'JPEG');
-                const badgeColor = isJpeg ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-emerald-100 text-emerald-800 border-emerald-300';
-                const barColor = isJpeg ? 'bg-amber-600' : 'bg-emerald-600';
+                const badgeColor = isFec
+                    ? 'bg-purple-100 text-purple-800 border-purple-300'
+                    : (isJpeg ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-emerald-100 text-emerald-800 border-emerald-300');
+                const barColor = isFec ? 'bg-purple-600' : (isJpeg ? 'bg-amber-600' : 'bg-emerald-600');
                 const snrColor = sub.avg_snr >= 12.0 ? 'text-emerald-600' : sub.avg_snr >= 6.0 ? 'text-amber-600' : 'text-rose-600';
 
                 const thumbHtml = sub.thumbnail_url
@@ -1401,9 +1411,11 @@
                     // タブカウント更新
                     const cntPng = document.getElementById('tab-count-png');
                     const cntJpeg = document.getElementById('tab-count-jpeg');
+                    const cntFec = document.getElementById('tab-count-fec');
                     const cntAll = document.getElementById('tab-count-all');
                     if (cntPng) cntPng.textContent = data.png_count;
                     if (cntJpeg) cntJpeg.textContent = data.jpeg_count;
+                    if (cntFec && data.fec_count !== undefined) cntFec.textContent = data.fec_count;
                     if (cntAll) cntAll.textContent = data.all_count;
 
                     renderImagesTable(data.images);

@@ -340,7 +340,8 @@ class AudioManager:
         t_mode = track.get("mode", "JPEG") if isinstance(track, dict) else "JPEG"
         if active.get(t_mode) == filename:
             remaining = [t["filename"] for t in tracks_dict.values() if isinstance(t, dict) and t.get("mode") == t_mode]
-            active[t_mode] = remaining[0] if remaining else ("turbo_256_256.wav" if t_mode == "JPEG" else "turbo_png_256_256.wav")
+            default_fb = "turbo_256_256.wav" if t_mode == "JPEG" else ("turbo_fec_256_256.wav" if t_mode == "FEC" else "turbo_png_256_256.wav")
+            active[t_mode] = remaining[0] if remaining else default_fb
 
         cls.save_manifest(manifest)
         return True
