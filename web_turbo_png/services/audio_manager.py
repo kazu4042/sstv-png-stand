@@ -71,7 +71,7 @@ class AudioManager:
                 "filename": "turbo_fec_256_256.wav",
                 "label": "標準 FEC テスト音声 (デフォルト)",
                 "mode": "FEC",
-                "image_id": "0x0001",
+                "image_id": "0x9D1B",
                 "description": "システム初期搭載の FEC (Raptor+RS) 復元テスト音声",
                 "is_system": True
             },

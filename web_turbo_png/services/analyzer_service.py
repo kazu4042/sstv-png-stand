@@ -65,7 +65,7 @@ class TurboPNGAnalyzerService:
         summaries = target_aggregator.db.get_images_summary()
         total_required = target_config.TILE_COUNT_X * target_config.TILE_COUNT_Y
         static_out = os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
-        target_ext = ".jpg" if target_mode == "JPEG" else ".png"
+        target_ext = ".jpg" if target_mode in ("JPEG", "FEC") else ".png"
 
         for item in summaries:
             img_hex = item["image_id_hex"]
@@ -76,7 +76,7 @@ class TurboPNGAnalyzerService:
             item["target_ext"] = target_ext
             item["total_required"] = total_required
             t_count = int(item["tile_count"]) if item.get("tile_count") is not None else 0
-            item["restoration_score"] = round((t_count / total_required) * 100, 1) if total_required > 0 else 0.0
+            item["restoration_score"] = round((min(total_required, t_count) / total_required) * 100, 1) if total_required > 0 else 0.0
 
             # 画像プレビューパス（指定モードの拡張子のみを厳格に探索）
             img_filename = f"restored_ID_{img_hex}{target_ext}"
@@ -86,6 +86,9 @@ class TurboPNGAnalyzerService:
             if os.path.exists(os.path.join(static_out, img_filename)):
                 thumb_path = os.path.join(static_out, img_filename)
                 base_url = f"/static/output/{img_filename}"
+            elif target_mode == "FEC" and os.path.exists(os.path.join(ROOT_DIR, "data", "digital_turbo_fec", "images", img_filename)):
+                thumb_path = os.path.join(ROOT_DIR, "data", "digital_turbo_fec", "images", img_filename)
+                base_url = f"/data/digital_turbo_fec/images/{img_filename}"
             elif target_mode == "JPEG" and os.path.exists(os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images", img_filename)):
                 thumb_path = os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images", img_filename)
                 base_url = f"/data/digital_turbo_jpeg/images/{img_filename}"
@@ -139,9 +142,9 @@ class TurboPNGAnalyzerService:
                     return None
             return None
 
-        # PNG と JPEG 両方のアグリゲータを取得してDBおよびログファイルから削除
+        # FEC, PNG, JPEG すべてのアグリゲータを取得してDBおよびログファイルから削除
         deleted_packets = 0
-        for m in ("PNG", "JPEG"):
+        for m in ("FEC", "PNG", "JPEG"):
             try:
                 cfg = SystemFactory.get_config(m)
                 ldir = getattr(cfg, "TEXT_LOG_DIR", f"data/digital_turbo_{m.lower()}/logs")
@@ -193,6 +196,7 @@ class TurboPNGAnalyzerService:
             os.path.join(ROOT_DIR, "data", "images"),
             os.path.join(ROOT_DIR, "data", "digital_turbo_png", "images"),
             os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images"),
+            os.path.join(ROOT_DIR, "data", "digital_turbo_fec", "images"),
             os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
         ]
 
@@ -232,7 +236,7 @@ class TurboPNGAnalyzerService:
         import glob
         deleted_packets = 0
         effective_mode = (target_mode or self.current_mode).upper()
-        modes_to_clear = [effective_mode] if mode_only else ["PNG", "JPEG"]
+        modes_to_clear = [effective_mode] if mode_only else ["FEC", "PNG", "JPEG"]
 
         for m in modes_to_clear:
             try:
@@ -269,6 +273,7 @@ class TurboPNGAnalyzerService:
             os.path.join(ROOT_DIR, "data", "images"),
             os.path.join(ROOT_DIR, "data", "digital_turbo_png", "images"),
             os.path.join(ROOT_DIR, "data", "digital_turbo_jpeg", "images"),
+            os.path.join(ROOT_DIR, "data", "digital_turbo_fec", "images"),
             os.path.join(ROOT_DIR, "web_turbo_png", "static", "output")
         ]
         
@@ -359,29 +364,57 @@ class TurboPNGAnalyzerService:
         cursor = agg.db.conn.cursor()
 
         cursor.execute("""
-            SELECT COUNT(DISTINCT tile_y || '_' || tile_x)
+            SELECT
+                COUNT(DISTINCT CASE WHEN tile_x < 255 AND tile_y < 255 THEN tile_y || '_' || tile_x ELSE NULL END),
+                COUNT(DISTINCT CASE WHEN tile_x = 255 AND tile_y < 255 THEN tile_y ELSE NULL END)
             FROM packets
             WHERE image_id = ?
         """, (target_id_int,))
         row_net = cursor.fetchone()
-        network_received = row_net[0] if row_net and row_net[0] is not None else 0
+        source_tiles_received = int(row_net[0] or 0) if row_net else 0
+        repair_packets_received = int(row_net[1] or 0) if row_net else 0
+
+        finalized_count = 0
+        raptor_recovered_count = 0
+        if effective_mode == "FEC":
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*), COALESCE(SUM(CASE WHEN stage = 'RAPTOR_MDS' THEN 1 ELSE 0 END), 0)
+                    FROM finalized_tiles
+                    WHERE image_id = ?
+                """, (target_id_int,))
+                fin_row = cursor.fetchone()
+                if fin_row:
+                    finalized_count = int(fin_row[0] or 0)
+                    raptor_recovered_count = int(fin_row[1] or 0)
+            except Exception:
+                pass
+
+        network_received = min(total_required, max(source_tiles_received, finalized_count))
         network_score = round((network_received / total_required) * 100, 1) if total_required > 0 else 0.0
+        remaining_for_raptor = max(0, total_required - (source_tiles_received + repair_packets_received))
 
         user_has_data = False
         user_packet_count = 0
         user_matched_count = 0
+        user_repair_count = 0
         user_score = 0.0
 
         if user_id:
             cursor.execute("""
-                SELECT COUNT(*), COUNT(DISTINCT tile_y || '_' || tile_x)
+                SELECT
+                    COUNT(*),
+                    COUNT(DISTINCT CASE WHEN tile_x < 255 AND tile_y < 255 THEN tile_y || '_' || tile_x ELSE NULL END),
+                    COUNT(DISTINCT CASE WHEN tile_x = 255 AND tile_y < 255 THEN tile_y ELSE NULL END)
                 FROM packets
                 WHERE image_id = ? AND user_id = ?
             """, (target_id_int, user_id))
             row_user = cursor.fetchone()
             if row_user and (row_user[0] or 0) > 0:
-                user_packet_count = row_user[0] or 0
-                user_matched_count = row_user[1] or 0
+                user_packet_count = int(row_user[0] or 0)
+                user_source_count = int(row_user[1] or 0)
+                user_repair_count = int(row_user[2] or 0)
+                user_matched_count = min(total_required, user_source_count + user_repair_count) if effective_mode == "FEC" else user_source_count
                 user_has_data = True
                 user_score = round((user_matched_count / total_required) * 100, 1) if total_required > 0 else 0.0
                 if user_score > 100.0:
@@ -434,8 +467,13 @@ class TurboPNGAnalyzerService:
             "user_has_data": user_has_data,
             "user_packet_count": user_packet_count,
             "user_matched_count": user_matched_count,
+            "user_repair_count": user_repair_count,
             "user_score": user_score,
             "network_received": network_received,
+            "source_tiles_received": source_tiles_received,
+            "repair_packets_received": repair_packets_received,
+            "raptor_recovered_count": raptor_recovered_count,
+            "remaining_for_raptor": remaining_for_raptor,
             "network_score": network_score,
             "total_required": total_required,
             "user_img_url": user_img_url,
@@ -448,50 +486,80 @@ class TurboPNGAnalyzerService:
 
     def find_missing_packets(self, target_image_id_hex, max_limit=2048):
         missing_list = []
+        clean_hex = str(target_image_id_hex).strip().upper().zfill(4)
         try:
-            target_id_int = int(target_image_id_hex, 16)
+            target_id_int = int(clean_hex, 16)
         except (ValueError, TypeError):
             return missing_list
 
-        config = SystemFactory.get_config()
+        effective_mode = self.detect_image_mode(clean_hex)
+        config = SystemFactory.get_config(effective_mode)
         tile_count_x = config.TILE_COUNT_X
         tile_count_y = config.TILE_COUNT_Y
         poor_threshold = getattr(config, 'POOR_BLOCK_SNR_THRESHOLD', 5.0)
 
-        cursor = self.aggregator.db.conn.cursor()
+        ldir = getattr(config, "TEXT_LOG_DIR", f"data/digital_turbo_{effective_mode.lower()}/logs")
+        ldir_path = os.path.join(ROOT_DIR, ldir) if not os.path.isabs(ldir) else ldir
+        agg = SystemFactory.get_aggregator(log_dir=ldir_path, mode=effective_mode)
+
+        cursor = agg.db.conn.cursor()
         cursor.execute("""
-            SELECT tile_y, tile_x, COUNT(*), MAX(snr)
+            SELECT tile_y, tile_x, COUNT(*), MAX(snr), AVG(snr)
             FROM packets
-            WHERE image_id = ?
+            WHERE image_id = ? AND tile_x < 255 AND tile_y < 255
             GROUP BY tile_y, tile_x
         """, (target_id_int,))
 
         tile_map = {}
         for row in cursor.fetchall():
-            ty, tx, count, max_s = row
-            tile_map[(ty, tx)] = {"count": count, "max_snr": max_s or 0.0}
+            ty, tx, count, max_s, avg_s = row
+            tile_map[(int(ty), int(tx))] = {
+                "count": int(count or 0),
+                "max_snr": float(max_s or 0.0),
+                "avg_snr": float(avg_s or 0.0)
+            }
+
+        fin_tiles = {}
+        if effective_mode == "FEC" and hasattr(agg.db, "get_finalized_tiles"):
+            try:
+                fin_tiles = agg.db.get_finalized_tiles(target_id_int)
+            except Exception:
+                fin_tiles = {}
 
         for ty in range(tile_count_y):
             for tx in range(tile_count_x):
                 block_id = ty * tile_count_x + tx
                 data = tile_map.get((ty, tx))
+                if data is None and (tx, ty) in fin_tiles:
+                    # ラプター消去訂正 (RAPTOR_MDS) により完全復元済みのタイルは欠損から除外
+                    continue
                 if data is None:
                     missing_list.append({
                         "block_id": block_id,
                         "tile_x": tx,
                         "tile_y": ty,
+                        "tx": tx,
+                        "ty": ty,
+                        "col": tx,
+                        "row": ty,
                         "status": "MISSING",
                         "copies": 0,
-                        "max_snr": 0.0
+                        "max_snr": 0.0,
+                        "avg_snr": 0.0
                     })
                 elif data["max_snr"] < poor_threshold:
                     missing_list.append({
                         "block_id": block_id,
                         "tile_x": tx,
                         "tile_y": ty,
-                        "status": "POOR_QUALITY",
+                        "tx": tx,
+                        "ty": ty,
+                        "col": tx,
+                        "row": ty,
+                        "status": "POOR",
                         "copies": data["count"],
-                        "max_snr": round(data["max_snr"], 1)
+                        "max_snr": round(data["max_snr"], 1),
+                        "avg_snr": round(data["avg_snr"], 1)
                     })
 
                 if len(missing_list) >= max_limit:
@@ -515,7 +583,14 @@ class TurboPNGAnalyzerService:
         agg = SystemFactory.get_aggregator(log_dir=ldir_path, mode=effective_mode)
 
         tiles_data = agg.db.get_packets_for_image(target_id_int)
-        if not tiles_data:
+        fin_tiles = {}
+        if effective_mode == "FEC" and hasattr(agg.db, "get_finalized_tiles"):
+            try:
+                fin_tiles = agg.db.get_finalized_tiles(target_id_int)
+            except Exception:
+                fin_tiles = {}
+
+        if not tiles_data and not fin_tiles:
             return reliability_map
 
         from web_turbo_png.services.auth_db import get_auth_db
@@ -528,6 +603,24 @@ class TurboPNGAnalyzerService:
         for ty in range(tile_count_y):
             for tx in range(tile_count_x):
                 if ty not in tiles_data or tx not in tiles_data[ty]:
+                    if (tx, ty) in fin_tiles:
+                        tdata, stage, fin_at = fin_tiles[(tx, ty)]
+                        reliability_map.append({
+                            "line": ty,
+                            "block": tx,
+                            "score": 100.0,
+                            "avg_snr": 12.0,
+                            "samples": 1,
+                            "total_weight": 13,
+                            "is_contributed": True,
+                            "sources": [{
+                                "sender": "Raptor FEC 自動復元 (Cauchy MDS)",
+                                "location": "FEC Engine",
+                                "received_at": fin_at or "Now",
+                                "file_name": f"raptor_mds_esi_{ty * tile_count_x + tx}",
+                                "snr": 12.0
+                            }]
+                        })
                     continue
 
                 len_dict = tiles_data[ty][tx]

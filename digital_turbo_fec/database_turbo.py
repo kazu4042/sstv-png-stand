@@ -163,14 +163,47 @@ class PacketDatabaseRaptorFEC:
 
         return data
 
+    def upsert_finalized_tiles(self, image_id: int, tiles_list: List[Tuple[int, int, bytes, str]]):
+        """
+        確定・ラプター復元済みタイルを finalized_tiles テーブルへ一括保存
+        tiles_list: [(tile_x, tile_y, tile_data_bytes, stage), ...]
+        """
+        if not tiles_list:
+            return
+        from datetime import datetime
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        rows = [(image_id, tx, ty, tdata, stage, now_str) for tx, ty, tdata, stage in tiles_list]
+        with self.conn:
+            self.conn.executemany("""
+                INSERT OR REPLACE INTO finalized_tiles (image_id, tile_x, tile_y, tile_data, stage, finalized_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, rows)
+
+    def get_finalized_tiles(self, target_image_id: int) -> Dict[Tuple[int, int], Tuple[bytes, str, str]]:
+        """
+        指定画像IDの確定・ラプター復元済みタイル一覧を取得
+        戻り値: {(tile_x, tile_y): (tile_data_bytes, stage, finalized_at)}
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT tile_x, tile_y, tile_data, stage, finalized_at
+            FROM finalized_tiles
+            WHERE image_id = ?
+        """, (target_image_id,))
+        res = {}
+        for tx, ty, tdata, stage, fin_at in cursor.fetchall():
+            res[(int(tx), int(ty))] = (bytes(tdata) if tdata else b"", str(stage or "DIRECT_RS"), str(fin_at or ""))
+        return res
+
     def get_images_summary(self) -> List[Dict[str, Any]]:
-        """管理画面用: すべての画像IDごとの統計情報を取得"""
+        """管理画面用: すべての画像IDごとの統計情報を取得（ラプター復元済みタイル数も考慮）"""
         cursor = self.conn.cursor()
         cursor.execute("""
             SELECT 
                 image_id,
                 COUNT(*) as packet_count,
-                COUNT(DISTINCT CASE WHEN tile_x != 255 AND tile_y != 255 THEN tile_y || '_' || tile_x ELSE NULL END) as tile_count,
+                COUNT(DISTINCT CASE WHEN tile_x < 255 AND tile_y < 255 THEN tile_y || '_' || tile_x ELSE NULL END) as tile_count,
+                COUNT(DISTINCT CASE WHEN tile_x = 255 AND tile_y < 255 THEN tile_y ELSE NULL END) as repair_count,
                 COUNT(DISTINCT user_id) as user_count,
                 MIN(imported_at) as first_received,
                 MAX(imported_at) as last_received
@@ -178,17 +211,23 @@ class PacketDatabaseRaptorFEC:
             GROUP BY image_id
             ORDER BY last_received DESC
         """)
+        rows = cursor.fetchall()
         results = []
-        for row in cursor.fetchall():
-            img_id_int, p_count, t_count, u_count, first_rec, last_rec = row
+        for row in rows:
+            img_id_int, p_count, t_count, rep_count, u_count, first_rec, last_rec = row
             if img_id_int is None:
                 continue
+            cursor.execute("SELECT COUNT(*) FROM finalized_tiles WHERE image_id = ?", (img_id_int,))
+            fin_row = cursor.fetchone()
+            fin_count = fin_row[0] if fin_row and fin_row[0] is not None else 0
+            effective_tile_count = max(int(t_count or 0), int(fin_count or 0))
             img_id_hex = f"{img_id_int:04X}"
             results.append({
                 "image_id_int": img_id_int,
                 "image_id_hex": img_id_hex,
                 "packet_count": p_count,
-                "tile_count": t_count,
+                "tile_count": effective_tile_count,
+                "repair_count": int(rep_count or 0),
                 "user_count": u_count,
                 "first_received": first_rec,
                 "last_received": last_rec

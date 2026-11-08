@@ -111,10 +111,13 @@ class TurboFECAggregator(BaseAggregator):
 
                             esi = None
                             pkt_type = 0
-                            if tile_x == 0xFF and tile_y == 0xFF:
+                            if tile_x == 0xFF:
                                 pkt_type = 1  # リペアパケット
+                                if tile_y < 0xFF:
+                                    esi = config.TOTAL_TILES + tile_y
                             else:
                                 pkt_type = 0  # データパケット
+                                esi = tile_y * config.TILE_COUNT_X + tile_x
 
                             file_packets.append((img_id, tile_x, tile_y, payload_len, payload_bits, snr_val, esi, pkt_type))
                         except Exception:
@@ -171,21 +174,39 @@ class TurboFECAggregator(BaseAggregator):
         web_out_path = os.path.join(web_static_out, img_filename)
 
         agg = RaptorRSAggregator(RAPTOR_CFG, total_source_packets=config.TOTAL_TILES)
+        from digital_turbo_fec.fec_engine import fast_bit_majority_vote
 
         for ty in sorted(tiles_data.keys()):
             for tx in sorted(tiles_data[ty].keys()):
                 for plen, pkts in tiles_data[ty][tx].items():
+                    cand_payloads = []
+                    cand_snrs = []
+                    last_esi_val = None
+
                     for p in pkts:
                         pbits, snr_val, fname, uid, imp_at, esi_val, ptype_val = p
                         payload_bytes = self.bits_to_bytes(pbits[:plen * 8])
                         if not payload_bytes:
                             continue
+                        cand_payloads.append(payload_bytes)
+                        cand_snrs.append(max(0.1, float(snr_val) + 1.0))
+                        if esi_val is not None:
+                            last_esi_val = int(esi_val)
 
-                        if tx != 0xFF and ty != 0xFF:
+                        if tx < config.TILE_COUNT_X and ty < config.TILE_COUNT_Y:
                             tile_id = ty * config.TILE_COUNT_X + tx
                             tile_seq = 0
                             tile_num_pkts = 1
                             tile_len = len(payload_bytes) - config.TAG_SIZE if len(payload_bytes) > config.TAG_SIZE else len(payload_bytes)
+                            if len(payload_bytes) >= 5:
+                                try:
+                                    _, t_s, t_np, t_l = struct.unpack(">BBBH", payload_bytes[:5])
+                                    if 1 <= t_np <= 8 and 1 <= t_l <= config.RS_DATA_CHUNK_SIZE * t_np:
+                                        tile_seq = t_s
+                                        tile_num_pkts = t_np
+                                        tile_len = t_l
+                                except Exception:
+                                    pass
 
                             pkt_info = {
                                 "is_valid": True,
@@ -203,8 +224,28 @@ class TurboFECAggregator(BaseAggregator):
                                 "snr_db": float(snr_val)
                             }
                             agg.add_packet(pkt_info)
-                        else:
-                            rep_esi = esi_val if (esi_val is not None and esi_val >= config.TOTAL_TILES) else (config.TOTAL_TILES + len(agg.raptor_symbols))
+
+                    if not cand_payloads:
+                        continue
+
+                    # 同一座標または同一リペアESIに対して複数局の受信がある場合、SNR重み付けビット多数決で最適シンボルを確定
+                    if len(cand_payloads) >= 2:
+                        voted_bytes = fast_bit_majority_vote(cand_payloads, weights=cand_snrs)
+                    else:
+                        voted_bytes = cand_payloads[0]
+                    best_snr = float(max(cand_snrs))
+
+                    if tx < config.TILE_COUNT_X and ty < config.TILE_COUNT_Y:
+                        tile_id = ty * config.TILE_COUNT_X + tx
+                        agg.raptor_symbols[tile_id] = voted_bytes
+                    elif tx == 0xFF:
+                        rep_esi = None
+                        if ty < 0xFF:
+                            rep_esi = config.TOTAL_TILES + ty
+                        elif last_esi_val is not None and last_esi_val >= config.TOTAL_TILES:
+                            rep_esi = last_esi_val
+
+                        if rep_esi is not None:
                             pkt_info = {
                                 "is_valid": True,
                                 "corrected_bytes": 0,
@@ -216,9 +257,9 @@ class TurboFECAggregator(BaseAggregator):
                                 "tile_seq": -1,
                                 "tile_num_pkts": -1,
                                 "tile_data_len": -1,
-                                "payload": payload_bytes,
-                                "raw_rs_block": payload_bytes + b"\x00" * config.RS_NSYM,
-                                "snr_db": float(snr_val)
+                                "payload": voted_bytes,
+                                "raw_rs_block": voted_bytes + b"\x00" * config.RS_NSYM,
+                                "snr_db": best_snr
                             }
                             agg.add_packet(pkt_info)
 
@@ -227,6 +268,22 @@ class TurboFECAggregator(BaseAggregator):
 
         # 第5防壁: RSTスキップ補間
         agg.finalize_tiles()
+
+        # 全体統合時は確定・ラプター復元済みタイルを DB の finalized_tiles テーブルへ同期保存
+        if target_user_id is None:
+            finalized_rows = []
+            for esi_idx in range(config.TOTAL_TILES):
+                tx = esi_idx % config.TILE_COUNT_X
+                ty = esi_idx // config.TILE_COUNT_X
+                if (tx, ty) in agg.rendered_tiles and esi_idx in agg.raptor_symbols:
+                    is_direct = (ty in tiles_data and tx in tiles_data[ty])
+                    stage_label = "DIRECT_RS" if is_direct else "RAPTOR_MDS"
+                    finalized_rows.append((tx, ty, agg.raptor_symbols[esi_idx], stage_label))
+            if finalized_rows:
+                try:
+                    self.db.upsert_finalized_tiles(img_id, finalized_rows)
+                except Exception:
+                    pass
 
         # 保存
         agg.save_canvas_image(img_out_path)

@@ -632,8 +632,14 @@
         function playFromPosition(offsetSec) {
             stopCurrent();
 
+            const safeOffset = ((offsetSec % audioBuffer.duration) + audioBuffer.duration) % audioBuffer.duration;
+
             sourceNode = audioContext.createBufferSource();
             sourceNode.buffer = audioBuffer;
+            // カルーセル方式: 終端に到達しても停止せず先頭から連続ループ再生する
+            sourceNode.loop = true;
+            sourceNode.loopStart = 0;
+            sourceNode.loopEnd = audioBuffer.duration;
 
             analyserNode = audioContext.createAnalyser();
             analyserNode.fftSize = 256;
@@ -641,18 +647,19 @@
             sourceNode.connect(analyserNode);
             analyserNode.connect(gainNode);
 
-            sourceNode.start(0, offsetSec);
-            startTime = audioContext.currentTime - offsetSec;
-            randomStartSec = offsetSec;
-            startPosEl.textContent = formatTime(offsetSec);
+            sourceNode.start(0, safeOffset);
+            startTime = audioContext.currentTime - safeOffset;
+            randomStartSec = safeOffset;
+            startPosEl.textContent = formatTime(safeOffset);
 
             sourceNode.onended = () => {
-                setPlayingUI(false);
-                pausedAt = 0;
-                progressFill.style.width = '0%';
-                currentTimeEl.textContent = '0:00';
-                // 再生位置を描画用にリセット
-                drawWaveform();
+                if (!sourceNode || !sourceNode.loop) {
+                    setPlayingUI(false);
+                    pausedAt = 0;
+                    progressFill.style.width = '0%';
+                    currentTimeEl.textContent = '0:00';
+                    drawWaveform();
+                }
             };
 
             setPlayingUI(true);
@@ -665,7 +672,7 @@
 
             if (isPlaying) {
                 // Pause
-                pausedAt = audioContext.currentTime - startTime;
+                pausedAt = ((audioContext.currentTime - startTime) % audioBuffer.duration + audioBuffer.duration) % audioBuffer.duration;
                 stopCurrent();
                 setPlayingUI(false);
             } else {
@@ -689,7 +696,7 @@
 
         function updateProgress() {
             if (!isPlaying || !audioBuffer) return;
-            const elapsed = audioContext.currentTime - startTime;
+            const elapsed = ((audioContext.currentTime - startTime) % audioBuffer.duration + audioBuffer.duration) % audioBuffer.duration;
             const pct = Math.min((elapsed / audioBuffer.duration) * 100, 100);
             progressFill.style.width = pct + '%';
             currentTimeEl.textContent = formatTime(elapsed);

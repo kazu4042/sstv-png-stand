@@ -35,28 +35,52 @@ class RaptorRSDecoder:
         self.samples_per_symbol = max(1, int(self.cfg.sample_rate * self.cfg.ms_symbol / 1000))
         self.samples_sync = max(1, int(self.cfg.sample_rate * self.cfg.ms_sync / 1000))
 
-        # 直交周波数の基底行列
+        # 直交周波数の基底行列（ハミング窓適用によりスマホ録音時の隣接シンボル干渉・残響干渉を抑制）
         sorted_pairs = sorted(self.cfg.freq_map.items(), key=lambda kv: kv[1], reverse=True)
         self.target_freqs = np.array([freq for sym, freq in sorted_pairs], dtype=np.float64)
         self.freq_idx_to_symbol = np.array([sym for sym, freq in sorted_pairs], dtype=np.uint8)
 
+        win = np.hamming(self.samples_per_symbol).astype(np.float64)
+        win = win / (np.mean(win) + 1e-12)
         t_sym = np.arange(self.samples_per_symbol) / self.cfg.sample_rate
-        self.cos_mat = np.cos(2 * np.pi * self.target_freqs[:, None] * t_sym)
-        self.sin_mat = np.sin(2 * np.pi * self.target_freqs[:, None] * t_sym)
+        self.cos_mat = np.cos(2 * np.pi * self.target_freqs[:, None] * t_sym) * win[None, :]
+        self.sin_mat = np.sin(2 * np.pi * self.target_freqs[:, None] * t_sym) * win[None, :]
 
     @staticmethod
     def calculate_crc16(data: bytes, poly: int = 0x1021, init: int = 0xFFFF) -> int:
         """テーブル引きによる高速 CRC-16-CCITT 計算"""
         return fast_calculate_crc16(data, init=init)
 
+    def estimate_eq_weights(self, wave_segment: np.ndarray) -> np.ndarray:
+        """
+        スマホスピーカー・マイク特性による高域減衰（6000Hz/8000Hzの減衰）を補正するため、
+        パケット区間波形の各周波数チャネルの85パーセンタイル電力から適応イコライザ重みを算出する。
+        """
+        sps = self.samples_per_symbol
+        n_syms = len(wave_segment) // sps
+        if n_syms < 16:
+            return np.ones(len(self.target_freqs), dtype=np.float64)
+        reshaped = wave_segment[: n_syms * sps].reshape(n_syms, sps)
+        corr_i = np.dot(reshaped, self.cos_mat.T)
+        corr_q = np.dot(reshaped, self.sin_mat.T)
+        power = corr_i ** 2 + corr_q ** 2
+        p90 = np.percentile(power, 90, axis=0)
+        max_p90 = float(np.max(p90))
+        if max_p90 <= 1e-12:
+            return np.ones(len(self.target_freqs), dtype=np.float64)
+        weights = max_p90 / np.maximum(p90, max_p90 * 0.002)
+        return np.clip(weights, 0.2, 500.0)
+
     def demodulate_symbols(
         self,
         wave_data: np.ndarray,
         start_idx: int,
         num_symbols: int,
-        drift_ratio: float = 0.0
-    ) -> Tuple[np.ndarray, float]:
-        """4-FSK シンボル列のNumPy高速相関復調（スマホ録音クロックドリフト±2000ppm完全追従）"""
+        drift_ratio: float = 0.0,
+        eq_weights: Optional[np.ndarray] = None,
+        return_power: bool = False
+    ):
+        """4-FSK シンボル列のNumPy高速相関復調（スマホ録音クロックドリフト±2000ppm＆適応イコライザ完全対応）"""
         sps = self.samples_per_symbol
         if abs(drift_ratio) < 1e-7:
             total_samples = num_symbols * sps
@@ -76,6 +100,16 @@ class RaptorRSDecoder:
         corr_q = np.dot(reshaped, self.sin_mat.T)
         power = corr_i ** 2 + corr_q ** 2
 
+        # 適応型トーンイコライザ補正（スマホ録音時の高域減衰補償）
+        if eq_weights is not None:
+            power = power * eq_weights[None, :]
+        elif num_symbols >= 64:
+            p85 = np.percentile(power, 85, axis=0)
+            max_p85 = float(np.max(p85))
+            if max_p85 > 1e-12:
+                auto_eq = np.clip(max_p85 / np.maximum(p85, max_p85 * 0.02), 0.2, 50.0)
+                power = power * auto_eq[None, :]
+
         best_freq_idx = np.argmax(power, axis=1)
         symbols = self.freq_idx_to_symbol[best_freq_idx]
 
@@ -85,7 +119,25 @@ class RaptorRSDecoder:
         snr_linear = np.mean(max_p / second_p)
         mean_snr_db = float(10.0 * np.log10(max(1.0, snr_linear)))
 
+        if return_power:
+            return symbols, mean_snr_db, power
         return symbols, mean_snr_db
+
+    @staticmethod
+    def compute_byte_confidences(power: np.ndarray) -> np.ndarray:
+        """
+        シンボルごとの4周波数の相関電力行列 (N_sym, 4) から、
+        各バイト (4シンボル単位) の最小確信度スコア (0.0〜1.0) を算出する。
+        確信度が低いバイト位置をRS復号器へ消失(Erasure)として引き渡すために使用。
+        """
+        n_bytes = len(power) // 4
+        if n_bytes <= 0:
+            return np.array([], dtype=np.float64)
+        sorted_p = np.sort(power[: n_bytes * 4], axis=1)
+        max_p = sorted_p[:, 3]
+        second_p = sorted_p[:, 2]
+        sym_conf = (max_p - second_p) / (max_p + 1e-9)
+        return np.min(sym_conf.reshape(n_bytes, 4), axis=1)
 
     def symbols_to_bytes(self, symbols: np.ndarray) -> bytes:
         """2ビットシンボル列をバイト列に変換"""
@@ -94,13 +146,54 @@ class RaptorRSDecoder:
         byte_arr = (syms_4[:, 0] << 6) | (syms_4[:, 1] << 4) | (syms_4[:, 2] << 2) | syms_4[:, 3]
         return byte_arr.astype(np.uint8).tobytes()
 
+    def _validate_decoded_rs_payload(self, decoded_data: bytes) -> Optional[Tuple[int, int, int, int, int, int, int, bytes]]:
+        """
+        RS復号後の223Bデータに対し、ヘッダCRC-16およびパケット構造の整合性を検証する。
+        戻り値: 検証成功時は (img_id, pkt_type, esi, tile_id, t_seq, t_num_pkts, t_len, payload)、失敗時は None
+        """
+        if decoded_data is None or len(decoded_data) < 12:
+            return None
+        img_id, pkt_type, esi = struct.unpack(">HBH", decoded_data[:5])
+        hdr_crc = struct.unpack(">H", decoded_data[5:7])[0]
+        if fast_calculate_crc16(decoded_data[:5]) != hdr_crc:
+            return None
+
+        max_esi = self.cfg.total_tiles + self.cfg.raptor_repair_count + 64
+        if pkt_type not in (self.cfg.TYPE_DATA, self.cfg.TYPE_REPAIR) or esi >= max_esi:
+            return None
+
+        payload = decoded_data[7:]
+        tile_id = 0xFF
+        t_seq = -1
+        t_num_pkts = -1
+        t_len = -1
+
+        if pkt_type == self.cfg.TYPE_DATA:
+            tile_id, t_seq, t_num_pkts, t_len = struct.unpack(">BBBH", payload[:5])
+            if tile_id >= self.cfg.total_tiles:
+                return None
+            if t_num_pkts < 1 or t_num_pkts > 8 or t_seq >= t_num_pkts:
+                return None
+            if t_len < 1 or t_len > self.cfg.rs_data_chunk_size * t_num_pkts:
+                return None
+            if getattr(self.cfg, "enable_header_stripping", True) and t_num_pkts == 1:
+                if tile_id != esi:
+                    return None
+
+        return (img_id, pkt_type, esi, tile_id, t_seq, t_num_pkts, t_len, payload)
+
     def decode_rs_packet(
         self,
         raw_packet_bytes: bytes,
-        snr_db: float = 0.0
+        snr_db: float = 0.0,
+        byte_conf: Optional[np.ndarray] = None,
+        known_header: Optional[bytes] = None,
+        allow_erasures: bool = True
     ) -> Dict:
         """
-        1つの復調パケットバイト列 (255B固定長) に対し、RS誤り訂正を行いメタデータを抽出。
+        1つの復調パケットバイト列 (255B固定長) に対し、
+        通常RS誤り訂正 (最大16B) ➔ 軟判定信頼度に基づくRS消失(Erasure)訂正を適用してメタデータを抽出。
+        偽陽性防止のため、消失訂正時も最低8シンドローム(64bit)の検算余力を厳格に維持する。
         """
         expected_len = self.cfg.packet_total_size  # 255B
 
@@ -109,52 +202,83 @@ class RaptorRSDecoder:
         elif len(raw_packet_bytes) > expected_len:
             raw_packet_bytes = raw_packet_bytes[:expected_len]
 
-        rs_block = raw_packet_bytes
+        if known_header is not None and len(known_header) == 7:
+            rs_block = known_header + raw_packet_bytes[7:]
+        else:
+            rs_block = raw_packet_bytes
+
+        decoded_data = None
+        corrected_count = 0
+        is_valid = False
+        validated = None
 
         # 1. RSシンドローム検査 (誤りゼロ高速パス)
         if self.rs_codec.is_clean(rs_block):
-            decoded_data = rs_block[:-self.cfg.rs_nsym]
-            corrected_count = 0
-            is_valid = True
-        else:
-            # 2. RS復号試行 (最大16バイト自動修復)
-            decoded_data, corrected_count, is_valid = self.rs_codec.decode(rs_block)
+            cand_data = rs_block[:-self.cfg.rs_nsym]
+            validated = self._validate_decoded_rs_payload(cand_data)
+            if validated is not None:
+                decoded_data = cand_data
+                corrected_count = 0
+                is_valid = True
 
-        if is_valid and decoded_data is not None:
-            # ヘッダ (7B): img_id(2B) + pkt_type(1B) + ESI(2B) + hdr_crc(2B)
-            img_id, pkt_type, esi = struct.unpack(">HBH", decoded_data[:5])
-            hdr_crc = struct.unpack(">H", decoded_data[5:7])[0]
-            
-            # ヘッダCRC-16による偽陽性二重ガード
-            if fast_calculate_crc16(decoded_data[:5]) == hdr_crc:
-                payload = decoded_data[7:]
+        # 2. 通常RS復号試行 (最大16バイト自動修復)
+        if not is_valid:
+            cand_data, cand_corr, ok = self.rs_codec.decode(rs_block)
+            if ok and cand_data is not None:
+                validated = self._validate_decoded_rs_payload(cand_data)
+                if validated is not None:
+                    decoded_data = cand_data
+                    corrected_count = cand_corr
+                    is_valid = True
 
-                tile_id = 0xFF
-                t_seq = -1
-                t_num_pkts = -1
-                t_len = -1
+        # 3. 軟判定信頼度に基づくRS消失(Erasure)訂正試行 (PDF補足説明資料H準拠)
+        # 偽合格(スピurious復号)によるラプター連立方程式の汚染を100%防ぐため、
+        # 消失指定数 E <= 16 かつ E + 2*T_unknown <= 24 (最低8バイト=64bitの検算シンドローム余力) を必須条件とする。
+        if not is_valid and allow_erasures and byte_conf is not None and len(byte_conf) >= expected_len:
+            conf_copy = np.array(byte_conf[:expected_len], dtype=np.float64)
+            if known_header is not None and len(known_header) == 7:
+                conf_copy[:7] = 1e9
+            elif len(rs_block) >= 7:
+                hdr_crc_raw = struct.unpack(">H", rs_block[5:7])[0]
+                if fast_calculate_crc16(rs_block[:5]) == hdr_crc_raw:
+                    conf_copy[:7] = 1e9
 
-                if pkt_type == self.cfg.TYPE_DATA:
-                    # 自己完結タグ (5B)
-                    tile_id, t_seq, t_num_pkts, t_len = struct.unpack(">BBBH", payload[:5])
+            low_conf_order = np.argsort(conf_copy)
+            for e_cnt in (8, 12, 16):
+                erase_pos = [int(idx) for idx in low_conf_order[:e_cnt]]
+                erase_set = set(erase_pos)
+                cand_data, _, ok = self.rs_codec.decode_with_erasures(rs_block, erase_pos=erase_pos)
+                if ok and cand_data is not None:
+                    # 復号後の完全な255B符号語を再構成し、実際の変更バイト位置を厳密に検算
+                    re_encoded = self.rs_codec.encode(cand_data)
+                    diff_positions = [idx for idx in range(expected_len) if rs_block[idx] != re_encoded[idx]]
+                    unknown_errors = sum(1 for idx in diff_positions if idx not in erase_set)
+                    # E + 2 * T_unknown <= 24 (最低8シンドロームの検算マージン確保)
+                    if e_cnt + 2 * unknown_errors <= 24:
+                        validated = self._validate_decoded_rs_payload(cand_data)
+                        if validated is not None:
+                            decoded_data = cand_data
+                            corrected_count = len(diff_positions)
+                            is_valid = True
+                            break
 
-                return {
-                    "is_valid": True,
-                    "corrected_bytes": corrected_count,
-                    "packet_id": esi,
-                    "img_id": img_id,
-                    "pkt_type": pkt_type,
-                    "esi": esi,
-                    "tile_id": tile_id,
-                    "tile_seq": t_seq,
-                    "tile_num_pkts": t_num_pkts,
-                    "tile_data_len": t_len,
-                    "payload": payload,
-                    "raw_rs_block": rs_block,
-                    "snr_db": snr_db
-                }
-            else:
-                is_valid = False
+        if is_valid and validated is not None:
+            img_id, pkt_type, esi, tile_id, t_seq, t_num_pkts, t_len, payload = validated
+            return {
+                "is_valid": True,
+                "corrected_bytes": corrected_count,
+                "packet_id": esi,
+                "img_id": img_id,
+                "pkt_type": pkt_type,
+                "esi": esi,
+                "tile_id": tile_id,
+                "tile_seq": t_seq,
+                "tile_num_pkts": t_num_pkts,
+                "tile_data_len": t_len,
+                "payload": payload,
+                "raw_rs_block": rs_block,
+                "snr_db": snr_db
+            }
 
         # RS復号失敗 (>16バイト誤り)
         # ヘッダ(7B)のCRCが一致している場合のみ ESI を信用する（それ以外は別パケットの多数決を汚染しないよう esi = -1）
@@ -297,9 +421,12 @@ class RaptorRSDecoder:
             working_wave = packet_wave
 
         # 3. 補正済み波形から 4-FSK シンボル列を復調
-        symbols, mean_snr = self.demodulate_symbols(working_wave, samples_sync, symbols_per_pkt)
+        symbols, mean_snr, power = self.demodulate_symbols(
+            working_wave, samples_sync, symbols_per_pkt, return_power=True
+        )
         raw_pkt_bytes = self.symbols_to_bytes(symbols)
-        res = self.decode_rs_packet(raw_pkt_bytes, snr_db=mean_snr)
+        byte_conf = self.compute_byte_confidences(power)
+        res = self.decode_rs_packet(raw_pkt_bytes, snr_db=mean_snr, byte_conf=byte_conf)
         res["sync_metric"] = sync_metric
         return res
 
